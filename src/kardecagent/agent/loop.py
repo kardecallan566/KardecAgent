@@ -4,7 +4,7 @@ from pathlib import Path
 from ..config import Settings
 from ..project import discover_command, project_snapshot
 from ..llm import LocalLLMClient
-from ..tools import ProjectFilesystem, run_command, search_text
+from ..tools import ProjectFilesystem, run_command, search_text, git_status, git_diff, git_log
 from .state import TaskState, TaskStatus
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
 
@@ -20,7 +20,7 @@ class AgentLoop:
         if action.tool == 'write_file': fs.write_file(args['path'], args['content']); return json.dumps({'ok':True,'path':args['path']})
         if action.tool == 'run_command':
             r=run_command(root,args['command'],timeout=self.settings.command_timeout_seconds,max_output_chars=self.settings.max_command_output_chars); return json.dumps(r.__dict__,ensure_ascii=False)
-        if action.tool == 'run_checks':
+        if action.tool == 'git_status': return json.dumps(git_status(root).__dict__, ensure_ascii=False)\n        if action.tool == 'git_diff': return json.dumps(git_diff(root).__dict__, ensure_ascii=False)\n        if action.tool == 'git_log': return json.dumps(git_log(root, args.get('limit', 10)).__dict__, ensure_ascii=False)\n        if action.tool == 'run_checks':
             kind=args['kind']; command=discover_command(root,kind)
             if not command: return json.dumps({'ok':False,'error':'No command discovered','kind':kind})
             r=run_command(root,command,timeout=self.settings.command_timeout_seconds,max_output_chars=self.settings.max_command_output_chars); return json.dumps({'kind':kind,'command':command,**r.__dict__},ensure_ascii=False)
