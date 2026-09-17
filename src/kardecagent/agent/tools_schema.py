@@ -48,5 +48,5 @@ def parse_tool_call(content: str) -> ToolCall:
 def tool_instructions() -> str:
     return ('Return ONLY JSON: {"tool":"<name>","arguments":{...}}. Tools: '
             'list_files(limit?), read_file(path), search_files(query,max_results?), '
-            'write_file(path,content), run_command(command), run_checks(kind), finish(reason). '
+            'write_file(path,content), run_command(command), run_checks(kind), git_status(), git_diff(), git_log(limit?), finish(reason). '
             'run_checks kind must be one of test, lint, typecheck, build.')
