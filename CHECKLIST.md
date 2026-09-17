@@ -94,8 +94,8 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Typecheck/lint/build detection
 - [ ] Test-result parsing
 - [ ] Error summarization
-- [ ] Git status/diff
-- [ ] Pre-task checkpoint
+- [x] Git status/diff
+- [x] Pre-task checkpoint
 - [ ] Post-task checkpoint
 - [ ] Rollback
 - [ ] Task interruption/resume
