@@ -26,8 +26,8 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Configurable base URL/model/API key
 - [x] Timeout
 - [x] Response normalization
-- [ ] Structured tool-call parsing
-- [ ] Malformed-response recovery
+- [x] Structured tool-call parsing
+- [x] Malformed-response recovery
 - [ ] Streaming
 
 ### Project tools
@@ -59,7 +59,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Tool dispatch
 - [x] Structured execution results
 - [x] Execution logging
-- [ ] Real model-driven tool selection
+- [x] Real model-driven tool selection
 - [ ] Completion detection
 - [ ] Retry/recovery
 - [ ] Test-failure feedback loop
