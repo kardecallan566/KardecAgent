@@ -16,6 +16,9 @@ TOOL_SCHEMAS = {
     'write_file': {'required': ['path', 'content'], 'types': {'path': str, 'content': str}},
     'run_command': {'required': ['command'], 'types': {'command': str}},
     'run_checks': {'required': ['kind'], 'types': {'kind': str}},
+    'git_status': {'required': [], 'optional': {}},
+    'git_diff': {'required': [], 'optional': {}},
+    'git_log': {'required': [], 'optional': {'limit': int}},
     'finish': {'required': ['reason'], 'types': {'reason': str}},
 }
 
