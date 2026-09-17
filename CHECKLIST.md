@@ -90,8 +90,8 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [ ] Tool-call validation
 - [ ] Patch-based editing
 - [ ] File-change verification
-- [ ] Automatic test command discovery
-- [ ] Typecheck/lint/build detection
+- [x] Automatic test command discovery
+- [x] Typecheck/lint/build detection
 - [ ] Test-result parsing
 - [ ] Error summarization
 - [ ] Git status/diff
