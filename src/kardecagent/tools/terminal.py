@@ -104,7 +104,14 @@ def parse_command(command: str) -> ParsedCommand | None:
     executable = executable.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
     if executable.endswith(".exe"):
         executable = executable[:-4]
-    return ParsedCommand(tuple(parts), executable)
+    argv = tuple(_strip_outer_quotes(part) for part in parts)
+    return ParsedCommand(argv, executable)
+
+
+def _strip_outer_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {\'"\', "\\'"}:
+        return value[1:-1]
+    return value
 
 
 def is_command_blocked(command: str) -> bool:
