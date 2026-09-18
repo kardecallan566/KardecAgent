@@ -83,8 +83,7 @@ def clamp(value, minimum, maximum):
         raise ValueError("invalid range")
     return max(minimum, min(value, maximum))
 === END WRITE ===""",
-        "=== RUN: python -m pytest -q ===
-=== END RUN ===",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
     case = _fixture_cases()[0]
     result = run_agentic_benchmark(client, cases=(case,), max_steps=3)[0]
@@ -93,13 +92,17 @@ def clamp(value, minimum, maximum):
     assert result.tool_calls == 3
     assert result.first_attempt_passed is True
     assert result.recovery_attempts == 0
-    assert result.eval_tokens == 20
+    assert result.eval_tokens == 30
     assert result.reads == 1
     assert result.writes == 1
     assert result.runs == 1
     assert result.dones == 0
     assert result.invalid_actions == 0
-    assert result.action_trace == ("step=1 READ src/math_utils.py", "step=2 WRITE src/math_utils.py", "step=2 RUN python -m pytest -q PASS")
+    assert result.action_trace == (
+        "step=1 READ src/math_utils.py",
+        "step=2 WRITE src/math_utils.py",
+        "step=3 RUN python -m pytest -q PASS",
+    )
 
 
 def test_agentic_benchmark_recovers_after_failed_test():
@@ -110,20 +113,18 @@ def test_agentic_benchmark_recovers_after_failed_test():
         """=== WRITE: src/math_utils.py ===
 def clamp(value, minimum, maximum):
     return value
-=== END WRITE ===
-=== RUN: python -m pytest -q ===
-=== END RUN ===""",
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
         """=== WRITE: src/math_utils.py ===
 def clamp(value, minimum, maximum):
     if minimum > maximum:
         raise ValueError("invalid range")
     return max(minimum, min(value, maximum))
-=== END WRITE ===
-=== RUN: python -m pytest -q ===
-=== END RUN ===""",
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
     case = _fixture_cases()[0]
-    result = run_agentic_benchmark(client, cases=(case,), max_steps=4)[0]
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=5)[0]
     assert result.passed is True
     assert result.attempts == 2
     assert result.recovery_attempts == 1
@@ -136,7 +137,13 @@ def test_agentic_benchmark_records_invalid_response_and_recovers_protocol():
     client = FakeAgenticClient([
         "I will inspect the project first.",
         "=== READ: src/math_utils.py ===\n=== END READ ===",
-        "=== WRITE: src/math_utils.py ===\ndef clamp(value, minimum, maximum):\n    if minimum > maximum:\n        raise ValueError(\"invalid range\")\n    return max(minimum, min(value, maximum))\n=== END WRITE ===\n=== RUN: python -m pytest -q ===\n=== END RUN ===",
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
     result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=4)[0]
     assert result.passed is True
@@ -146,7 +153,6 @@ def test_agentic_benchmark_records_invalid_response_and_recovers_protocol():
     assert result.runs == 1
     assert result.action_trace[0].startswith("step=1 INVALID")
     assert result.action_trace[-1].endswith("PASS")
-
 
 def test_normalize_agentic_prompt_removes_legacy_file_protocol():
     from kardecagent.llm.benchmark import _normalize_agentic_prompt
