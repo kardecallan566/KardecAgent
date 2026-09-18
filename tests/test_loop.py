@@ -186,9 +186,9 @@ def test_finish_requires_evidence_for_every_completion_criterion(tmp_path: Path)
         encoding="utf-8",
     )
     llm = FakeLLM([
-        _plan(),
+        '{"summary":"Do task","steps":["Finish validation"],"validation":["Run checks"],"risks":[],"completion_criteria":["result is verified","tests pass"]}',
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"implemented"},"plan_step":1}',
-        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":[]}}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["only one"]}}',
         '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["validator passed"]}}',
     ])
     state = AgentLoop(llm, Settings(max_iterations=4)).run(
