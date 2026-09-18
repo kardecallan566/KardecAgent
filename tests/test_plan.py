@@ -1,0 +1,34 @@
+import pytest
+
+from kardecagent.agent.plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
+
+
+def test_parse_plan():
+    plan = parse_plan(
+        '{"summary":"Create a site","steps":["Create HTML","Create CSS"],'
+        '"validation":["Validate HTML"],"risks":["No browser automation yet"]}'
+    )
+    assert plan.summary == "Create a site"
+    assert plan.steps == ["Create HTML", "Create CSS"]
+
+
+def test_invalid_plan():
+    with pytest.raises(PlanError, match="non-empty list"):
+        parse_plan('{"summary":"x","steps":[],"validation":[]}')
+
+
+def test_plan_tracker_enforces_sequential_steps():
+    tracker = PlanTracker(
+        ExecutionPlan("x", ["one", "two"], ["validate"])
+    )
+    assert tracker.current_step == 1
+    tracker.start(1)
+    tracker.complete(1)
+    assert tracker.current_step == 2
+    assert tracker.status() == ["completed", "in_progress"]
+    with pytest.raises(PlanError, match="active plan step"):
+        tracker.start(1)
+    tracker.start(2)
+    tracker.complete(2)
+    assert tracker.completed
+    assert tracker.as_dict()["current_step"] is None
