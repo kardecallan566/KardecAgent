@@ -41,6 +41,7 @@ class AgentEvent:
     message: str
     data: dict = field(default_factory=dict)
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    sequence: int = 0
 
 
 @dataclass
@@ -52,7 +53,7 @@ class TaskState:
     events: list[AgentEvent] = field(default_factory=list)
 
     def record(self, event_type: str, message: str, **data) -> None:
-        self.events.append(AgentEvent(self.iteration, event_type, message, data))
+        self.events.append(AgentEvent(self.iteration, event_type, message, data, sequence=len(self.events) + 1))
 
     def transition(self, new_status: TaskStatus, *, reason: str = "", **data) -> None:
         """Move the controller-owned task state through a legal transition."""
