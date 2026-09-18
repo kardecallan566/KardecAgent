@@ -216,3 +216,42 @@ def clamp(value, minimum, maximum):
     assert result.runs == 1
     assert result.invalid_actions == 1
     assert any(item.endswith("READ src/math_utils.py DUPLICATE") for item in result.action_trace)
+
+
+def test_agentic_project_snapshot_uses_real_line_breaks():
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from kardecagent.llm.benchmark import _project_snapshot
+
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / "src").mkdir()
+        (root / "src" / "a.py").write_text("x = 1")
+        (root / "tests").mkdir()
+        (root / "tests" / "test_a.py").write_text("def test_a(): pass")
+        snapshot = _project_snapshot(root)
+        assert "\\n" not in snapshot
+        assert snapshot == "src/a.py\ntests/test_a.py"
+
+
+def test_agentic_recovery_prompt_mentions_authoritative_failure():
+    from kardecagent.llm.benchmark import run_agentic_benchmark, _fixture_cases
+
+    client = FakeAgenticClient([
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    return value
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=2)[0]
+    assert result.passed is True
