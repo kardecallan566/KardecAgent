@@ -226,6 +226,7 @@ class AgentLoop:
         *, context: dict | None = None, allowed_scope: tuple[str, ...] | None = None,
         max_iterations: int | None = None, allow_plan_changes: bool = True,
         approval_callback=None, high_risk_approval_callback=None, persistence_callback=None,
+        resume_step: int = 1,
     ) -> TaskState:
         """Execute an already-approved plan without creating another plan or approval gate."""
         recovery_start_index = len(state.events)
@@ -236,6 +237,7 @@ class AgentLoop:
             approval_callback=approval_callback,
             high_risk_approval_callback=high_risk_approval_callback,
             persistence_callback=persistence_callback,
+            resume_step=resume_step,
         )
         # Parent execution owns recovery when no logical subtask scope exists.
         # Subtasks are recovered by the orchestrator using their subtask ID.
