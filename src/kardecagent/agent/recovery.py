@@ -30,11 +30,13 @@ class RecoveryManager:
         *,
         subtask_id: str | None = None,
         iteration: int | None = None,
+        min_event_index: int = 0,
     ) -> RecoveryResult:
         candidates = [
             (index, event)
             for index, event in enumerate(state.events)
-            if event.event_type == "integrity_change"
+            if index >= min_event_index
+            and event.event_type == "integrity_change"
             and (subtask_id is None or event.data.get("subtask_id") == subtask_id)
             and (iteration is None or event.iteration == iteration)
         ]
@@ -44,6 +46,7 @@ class RecoveryManager:
                 "No audited integrity changes matched the recovery scope.",
                 subtask_id=subtask_id,
                 iteration=iteration,
+                min_event_index=min_event_index,
             )
             return RecoveryResult(True)
 
@@ -52,6 +55,7 @@ class RecoveryManager:
             "Starting conflict-safe recovery of audited workspace changes.",
             subtask_id=subtask_id,
             iteration=iteration,
+            min_event_index=min_event_index,
             event_count=len(candidates),
         )
 
