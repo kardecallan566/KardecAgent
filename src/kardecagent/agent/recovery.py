@@ -72,6 +72,7 @@ class RecoveryManager:
             event_changes = event.data.get("changes", [])
             if not isinstance(event_changes, list):
                 state.record("recovery_failed", "Invalid integrity event format.", event_index=_)
+                state.transition(TaskStatus.FAILED, reason="Recovery rejected invalid integrity event data.")
                 return RecoveryResult(False, error="invalid integrity event format")
             changes.extend(reversed(event_changes))
 
