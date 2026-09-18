@@ -107,7 +107,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Human approval gate before implementation
 - [x] Approved plan passed to execution context
 - [ ] Stored plan
-- [ ] Plan progress
+- [x] Plan progress
 - [ ] Completion criteria
 - [ ] Reviewer phase
 - [ ] Reviewer findings
@@ -161,3 +161,14 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [ ] Avoid complex UI before the core loop is reliable
 - [ ] Avoid multi-agent complexity before single-agent reliability
 - [ ] Avoid premature inference optimization
+
+
+## M2 implementation notes
+
+- [x] Plan tracker with sequential active-step state.
+- [x] Mutating tool calls require a plan step.
+- [x] Agent rejects actions outside the active approved step.
+- [x] Agent requires explicit step completion with evidence.
+- [x] Agent rejects finalization until all approved steps are completed.
+- [x] Git checkpoint moved to after explicit plan approval.
+- [ ] Plan deviation flow with a second user approval gate.
