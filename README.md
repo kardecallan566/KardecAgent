@@ -82,3 +82,16 @@ Each subtask receives:
 
 A subtask never receives a new approval gate. If it needs work outside the approved parent plan, the parent execution must stop and request a new plan approval.
 
+
+### Scoped command side-effect remediation
+
+When a logical subtask runs a command, KardecAgent records the pre-command working-tree state and detects files changed by the command. If a command changes a path outside the subtask scope, execution is rejected and the agent attempts safe automatic remediation.
+
+Remediation is deliberately conservative:
+- pre-existing files are restored byte-for-byte from the pre-command snapshot, preserving user changes;
+- deleted pre-existing files are recreated from their exact snapshot;
+- newly created regular files inside the project root are removed;
+- paths involving symlinks, special files, or Git rename/copy operations are not automatically reverted and are reported as remediation failures;
+- remediation never uses `git reset --hard` or `git checkout`, so it cannot discard unrelated user work.
+
+Scoped command remediation currently applies to Git repositories, where tracked files and pre-existing working-tree changes are snapshotted before the command.
