@@ -9,7 +9,8 @@ from ..config import Settings
 from ..llm import LocalLLMClient
 from ..project import project_snapshot
 from .loop import AgentLoop
-from .plan import ExecutionPlan\nfrom .state import TaskStatus
+from .plan import ExecutionPlan
+from .state import TaskStatus
 from ..tasks import Subtask, SubtaskManager, TaskBoard, SubtaskStatus
 
 DECOMPOSITION_PROMPT = """You are the KardecAgent task decomposer.
