@@ -156,6 +156,8 @@ class AgentLoop:
             return fs.read_file(args["path"])
         if action.tool == "search_web":
             return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
+        if action.tool == "fetch_web_page":
+            return json.dumps(fetch_web_page(args["url"], max_chars=args.get("max_chars", 30000)), ensure_ascii=False)
         if action.tool == "search_web":
             return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
         if action.tool == "search_files":
