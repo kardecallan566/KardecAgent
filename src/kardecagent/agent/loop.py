@@ -144,7 +144,8 @@ class AgentLoop:
                 state.record("subtask_decomposed", "Approved plan decomposed into logical subtasks.",
                              board=board.as_dict())
                 board = orchestrator.execute_approved_plan(root, task, plan, board,
-                    progress_callback=lambda current: store.save(state, plan=plan, board=current, approved=True))
+                    progress_callback=lambda current: store.save(state, plan=plan, board=current, approved=True),
+                    parent_state=state)
                 state.record("subtask_execution_finished", "Logical subtask execution finished.",
                              board=board.as_dict())
                 if not board.completed:
@@ -196,6 +197,9 @@ class AgentLoop:
             board = orchestrator.execute_approved_plan(
                 root, task, plan, board,
                 progress_callback=lambda current: store.save(state, plan=plan, board=current, approved=True),
+                parent_state=state,
+                resume_subtask_id=state.active_subtask_id,
+                resume_step=state.active_subtask_step,
             )
             state.record("subtask_execution_resumed", "Persisted logical subtask board resumed.",
                          board=board.as_dict())
