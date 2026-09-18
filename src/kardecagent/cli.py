@@ -34,6 +34,23 @@ def _approve_plan(plan) -> bool:
         print("Resposta inválida. Digite 's' para aprovar ou Enter/N para rejeitar.")
 
 
+
+def _approve_high_risk(plan) -> bool:
+    print()
+    print("ATENÇÃO: esta tarefa foi classificada como HIGH_RISK.")
+    print("Uma segunda aprovação é necessária antes de qualquer alteração.")
+    print()
+    print(plan.format_for_review())
+    print()
+    while True:
+        answer = input("Confirmar a execução da tarefa de alto risco? [s/N]: ").strip().lower()
+        if answer in {"s", "sim", "y", "yes"}:
+            return True
+        if answer in {"", "n", "nao", "não", "no"}:
+            return False
+        print("Resposta inválida. Digite 's' para aprovar ou Enter/N para rejeitar.")
+
+
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -61,6 +78,7 @@ def main() -> int:
             resolve_project_root(args.project),
             args.task,
             approval_callback=_approve_plan,
+            high_risk_approval_callback=_approve_high_risk,
         )
 
         print(f"Status: {state.status.value}\nIterations: {state.iteration}")
