@@ -82,9 +82,9 @@ def clamp(value, minimum, maximum):
     if minimum > maximum:
         raise ValueError("invalid range")
     return max(minimum, min(value, maximum))
-=== END WRITE ===
-=== RUN: python -m pytest -q ===
-=== END RUN ===""",
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===
+=== END RUN ===",
     ])
     case = _fixture_cases()[0]
     result = run_agentic_benchmark(client, cases=(case,), max_steps=3)[0]
