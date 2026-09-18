@@ -47,3 +47,12 @@ def test_status_transition_is_audited():
     assert event.event_type == "status_changed"
     assert event.data["from_status"] == "pending"
     assert event.data["to_status"] == "running"
+
+
+
+def test_events_have_monotonic_sequences():
+    state = TaskState("test", ".")
+    state.transition(TaskStatus.RUNNING)
+    state.record("work", "done")
+    state.transition(TaskStatus.VERIFYING)
+    assert [event.sequence for event in state.events] == [1, 2, 3]
