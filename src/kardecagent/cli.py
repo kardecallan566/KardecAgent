@@ -5,7 +5,7 @@ import logging
 
 from .agent import AgentLoop
 from .config import Settings, resolve_project_root
-from .llm import LocalLLMClient
+from .llm import LocalLLMClient, OllamaClient
 from .project import detect_project
 from .agent.persistence import TaskStore, PersistenceError
 
@@ -60,6 +60,23 @@ def _approve_high_risk(plan) -> bool:
         print("Resposta inválida. Digite 's' para aprovar ou Enter/N para rejeitar.")
 
 
+def _build_llm(settings: Settings):
+    if settings.llm_provider == "ollama":
+        return OllamaClient(
+            settings.ollama_base_url,
+            settings.llm_model,
+            settings.llm_timeout_seconds,
+        )
+    if settings.llm_provider in {"openai-compatible", "local"}:
+        return LocalLLMClient(
+            settings.llm_base_url,
+            settings.llm_model,
+            settings.llm_api_key,
+            settings.llm_timeout_seconds,
+        )
+    raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+
+
 def _doctor(settings: Settings, root) -> int:
     profile = detect_project(root)
     print("KardecAgent doctor")
@@ -68,27 +85,41 @@ def _doctor(settings: Settings, root) -> int:
     print(f"[OK] Language: {profile.language}")
     print(f"[OK] Framework: {profile.framework or 'none'}")
     print(f"[OK] Package manager: {profile.package_manager or 'none'}")
-    print(f"[OK] LLM base URL: {settings.llm_base_url}")
+    print(f"[OK] LLM provider: {settings.llm_provider}")
     print(f"[OK] LLM model: {settings.llm_model}")
 
     try:
-        client = LocalLLMClient(
-            settings.llm_base_url, settings.llm_model,
-            settings.llm_api_key, min(settings.llm_timeout_seconds, 10.0),
-        )
-        response = client.chat([
-            {"role": "system", "content": "Reply with exactly: KARDECAGENT_OK"},
-            {"role": "user", "content": "Health check."},
-        ], temperature=0.0)
+        if settings.llm_provider == "ollama":
+            client = OllamaClient(
+                settings.ollama_base_url,
+                settings.llm_model,
+                min(settings.llm_timeout_seconds, 10.0),
+            )
+            models = client.list_models()
+            names = {item.get("name") for item in models if isinstance(item, dict)}
+            if settings.llm_model not in names:
+                print(f"[FAIL] Ollama model not installed: {settings.llm_model}")
+                print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
+                return 1
+            response = client.health_check()
+        else:
+            client = _build_llm(settings)
+            response = client.chat(
+                [
+                    {"role": "system", "content": "Reply with exactly: KARDECAGENT_OK"},
+                    {"role": "user", "content": "Health check."},
+                ],
+                temperature=0.0,
+            )
+
         if response.content.strip() != "KARDECAGENT_OK":
             print("[FAIL] LLM responded, but health-check content was unexpected.")
             return 1
         print("[OK] Local LLM: reachable and responding")
+        return 0
     except Exception as exc:
         print(f"[FAIL] Local LLM: {exc}")
-        print("Configure KARDEC_LLM_BASE_URL/KARDEC_LLM_MODEL if your server differs.")
         return 1
-    return 0
 
 
 def _tasks(root) -> int:
@@ -132,15 +163,7 @@ def main() -> int:
             "max_iterations": args.max_iterations,
         })
 
-    agent = AgentLoop(
-        LocalLLMClient(
-            settings.llm_base_url,
-            settings.llm_model,
-            settings.llm_api_key,
-            settings.llm_timeout_seconds,
-        ),
-        settings,
-    )
+    agent = AgentLoop(_build_llm(settings), settings)
     root = resolve_project_root(args.project)
     if args.command == "run":
         state = agent.run(root, args.task, approval_callback=_approve_plan,
