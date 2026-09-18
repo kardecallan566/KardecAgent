@@ -96,7 +96,7 @@ class TaskJournal:
                 record = json.loads(raw_line.decode("utf-8"))
                 self._validate_record(record, index, records[-1] if records else None)
             except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-                if index == len(lines):
+                if index == len(lines) and raw and not complete:
                     self._truncate_to_valid_lines(lines, records)
                     break
                 raise PersistenceError(
@@ -262,12 +262,29 @@ class TaskStore:
             try:
                 payload = json.loads(backup.read_text(encoding="utf-8"))
                 self._validate_payload(payload, backup)
-                os.replace(backup, target)
+                self._restore_snapshot_bytes(backup, target)
                 return payload
             except Exception as exc:
                 raise PersistenceError(
                     f"invalid persisted task and backup: {target.name}"
                 ) from exc
+
+    def _restore_snapshot_bytes(self, backup: Path, target: Path) -> None:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=target.name + ".restore.", suffix=".tmp", dir=self.directory
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(backup.read_bytes())
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, target)
+            self._fsync_directory()
+        except OSError as exc:
+            raise PersistenceError("failed to restore snapshot backup") from exc
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
 
     def _validate_payload(self, payload: dict, source: Path) -> None:
         try:
