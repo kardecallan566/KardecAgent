@@ -164,7 +164,7 @@ class AgentExecutor:
         args = action.arguments
         fs = ProjectFilesystem(root)
         mutating = action.tool in {"write_file", "apply_patch", "run_command"}
-        integrity_before = self._workspace_snapshot(root, bool(scope)) if mutating else None
+        integrity_before = self._workspace_snapshot(root, True) if mutating else None
         if action.tool == "list_files":
             return json.dumps(fs.list_files(args.get("limit", 500)), ensure_ascii=False)
         if action.tool == "read_file":
