@@ -19,7 +19,7 @@ class Settings:
     # available through the existing LocalLLMClient for future providers.
     llm_provider: str = "ollama"
     llm_base_url: str = "http://127.0.0.1:8080/v1"
-    llm_model: str = "qwen3-coder:30b"
+    llm_model: str = "qwen2.5-coder:3b"
     llm_api_key: str = "local"
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_timeout_seconds: float = 120.0
