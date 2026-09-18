@@ -60,9 +60,9 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Structured execution results
 - [x] Execution logging
 - [x] Real model-driven tool selection
-- [ ] Completion detection
+- [x] Completion detection
 - [ ] Retry/recovery
-- [ ] Test-failure feedback loop
+- [x] Test-failure feedback loop
 
 ### Tests
 - [x] Configuration
@@ -71,7 +71,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Search
 - [x] Terminal policy
 - [x] Agent state
-- [ ] Mocked end-to-end LLM test
+- [x] Mocked end-to-end LLM test
 - [ ] Real local-model end-to-end test
 
 ### M0 exit criteria
