@@ -17,6 +17,7 @@ def test_default_benchmark_models():
         "qwen2.5-coder:1.5b",
         "qwen2.5-coder:3b",
         "qwen2.5-coder:7b",
+        "Qwen3-Coder-Next-GGUF",
     )
 
 
