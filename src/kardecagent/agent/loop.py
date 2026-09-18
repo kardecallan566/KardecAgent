@@ -285,7 +285,7 @@ class AgentLoop:
             )
             if persistence_callback is not None:
                 persistence_callback(result, plan)
-            if recovery.recovered and recovery.rolled_back_events:
+            if recovery.recovered:
                 result.record(
                     "resume_retry_started",
                     "Retrying the approved plan from the last consistent plan step.",
