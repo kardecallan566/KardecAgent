@@ -9,7 +9,7 @@ from ..config import Settings
 from ..llm import LocalLLMClient
 from ..project import project_snapshot
 from .loop import AgentLoop
-from .plan import ExecutionPlan
+from .plan import ExecutionPlan\nfrom .state import TaskStatus
 from ..tasks import Subtask, SubtaskManager, TaskBoard, SubtaskStatus
 
 DECOMPOSITION_PROMPT = """You are the KardecAgent task decomposer.
@@ -160,7 +160,7 @@ class Orchestrator:
                 task=f"{parent_task} :: {subtask.title}",
                 project_root=str(project_root.resolve()),
             )
-            state.status = SubtaskStatus.RUNNING  # type: ignore[assignment]
+            state.status = TaskStatus.RUNNING
             result_state = self.agent_loop.execute_approved_plan(
                 project_root,
                 f"{parent_task} :: {subtask.objective}",
