@@ -53,3 +53,15 @@ def test_recovery_preflight_conflict_changes_nothing(tmp_path: Path):
     assert result.conflict_paths == ("failed.txt",)
     assert (tmp_path / "failed.txt").read_text(encoding="utf-8") == "changed externally"
     assert any(e.event_type == "recovery_failed" for e in state.events)
+
+
+def test_recovery_reports_last_consistent_plan_step(tmp_path: Path):
+    state = TaskState("task", str(tmp_path))
+    state.record("plan_step_completed", "step 1", step=1)
+    state.record("plan_step_completed", "step 2", step=2)
+    _event(state, tmp_path / "failed.txt", "remove", "subtask-2")
+
+    result = RecoveryManager().recover(tmp_path, state, subtask_id="subtask-2")
+
+    assert result.recovered
+    assert result.resume_step == 3
