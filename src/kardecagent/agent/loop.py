@@ -115,8 +115,8 @@ class AgentLoop:
             state.record("high_risk_approval", "High-risk execution approved.", approved=True)
 
         store = TaskStore(root)
+        state.record("task_persisted", "Approved task state is being durably persisted for resume.", path=str(store.path_for(task)), journal_path=str(store.journal_path_for(task)))
         store.save(state, plan=plan, approved=True)
-        state.record("task_persisted", "Approved task state persisted for resume.", path=str(store.path_for(task)))
 
         if git_is_repo(root):
             checkpoint = create_checkpoint(root, task)
