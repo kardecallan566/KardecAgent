@@ -46,7 +46,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Timeout
 - [x] Output limits
 - [x] Basic dangerous-command protection
-- [ ] Configurable allowlist
+- [x] Configurable allowlist
 - [ ] Process cancellation
 - [ ] Resource limits
 - [ ] Interactive commands
@@ -61,7 +61,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Execution logging
 - [x] Real model-driven tool selection
 - [x] Completion detection
-- [ ] Retry/recovery
+- [x] Retry/recovery
 - [x] Test-failure feedback loop
 
 ### Tests
