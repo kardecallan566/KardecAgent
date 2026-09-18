@@ -184,8 +184,15 @@ class AgentLoop:
             return state
         if state.status is not TaskStatus.RUNNING:
             if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
+                # A persisted failure may already have completed controller-owned
+                # recovery. Do not blindly roll back older audited operations here.
                 state.transition(TaskStatus.RECOVERING, reason="Persisted task resume requested.")
                 state.transition(TaskStatus.RESUMING, reason="Persisted task is eligible for resume.")
+            elif state.status is TaskStatus.VERIFYING:
+                # Verification is idempotent/read-only; rerun it from the durable
+                # execution state rather than treating an interrupted verification
+                # as a fresh implementation run.
+                state.transition(TaskStatus.RUNNING, reason="Resuming after interrupted verification.")
             elif state.status is TaskStatus.PENDING:
                 state.transition(TaskStatus.RUNNING, reason="Persisted task had not started.")
             else:
@@ -204,12 +211,12 @@ class AgentLoop:
             state.record("subtask_execution_resumed", "Persisted logical subtask board resumed.",
                          board=board.as_dict())
             if board.completed:
+                state.transition(TaskStatus.VERIFYING, reason="Parent verification after resume started.")
                 verification = self.executor.verify(
                     root, security_required=plan.security_level in {"sensitive", "high_risk"}
                 )
                 state.record("verification", "Parent task verification executed after resume.",
                              verification=verification)
-                state.transition(TaskStatus.VERIFYING, reason="Parent verification after resume started.")
                 if verification["verified"]:
                     state.transition(TaskStatus.VERIFIED, reason="Parent verification after resume passed.")
                     state.transition(TaskStatus.COMPLETED, reason="Persisted task resume completed.")
