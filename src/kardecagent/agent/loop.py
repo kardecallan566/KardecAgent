@@ -298,6 +298,19 @@ class AgentLoop:
             if action.tool == "request_plan_change":
                 try:
                     proposed_plan = parse_plan(json.dumps(action.arguments["plan"], ensure_ascii=False))
+                    required_level = assess_security(task).level
+                    rank = {"normal": 0, "low_risk": 1, "sensitive": 2, "high_risk": 3}
+                    if rank[proposed_plan.security_level] < rank[required_level]:
+                        raise PlanError(
+                            "replacement plan security level cannot be lower than task-required level: "
+                            + required_level
+                        )
+                    if required_level in {"sensitive", "high_risk"} and not proposed_plan.security_requirements:
+                        proposed_plan = ExecutionPlan(
+                            proposed_plan.summary, proposed_plan.steps, proposed_plan.validation,
+                            proposed_plan.risks, proposed_plan.completion_criteria,
+                            required_level, security_requirements_for(required_level),
+                        )
                 except PlanError as exc:
                     state.record("plan_change_error", str(exc))
                     messages += [
