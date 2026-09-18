@@ -156,6 +156,17 @@ class AgentLoop:
         else:
             state.record("checkpoint_skipped", "Project is not a Git repository.")
 
+        profile = detect_project(project_root)
+        state.record(
+            "project_detected",
+            f"Detected project kind: {profile.kind}.",
+            kind=profile.kind,
+            language=profile.language,
+            framework=profile.framework,
+            package_manager=profile.package_manager,
+            commands=profile.commands,
+        )
+
         messages = [
             {
                 "role": "system",
