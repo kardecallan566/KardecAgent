@@ -97,7 +97,7 @@ def _doctor(settings: Settings, root) -> int:
             client = OllamaClient(
                 settings.ollama_base_url,
                 settings.llm_model,
-                min(settings.llm_timeout_seconds, 10.0),
+                settings.llm_timeout_seconds,
             )
             models = client.list_models()
             names = {item.get("name") for item in models if isinstance(item, dict)}
