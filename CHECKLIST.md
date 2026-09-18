@@ -98,15 +98,15 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Pre-task checkpoint (implemented as a post-approval safety checkpoint)
 - [ ] Post-task checkpoint
 - [ ] Rollback (safety/confirmation layer required before exposure)
-- [ ] Task interruption/resume
-- [ ] Persistent task logs
+- [x] Task interruption/resume
+- [x] Persistent task logs
 
 ## M2 — Planning & Verification
 - [x] Explicit planning phase
 - [x] Structured execution plan
 - [x] Human approval gate before implementation
 - [x] Approved plan passed to execution context
-- [ ] Stored plan
+- [x] Stored plan
 - [x] Plan progress
 - [x] Completion criteria
 - [ ] Reviewer phase
@@ -230,7 +230,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Large approved plans automatically route through logical subtasks.
 - [x] Parent verification runs after all subtasks complete.
 - [x] Post-command changed-file scope enforcement.
-- [ ] Persistent subtask board.
+- [x] Persistent subtask board.
 
 
 ### M3 implementation notes — command side-effect isolation
