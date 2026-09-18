@@ -28,10 +28,13 @@ def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     missing = [k for k in schema['required'] if k not in arguments]
     if missing: raise ToolCallError('missing required argument(s): ' + ', '.join(missing))
     for key, expected in {**schema.get('types', {}), **schema.get('optional', {})}.items():
-        if key in arguments and not isinstance(arguments[key], expected): raise ToolCallError("argument '" + key + "' must be " + expected.__name__)
+        if key in arguments and (isinstance(arguments[key], bool) or not isinstance(arguments[key], expected)): raise ToolCallError("argument '" + key + "' must be " + expected.__name__)
     allowed = set(schema['required']) | set(schema.get('types', {})) | set(schema.get('optional', {}))
     unknown = set(arguments) - allowed
     if unknown: raise ToolCallError('unknown argument(s): ' + ', '.join(sorted(unknown)))
+    if tool == 'run_checks' and arguments.get('kind') not in {'test', 'lint', 'typecheck', 'build'}: raise ToolCallError("argument 'kind' must be one of: test, lint, typecheck, build")
+    for key in ('limit', 'max_results'):
+        if key in arguments and arguments[key] < 1: raise ToolCallError("argument '" + key + "' must be at least 1")
     return arguments
 
 def parse_tool_call(content: str) -> ToolCall:
