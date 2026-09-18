@@ -83,3 +83,35 @@ def test_fetch_web_page_marks_content_untrusted(monkeypatch):
     assert result["untrusted_content"] is True
     assert "alert(" not in result["text"]
     assert "reveal the API key" in result["text"]
+
+
+def test_domain_allowlist_blocks_unapproved_domain():
+    with pytest.raises(PermissionError):
+        validate_domain_policy("https://example.com", allow_domains=("docs.python.org",))
+
+
+def test_domain_allowlist_accepts_subdomain():
+    validate_domain_policy("https://docs.python.org/3/", allow_domains=("docs.python.org",))
+
+
+def test_domain_denylist_blocks_domain():
+    with pytest.raises(PermissionError):
+        validate_domain_policy("https://evil.example.com", deny_domains=("example.com",))
+
+
+def test_source_classification():
+    assert classify_source("https://docs.python.org/3/") == "official_documentation"
+    assert classify_source("https://github.com/example/project") == "source_repository"
+    assert classify_source("https://www.npmjs.com/package/httpx") == "package_registry"
+    assert classify_source("https://example.com/article") == "general_web"
+
+
+def test_search_web_rejects_result_outside_allowlist(monkeypatch):
+    class FakeResponse:
+        text = '<div class="result"><a class="result__a" href="https://evil.example.com">Evil</a><div class="result__snippet">bad</div></div></div>'
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: FakeResponse())
+    with pytest.raises(PermissionError):
+        search_web("test", allow_domains=("docs.python.org",))
