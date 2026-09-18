@@ -134,9 +134,37 @@ class AgentExecutor:
                               "message": "Independent review was not validatable.",
                               "recommendation": "Repeat the review before completion."}]}
 
-    def _execute_tool(self, root: Path, action, scope: tuple[str, ...] | None) -> str:
+    def _workspace_snapshot(self, root: Path, scoped: bool) -> WorkspaceSnapshot | None:
+        if not scoped:
+            return None
+        return WorkspaceSnapshot.for_git_repo(root) if git_is_repo(root) else WorkspaceSnapshot.for_project(root)
+
+    def _record_integrity(self, state: TaskState, before: WorkspaceSnapshot,
+                          after: WorkspaceSnapshot, changed: list[str],
+                          *, tool: str, plan_step: int, subtask: bool) -> None:
+        records = []
+        for path in changed:
+            before_item = before.files.get(path)
+            after_item = after.files.get(path)
+            records.append({
+                "path": path,
+                "exists_before": bool(before_item and before_item.exists),
+                "exists_after": bool(after_item and after_item.exists),
+                "sha256_before": before_item.digest if before_item else None,
+                "sha256_after": after_item.digest if after_item else None,
+                "tool": tool,
+                "plan_step": plan_step,
+                "subtask": subtask,
+            })
+        if records:
+            state.record("integrity_change", "Workspace changes recorded with before/after SHA-256 fingerprints.",
+                         changes=records)
+
+    def _execute_tool(self, root: Path, action, scope: tuple[str, ...] | None, state: TaskState | None = None) -> str:
         args = action.arguments
         fs = ProjectFilesystem(root)
+        mutating = action.tool in {"write_file", "apply_patch", "run_command"}
+        integrity_before = self._workspace_snapshot(root, bool(scope)) if mutating else None
         if action.tool == "list_files":
             return json.dumps(fs.list_files(args.get("limit", 500)), ensure_ascii=False)
         if action.tool == "read_file":
@@ -155,6 +183,11 @@ class AgentExecutor:
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
             fs.write_file(args["path"], args["content"])
+            integrity_after = self._workspace_snapshot(root, bool(scope))
+            if state is not None and integrity_before is not None and integrity_after is not None:
+                self._record_integrity(state, integrity_before, integrity_after,
+                                      sorted(integrity_before.changed_paths(integrity_after)),
+                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope))
             return json.dumps({"ok": True, "path": args["path"], "method": "full_file"})
         if action.tool == "apply_patch":
             patch_paths = self._patch_paths(args["patch"])
@@ -162,13 +195,16 @@ class AgentExecutor:
             result = apply_unified_patch(root, args["patch"])
             if not result.applied:
                 raise ValueError(result.error or "Patch was not applied.")
+            integrity_after = self._workspace_snapshot(root, bool(scope))
+            if state is not None and integrity_before is not None and integrity_after is not None:
+                self._record_integrity(state, integrity_before, integrity_after,
+                                      sorted(integrity_before.changed_paths(integrity_after)),
+                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope))
             return json.dumps({"ok": True, "changed_files": list(result.changed_files),
                                 "method": "unified_patch"})
         if action.tool == "run_command":
             scoped = bool(scope)
-            snapshot = WorkspaceSnapshot.for_git_repo(root) if git_is_repo(root) and scoped else (
-                WorkspaceSnapshot.for_project(root) if scoped else None
-            )
+            snapshot = self._workspace_snapshot(root, scoped)
             result = run_command(root, args["command"], timeout=self.settings.command_timeout_seconds,
                                  max_output_chars=self.settings.max_command_output_chars)
             if scoped:
@@ -196,6 +232,9 @@ class AgentExecutor:
                         + "; safely remediated: "
                         + (", ".join(restored) if restored else "none")
                     )
+                if state is not None and snapshot is not None:
+                    self._record_integrity(state, snapshot, after_snapshot, changed,
+                                          tool=action.tool, plan_step=action.plan_step, subtask=True)
                 if changed:
                     return json.dumps({
                         **result.__dict__,
@@ -396,7 +435,7 @@ class AgentExecutor:
                 return state
 
             try:
-                result = self._execute_tool(root, action, allowed_scope)
+                result = self._execute_tool(root, action, allowed_scope, state)
                 state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result)
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
