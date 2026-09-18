@@ -13,8 +13,9 @@ import httpx
 MAX_PAGE_CHARS = 30_000
 MAX_REDIRECTS = 3
 BLOCKED_SCHEMES = {"file", "data", "javascript", "vbscript"}
-BLOCKED_HOSTNAMES = {"localhost", "localhost.localdomain"}
+BLOCKED_HOSTNAMES = {"localhost", "localhost.localdomain", "metadata.google.internal"}
 PRIVATE_HOST_SUFFIXES = (".local", ".internal", ".localhost")
+BLOCKED_METADATA_IPS = {"169.254.169.254", "100.100.100.200"}
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class WebPage:
     title: str
     text: str
     truncated: bool
+    untrusted_content: bool = True
 
 
 def _clean(value: str) -> str:
@@ -39,8 +41,10 @@ def _clean(value: str) -> str:
 
 def _validate_url(url: str) -> None:
     parsed = urlparse(url)
-    if parsed.scheme.lower() not in {"http", "https"}:
+    if parsed.scheme.lower() in BLOCKED_SCHEMES or parsed.scheme.lower() not in {"http", "https"}:
         raise ValueError("Only HTTP and HTTPS URLs are allowed.")
+    if parsed.username is not None or parsed.password is not None:
+        raise PermissionError("URLs containing embedded credentials are blocked.")
     if not parsed.hostname:
         raise ValueError("URL has no hostname.")
     host = parsed.hostname.lower().rstrip(".")
@@ -54,7 +58,7 @@ def _validate_url(url: str) -> None:
 
     for item in addresses:
         address = ip_address(item[4][0])
-        if address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_reserved:
+        if str(address) in BLOCKED_METADATA_IPS or address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_reserved or address.is_unspecified:
             raise PermissionError("Web destination resolves to a private or reserved address.")
 
 
@@ -146,4 +150,4 @@ def fetch_web_page(url: str, *, timeout: float = 15.0, max_chars: int = MAX_PAGE
     truncated = len(text_content) > max_chars
     text_content = text_content[:max_chars]
 
-    return WebPage(url, current, title, text_content, truncated).__dict__
+    return WebPage(url, current, title, text_content, truncated, True).__dict__
