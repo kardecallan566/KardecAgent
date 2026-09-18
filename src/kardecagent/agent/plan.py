@@ -1,4 +1,4 @@
-from __future__
+from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
@@ -24,10 +24,50 @@ class ExecutionPlan:
         lines.append("Validação:")
         lines.extend(f"- {item}" for item in self.validation)
         if self.risks:
-            lines.append("")
-            lines.append("Riscos / observações:")
+            lines.extend(["", "Riscos / observações:"])
             lines.extend(f"- {item}" for item in self.risks)
         return "\n".join(lines)
+
+@dataclass
+class PlanTracker:
+    plan: ExecutionPlan
+    current_step: int = 1
+    completed_steps: list[int] = field(default_factory=list)
+    started_steps: list[int] = field(default_factory=list)
+
+    @property
+    def total_steps(self) -> int:
+        return len(self.plan.steps)
+
+    @property
+    def completed(self) -> bool:
+        return len(self.completed_steps) == self.total_steps
+
+    def can_start(self, step: int) -> bool:
+        return step == self.current_step and 1 <= step <= self.total_steps
+
+    def start(self, step: int) -> None:
+        if not self.can_start(step):
+            raise PlanError(f"step {step} is not the active plan step")
+        if step not in self.started_steps:
+            self.started_steps.append(step)
+
+    def complete(self, step: int) -> None:
+        if step != self.current_step:
+            raise PlanError(f"step {step} is not the active plan step")
+        if step not in self.completed_steps:
+            self.completed_steps.append(step)
+        if step < self.total_steps:
+            self.current_step += 1
+
+    def status(self) -> list[str]:
+        return [
+            "completed" if i in self.completed_steps else "in_progress" if i == self.current_step else "pending"
+            for i in range(1, self.total_steps + 1)
+        ]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"current_step": None if self.completed else self.current_step, "total_steps": self.total_steps, "completed_steps": list(self.completed_steps), "status": self.status()}
 
 def parse_plan(content: str) -> ExecutionPlan:
     text = content.strip()
