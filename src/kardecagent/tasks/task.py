@@ -24,6 +24,7 @@ class Subtask:
     scope: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     completion_criteria: tuple[str, ...] = ()
+    plan_steps: tuple[int, ...] = ()
     status: SubtaskStatus = SubtaskStatus.PENDING
     result: str | None = None
     evidence: list[str] = field(default_factory=list)
@@ -37,6 +38,7 @@ class Subtask:
             "scope": list(self.scope),
             "dependencies": list(self.dependencies),
             "completion_criteria": list(self.completion_criteria),
+            "plan_steps": list(self.plan_steps),
             "status": self.status.value,
             "result": self.result,
             "evidence": list(self.evidence),
