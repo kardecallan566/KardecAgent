@@ -231,9 +231,36 @@ class AgentLoop:
                 "task_recovery",
                 "Recovery attempted after approved-plan execution failure.",
                 recovered=recovery.recovered,
+                resume_step=recovery.resume_step,
                 rolled_back_files=list(recovery.rolled_back_files),
                 conflict_paths=list(recovery.conflict_paths),
             )
             if persistence_callback is not None:
                 persistence_callback(result, plan)
+            if recovery.recovered and recovery.rolled_back_events:
+                # One deterministic retry from the last consistent approved step.
+                result.record(
+                    "resume_retry_started",
+                    "Retrying the approved plan from the last consistent plan step.",
+                    resume_step=recovery.resume_step,
+                )
+                retry_start_index = len(result.events)
+                result = self.executor.execute(
+                    project_root, task, plan, result, context=context,
+                    allowed_scope=allowed_scope, max_iterations=max_iterations,
+                    allow_plan_changes=allow_plan_changes,
+                    approval_callback=approval_callback,
+                    high_risk_approval_callback=high_risk_approval_callback,
+                    persistence_callback=persistence_callback,
+                    resume_step=recovery.resume_step,
+                )
+                result.record(
+                    "resume_retry_finished",
+                    "Approved-plan retry finished without requesting a new approval.",
+                    resume_step=recovery.resume_step,
+                    status=result.status.value,
+                    events_from_index=retry_start_index,
+                )
+                if persistence_callback is not None:
+                    persistence_callback(result, plan)
         return result
