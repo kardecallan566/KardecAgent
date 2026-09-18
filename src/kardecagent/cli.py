@@ -167,11 +167,21 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
         overall.append((model, passed, total, elapsed, tps))
         for result in results:
             status = "PASS" if result.passed else "FAIL"
+            details = ""
+            if level == "agentic":
+                details = (
+                    f" | attempts={result.attempts}"
+                    f" | tool_calls={result.tool_calls}"
+                    f" | recovery={result.recovery_attempts}"
+                    f" | first_pass={'yes' if result.first_attempt_passed else 'no'}"
+                )
             print(
                 f"[{status}] {model} / {result.case} | "
                 f"{result.elapsed_seconds:.2f}s | {result.tokens_per_second:.2f} tok/s"
+                f"{details}"
             )
-        print()
+            if not result.passed and getattr(result, "error", ""):
+                print(f"  error: {result.error}")
 
     if not overall:
         print("No installed benchmark models were found.")
@@ -180,6 +190,9 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
     print("Summary")
     for model, passed, total, elapsed, tps in overall:
         print(f"- {model}: {passed}/{total} passed | {elapsed:.2f}s total | {tps:.2f} tok/s avg")
+    if level == "agentic":
+        print()
+        print("Agentic metrics: attempts = test executions; recovery = failed test attempts before a later pass; first_pass = passed on first test.")
     print()
     print("Use the results to choose the model; no automatic winner is selected.")
     return 0
