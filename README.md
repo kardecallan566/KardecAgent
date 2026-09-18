@@ -250,3 +250,9 @@ A lista padrão prioriza modelos pequenos que podem ser úteis em uma máquina l
 O benchmark agentic agora possui 12 cenários, incluindo implementação, debugging, mudança multi-arquivo, criação de testes, refatoração, reparo a partir de falha, contrato de API, máquina de estados, regressões de segurança e validação cruzada entre módulos. Cada caso gera um projeto temporário, aplica os arquivos produzidos pelo modelo, executa a suíte de testes e verifica critérios adicionais específicos do caso.
 
 O benchmark não baixa modelos automaticamente. Use `ollama pull` antes de executá-lo. Cada tarefa é executada em uma pasta temporária isolada; o resultado não altera o projeto do usuário.
+
+### Agentic benchmark loop
+
+The default agentic benchmark now exercises an iterative local-agent loop instead of a single-shot FILE response. Each model can READ fixture files, WRITE complete files, RUN the isolated pytest command, receive the test output, and retry after failures. A case succeeds only when the tests pass and its verification predicate passes.
+
+The CLI reports additional agentic metrics: `attempts` (test executions), `tool_calls`, `recovery` (failed test attempts before a later pass), and `first_pass` (passed on the first test execution). The benchmark remains descriptive and does not automatically select a model.
