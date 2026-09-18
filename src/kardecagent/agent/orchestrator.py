@@ -155,6 +155,7 @@ class Orchestrator:
                         subtask_id=subtask.id,
                         result=result.summary,
                         evidence=list(result.evidence),
+                        resume_step=result.resume_step,
                         board=board.as_dict(),
                     )
             else:
@@ -165,6 +166,7 @@ class Orchestrator:
                         "Logical subtask failed.",
                         subtask_id=subtask.id,
                         result=result.summary,
+                        resume_step=result.resume_step,
                         board=board.as_dict(),
                     )
                 self._mark_blocked(board)
@@ -258,6 +260,16 @@ class Orchestrator:
                         "Retrying the approved subtask plan from the last consistent step.",
                         resume_step=recovery.resume_step,
                     )
+                    if parent_state is not None:
+                        parent_state.record(
+                            "subtask_retry_started",
+                            "Logical subtask retry started from the last consistent plan step.",
+                            subtask_id=subtask.id,
+                            resume_step=recovery.resume_step,
+                            board=board.as_dict(),
+                        )
+                        if progress_callback is not None:
+                            progress_callback(board)
                     result_state = self.agent_loop.execute_approved_plan(
                         project_root,
                         f"{parent_task} :: {subtask.objective}",
