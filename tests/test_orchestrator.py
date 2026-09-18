@@ -69,3 +69,30 @@ def test_failed_subtask_blocks_dependents(tmp_path: Path):
     result = orchestrator.execute_sequentially(board, execute)
     assert result.get("1").status is SubtaskStatus.FAILED
     assert result.get("2").status is SubtaskStatus.BLOCKED
+
+
+def test_sequential_resume_prioritizes_active_subtask_and_step(tmp_path: Path):
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings())
+    board = orchestrator.decompose(
+        make_plan(),
+        tmp_path,
+    ) if False else None
+
+    from kardecagent.tasks import Subtask, TaskBoard
+    board = TaskBoard()
+    board.add(Subtask("1", "First", "First", scope=("src",), plan_steps=(1,)))
+    board.add(Subtask("2", "Second", "Second", scope=("tests",), plan_steps=(2,)))
+    calls = []
+
+    def execute(subtask, resume_step=1):
+        calls.append((subtask.id, resume_step))
+        return SubtaskExecutionResult(subtask.id, "completed", "ok", ["verified"], resume_step)
+
+    result = orchestrator.execute_sequentially(
+        board,
+        execute,
+        resume_subtask_id="2",
+        resume_step=2,
+    )
+    assert result.completed
+    assert calls[0] == ("2", 2)
