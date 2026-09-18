@@ -14,9 +14,11 @@ class ExecutionPlan:
     validation: list[str]
     risks: list[str] = field(default_factory=list)
     completion_criteria: list[str] = field(default_factory=list)
+    security_level: str = "normal"
+    security_requirements: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
-        return {"summary": self.summary, "steps": self.steps, "validation": self.validation, "risks": self.risks, "completion_criteria": self.completion_criteria}
+        return {"summary": self.summary, "steps": self.steps, "validation": self.validation, "risks": self.risks, "completion_criteria": self.completion_criteria, "security_level": self.security_level, "security_requirements": self.security_requirements}
 
     def format_for_review(self) -> str:
         lines = ["PLANO DE EXECUÇÃO", "", self.summary, "", "Etapas:"]
@@ -24,6 +26,11 @@ class ExecutionPlan:
         lines.append("")
         lines.append("Validação:")
         lines.extend(f"- {item}" for item in self.validation)
+        lines.append("")
+        lines.append(f"Nível de segurança: {self.security_level}")
+        if self.security_requirements:
+            lines.append("Requisitos de segurança:")
+            lines.extend(f"- {item}" for item in self.security_requirements)
         lines.append("")
         lines.append("Critérios de conclusão:")
         lines.extend(f"- {item}" for item in self.completion_criteria)
@@ -82,14 +89,19 @@ def parse_plan(content: str) -> ExecutionPlan:
     summary, steps = payload.get("summary"), payload.get("steps")
     validation, risks = payload.get("validation", []), payload.get("risks", [])
     completion_criteria = payload.get("completion_criteria", [])
+    security_level = payload.get("security_level", "normal")
+    security_requirements = payload.get("security_requirements", [])
     if not isinstance(summary, str) or not summary.strip(): raise PlanError("plan requires a non-empty summary")
     if not isinstance(steps, list) or not steps or not all(isinstance(x, str) and x.strip() for x in steps): raise PlanError("plan requires a non-empty list of textual steps")
     if not isinstance(validation, list) or not all(isinstance(x, str) and x.strip() for x in validation): raise PlanError("validation must be a list of textual checks")
     if not isinstance(risks, list) or not all(isinstance(x, str) and x.strip() for x in risks): raise PlanError("risks must be a list of textual notes")
     if not isinstance(completion_criteria, list) or not completion_criteria or not all(isinstance(x, str) and x.strip() for x in completion_criteria): raise PlanError("completion_criteria must be a non-empty list of textual criteria")
-    return ExecutionPlan(summary.strip(), [x.strip() for x in steps], [x.strip() for x in validation], [x.strip() for x in risks], [x.strip() for x in completion_criteria])
+    if security_level not in {"normal", "low_risk", "sensitive", "high_risk"}: raise PlanError("security_level must be normal, low_risk, sensitive, or high_risk")
+    if not isinstance(security_requirements, list) or not all(isinstance(x, str) and x.strip() for x in security_requirements): raise PlanError("security_requirements must be a list of textual requirements")
+    if security_level in {"sensitive", "high_risk"} and not security_requirements: raise PlanError("security-sensitive plans require security_requirements")
+    return ExecutionPlan(summary.strip(), [x.strip() for x in steps], [x.strip() for x in validation], [x.strip() for x in risks], [x.strip() for x in completion_criteria], security_level, [x.strip() for x in security_requirements])
 
 def plan_instructions() -> str:
-    return ('Return ONLY JSON for the execution plan: {"summary":"...","steps":["..."],"validation":["..."],"risks":["..."],"completion_criteria":["..."]}. '
+    return ('Return ONLY JSON for the execution plan: {"summary":"...","steps":["..."],"validation":["..."],"risks":["..."],"completion_criteria":["..."],"security_level":"normal","security_requirements":["..."]}. '
             'Create a concrete implementation plan based on the detected project and task. '
             'Include files/components likely to be created or changed, implementation order, how the result will be validated, and concrete completion criteria that can be checked from implementation evidence and automated validation. Do not modify files while planning.')
