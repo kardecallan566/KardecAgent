@@ -102,3 +102,27 @@ def test_run_command_detects_change_to_preexisting_dirty_file(tmp_path: Path):
         assert "scope violation" in str(exc)
     else:
         raise AssertionError("expected scope violation")
+
+
+def test_mutation_records_integrity_fingerprints(tmp_path: Path):
+    llm = FakeLLM([])
+    loop = AgentLoop(llm, Settings())
+    plan = ExecutionPlan("Audit", ["Implement"], ["checks"], [], ["done"])
+    state = make_state(tmp_path)
+    from kardecagent.agent.tools_schema import parse_tool_call
+    action = parse_tool_call(
+        '{"tool":"write_file","arguments":{"path":"inside.txt","content":"after"},"plan_step":1}'
+    )
+
+    loop.executor._execute_tool(tmp_path, action, ("inside.txt",), state)
+
+    changes = [e for e in state.events if e.event_type == "integrity_change"]
+    assert len(changes) == 1
+    record = changes[0].data["changes"][0]
+    assert record["path"] == "inside.txt"
+    assert record["sha256_before"] is None
+    assert len(record["sha256_after"]) == 64
+    assert record["tool"] == "write_file"
+    assert record["plan_step"] == 1
+    assert record["subtask"] is True
+    assert changes[0].timestamp
