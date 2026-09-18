@@ -214,6 +214,7 @@ class AgentLoop:
         approval_callback=None, high_risk_approval_callback=None, persistence_callback=None,
     ) -> TaskState:
         """Execute an already-approved plan without creating another plan or approval gate."""
+        recovery_start_index = len(state.events)
         result = self.executor.execute(
             project_root, task, plan, state, context=context,
             allowed_scope=allowed_scope, max_iterations=max_iterations,
@@ -225,7 +226,7 @@ class AgentLoop:
         # Parent execution owns recovery when no logical subtask scope exists.
         # Subtasks are recovered by the orchestrator using their subtask ID.
         if result.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS} and not (context or {}).get("subtask"):
-            recovery = self.recovery.recover(project_root, result)
+            recovery = self.recovery.recover(project_root, result, min_event_index=recovery_start_index)
             result.record(
                 "task_recovery",
                 "Recovery attempted after approved-plan execution failure.",
