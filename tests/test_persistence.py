@@ -173,3 +173,59 @@ def test_load_replays_journal_after_snapshot_boundary(tmp_path: Path):
     assert loaded.iteration == 2
     assert loaded.events[-1].event_type == "progress"
     assert loaded.events[-1].sequence == 2
+
+
+def test_journal_reconstructs_exact_execution_cursor(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("cursor", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.record("plan_step_started", "started step", step=2)
+    state.record("subtask_started", "started subtask", subtask_id="2")
+    state.record("subtask_progress", "progress persisted", subtask_id="2", plan_step=3)
+    store.save(state, plan=make_plan(), approved=True)
+
+    loaded, _, _ = store.load("cursor")
+
+    assert loaded.active_plan_step == 2
+    assert loaded.active_subtask_id == "2"
+    assert loaded.active_subtask_step == 3
+
+
+def test_journal_ahead_snapshot_rebuilds_latest_board(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("board-crash", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    board = TaskBoard()
+    board.add(Subtask(
+        "1", "Implementation", "Work", scope=("src",), plan_steps=(1,),
+    ))
+    store.save(state, plan=make_plan(), board=board, approved=True)
+
+    board.mark_running("1")
+    state.record(
+        "subtask_started",
+        "subtask started before snapshot replacement",
+        subtask_id="1",
+        board=board.as_dict(),
+    )
+    TaskJournal(store.journal_path_for("board-crash")).append_events(state)
+
+    loaded, _, loaded_board = store.load("board-crash")
+
+    assert loaded.active_subtask_id == "1"
+    assert loaded_board is not None
+    # RUNNING work is reset to PENDING so resume can safely restart it.
+    assert loaded_board.get("1").status is SubtaskStatus.PENDING
+
+
+def test_journal_cursor_advances_after_completed_plan_step(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("step-cursor", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.record("plan_step_started", "step one", step=1)
+    state.record("plan_step_completed", "step one complete", step=1)
+    store.save(state, plan=make_plan(), approved=True)
+
+    loaded, _, _ = store.load("step-cursor")
+
+    assert loaded.active_plan_step == 2
