@@ -292,6 +292,11 @@ class AgentExecutor:
     ) -> TaskState:
         tracker = PlanTracker.resume_from(plan, resume_step)
         root = root.resolve()
+        if state.status in {TaskStatus.PENDING, TaskStatus.RESUMING}:
+            state.transition(TaskStatus.RUNNING, reason="Approved plan execution started or resumed.",
+                             resume_step=resume_step)
+        elif state.status is not TaskStatus.RUNNING:
+            raise ValueError(f"cannot execute plan from task status {state.status.value}")
         profile = detect_project(root)
         execution_context = {
             "task": task,
@@ -427,9 +432,11 @@ class AgentExecutor:
                     continue
                 security_required = plan.security_level in {"sensitive", "high_risk"}
                 verification = self.verify(root, security_required=security_required)
+                state.transition(TaskStatus.VERIFYING, reason="Completion verification started.")
                 state.record("verification", "Completion verification executed.", verification=verification)
                 if not verification["verified"]:
                     state.record("verification_failed", "Completion verification failed.", verification=verification)
+                    state.transition(TaskStatus.RUNNING, reason="Completion verification failed; continuing execution.")
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": json.dumps({
                                      "verification": verification,
@@ -441,16 +448,18 @@ class AgentExecutor:
                     state.record("security_review", "Independent security review completed.", review=review)
                     if review.get("status") != "pass":
                         state.record("verification_failed", "Security review reported findings.", review=review)
+                        state.transition(TaskStatus.RUNNING, reason="Security review found issues; continuing execution.")
                         messages += [{"role": "assistant", "content": response.content},
                                      {"role": "user", "content": json.dumps({
                                          "security_review": review,
                                          "instruction": "Address security findings before finishing.",
                                      }, ensure_ascii=False)}]
                         continue
+                state.transition(TaskStatus.VERIFIED, reason="Completion verification passed.")
                 state.record("completed", "Task completed and verified.",
                              reason=action.arguments["reason"], criteria_evidence=evidence,
                              verification=verification)
-                state.status = TaskStatus.COMPLETED
+                state.transition(TaskStatus.COMPLETED, reason="Approved plan completed and verified.")
                 return state
 
             try:
@@ -470,7 +479,7 @@ class AgentExecutor:
                                  "instruction": "Diagnose the error and choose a safe correction.",
                              }, ensure_ascii=False)}]
 
-        state.status = TaskStatus.MAX_ITERATIONS
+        state.transition(TaskStatus.MAX_ITERATIONS, reason="Maximum execution iterations reached.")
         state.record("max_iterations", "Maximum execution iterations reached.")
         if persistence_callback is not None:
             persistence_callback(state, plan)
