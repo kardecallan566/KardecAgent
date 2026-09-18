@@ -17,6 +17,8 @@ from ..tools import (
     git_status,
     run_command,
     search_text,
+    search_web,
+    fetch_web_page,
 )
 from .state import TaskState, TaskStatus
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan, plan_instructions
@@ -155,9 +157,9 @@ class AgentLoop:
         if action.tool == "read_file":
             return fs.read_file(args["path"])
         if action.tool == "search_web":
-            return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
+            return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5), allow_domains=self.settings.web_allow_domains, deny_domains=self.settings.web_deny_domains), ensure_ascii=False)
         if action.tool == "fetch_web_page":
-            return json.dumps(fetch_web_page(args["url"], max_chars=args.get("max_chars", 30000)), ensure_ascii=False)
+            return json.dumps(fetch_web_page(args["url"], max_chars=args.get("max_chars", 30000), allow_domains=self.settings.web_allow_domains, deny_domains=self.settings.web_deny_domains), ensure_ascii=False)
         if action.tool == "search_web":
             return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
         if action.tool == "search_files":
