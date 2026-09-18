@@ -9,7 +9,7 @@ from ..project import detect_project, discover_command, project_snapshot, scan_p
 from ..project.dependencies import discover_audit_command, summarize_audit
 from ..tools import (
     ProjectFilesystem, apply_unified_patch, git_diff, git_has_uncommitted_changes,
-    git_is_repo, git_log, git_status, git_changed_paths, run_command, search_text, search_web,
+    git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
     fetch_web_page,
 )
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
@@ -164,17 +164,26 @@ class AgentExecutor:
                                 "method": "unified_patch"})
         if action.tool == "run_command":
             before = git_changed_paths(root) if scope and git_is_repo(root) else set()
+            before_fingerprints = (
+                git_changed_fingerprints(root, before) if scope and git_is_repo(root) else {}
+            )
             result = run_command(root, args["command"], timeout=self.settings.command_timeout_seconds,
                                  max_output_chars=self.settings.max_command_output_chars)
             if scope and git_is_repo(root):
                 after = git_changed_paths(root)
+                after_fingerprints = git_changed_fingerprints(root, after)
                 introduced = sorted(after - before)
-                self._check_scope(root, introduced, scope)
-                if introduced:
+                modified_existing = sorted(
+                    path for path in (before & after)
+                    if before_fingerprints.get(path) != after_fingerprints.get(path)
+                )
+                changed = sorted(set(introduced) | set(modified_existing))
+                self._check_scope(root, changed, scope)
+                if changed:
                     return json.dumps({
                         **result.__dict__,
                         "scope_verified": True,
-                        "changed_paths": introduced,
+                        "changed_paths": changed,
                     }, ensure_ascii=False)
             return json.dumps(result.__dict__, ensure_ascii=False)
         if action.tool == "run_checks":
