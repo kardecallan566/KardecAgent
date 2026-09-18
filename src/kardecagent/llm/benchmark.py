@@ -175,11 +175,10 @@ def _write_files(root: Path, files: dict[str, str]) -> None:
 
 
 def _fixture_cases() -> tuple[AgenticCase, ...]:
-def _fixture_cases() -> tuple[AgenticCase, ...]:
     return (
         AgenticCase(
             "implement_existing_function",
-            """Inspect the project and implement the task. Return ONLY complete modified files as FILE blocks.
+            """Inspect the project and implement the task. Use READ/WRITE/RUN actions to modify the project and verify the result.
 Format:
 === FILE: path ===
 <complete file>
@@ -249,7 +248,7 @@ Task: accept only integer retries >= 0; invalid values raise ValueError. Preserv
         ),
         AgenticCase(
             "create_tests",
-            """Create useful pytest tests. Return ONLY the new/modified test file as FILE blocks.
+            """Create useful pytest tests. Use READ/WRITE/RUN actions to create the test file and verify the result.
 
 src/parser.py:
 def parse_port(value):
@@ -545,17 +544,20 @@ def _run_benchmark_test(root: Path, case: AgenticCase) -> tuple[int, str]:
 
 
 def _parse_agent_actions(text: str) -> list[tuple[str, str, str]]:
-    actions = []
+    actions: list[tuple[int, str, str, str]] = []
     for match in _ACTION_RE.finditer(text):
-        kind = match.group(1).upper()
-        target = match.group(2).strip()
-        body = match.group(3)
-        actions.append((kind, target, body))
+        actions.append(
+            (match.start(), match.group(1).upper(), match.group(2).strip(), match.group(3))
+        )
+    done_re = re.compile(r"(?m)^===\\s*DONE:\\s*([^\\r\\n]*)\\s*===\\s*$")
+    for match in done_re.finditer(text):
+        actions.append((match.start(), "DONE", match.group(1).strip(), ""))
+    actions.sort(key=lambda item: item[0])
     if not actions:
         raise ValueError(
             "Model returned no tool actions. Expected READ, WRITE, RUN, or DONE blocks."
         )
-    return actions
+    return [(kind, target, body) for _, kind, target, body in actions]
 
 
 def run_agentic_benchmark(
