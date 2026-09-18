@@ -161,6 +161,7 @@ class Orchestrator:
                         "subtask_completed",
                         "Logical subtask completed.",
                         subtask_id=subtask.id,
+                        plan_steps=list(subtask.plan_steps),
                         result=result.summary,
                         evidence=list(result.evidence),
                         resume_step=result.resume_step,
@@ -173,6 +174,7 @@ class Orchestrator:
                         "subtask_failed",
                         "Logical subtask failed.",
                         subtask_id=subtask.id,
+                        plan_steps=list(subtask.plan_steps),
                         result=result.summary,
                         resume_step=result.resume_step,
                         board=board.as_dict(),
@@ -231,6 +233,11 @@ class Orchestrator:
                         "Logical subtask execution cursor persisted.",
                         subtask_id=subtask.id,
                         plan_step=current_state.active_plan_step,
+                        parent_plan_step=(
+                            subtask.plan_steps[current_state.active_plan_step - 1]
+                            if 1 <= current_state.active_plan_step <= len(subtask.plan_steps)
+                            else subtask.plan_steps[-1]
+                        ),
                         status=current_state.status.value,
                     )
                     if progress_callback is not None:
@@ -277,6 +284,11 @@ class Orchestrator:
                             "Logical subtask retry started from the last consistent plan step.",
                             subtask_id=subtask.id,
                             resume_step=recovery.resume_step,
+                            parent_plan_step=(
+                                subtask.plan_steps[recovery.resume_step - 1]
+                                if 1 <= recovery.resume_step <= len(subtask.plan_steps)
+                                else subtask.plan_steps[-1]
+                            ),
                             board=board.as_dict(),
                         )
                         if progress_callback is not None:
