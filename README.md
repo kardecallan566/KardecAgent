@@ -126,3 +126,57 @@ Failure and recovery flow:
 Recovery may instead end in `FAILED` when workspace conflicts, invalid audit data, or rollback errors prevent a safe resume. Invalid transitions are rejected by `TaskState.transition()`, and every valid transition is recorded as a `status_changed` event for persistence and auditability.
 
 Recovered executions resume only from the last consistently completed approved plan step. Subtasks use the same state machine and can perform one deterministic retry after audited changes are safely rolled back.
+
+
+## Primeira versão testável
+
+A primeira versão pode ser validada localmente sem modificar o projeto usando os comandos abaixo.
+
+### 1. Instalar
+
+```powershell
+cd D:/caminho/para/KardecAgent
+python -m venv .venv
+./.venv/Scripts/Activate.ps1
+pip install -e ".[dev]"
+```
+
+### 2. Verificar ambiente
+
+```powershell
+kardec-agent doctor --project D:/caminho/para/seu-projeto
+```
+
+O `doctor` verifica o projeto detectado e faz uma chamada mínima ao servidor OpenAI-compatible local. Ele não executa ferramentas de implementação nem altera arquivos.
+
+Os padrões do runtime Qwen local são `http://127.0.0.1:8080/v1` e `qwen3.8-27b`. Eles podem ser alterados com `KARDEC_LLM_BASE_URL` e `KARDEC_LLM_MODEL`.
+
+### 3. Executar uma tarefa real
+
+```powershell
+kardec-agent run --project D:/caminho/para/seu-projeto --task "adicione um teste simples para validar o projeto"
+```
+
+O agente cria o plano primeiro e mostra o plano para aprovação. **Sem aprovação explícita, nenhuma execução de implementação começa.**
+
+### 4. Inspecionar tarefas persistidas
+
+```powershell
+kardec-agent tasks --project D:/caminho/para/seu-projeto
+```
+
+### 5. Retomar uma execução interrompida
+
+```powershell
+kardec-agent resume --project D:/caminho/para/seu-projeto --task "adicione um teste simples para validar o projeto"
+```
+
+O resume reutiliza o plano aprovado e o journal persistido; não cria uma nova aprovação. Se uma recuperação estava em andamento quando o processo caiu, a transação de recovery é retomada antes da execução continuar.
+
+### 6. Rodar a suíte automatizada
+
+```powershell
+pytest -q
+```
+
+A suíte cobre planejamento/aprovação, execução de ferramentas, escopo de subtarefas, persistência/journal, recuperação, rollback seguro e comandos básicos da CLI.
