@@ -140,6 +140,8 @@ class AgentLoop:
             return json.dumps(fs.list_files(args.get("limit", 500)), ensure_ascii=False)
         if action.tool == "read_file":
             return fs.read_file(args["path"])
+        if action.tool == "search_web":
+            return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
         if action.tool == "search_files":
             return json.dumps(
                 search_text(root, args["query"], args.get("max_results", 50)),
