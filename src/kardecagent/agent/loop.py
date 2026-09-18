@@ -123,7 +123,40 @@ class AgentLoop:
         else:
             state.record("checkpoint_skipped", "Project is not a Git repository.")
 
-        return self.execute_approved_plan(root, task, plan, state, context=self._build_context(root, task),
+        context = self._build_context(root, task)
+        from .orchestrator import Orchestrator, OrchestrationError
+        orchestrator = Orchestrator(self.llm, self.settings)
+        if orchestrator.should_decompose(plan, root):
+            state.record("subtask_decomposition_started",
+                         "Approved plan is large enough for logical subtask decomposition.")
+            try:
+                board = orchestrator.decompose(plan, root)
+                state.record("subtask_decomposed", "Approved plan decomposed into logical subtasks.",
+                             board=board.as_dict())
+                board = orchestrator.execute_approved_plan(root, task, plan, board)
+                state.record("subtask_execution_finished", "Logical subtask execution finished.",
+                             board=board.as_dict())
+                if not board.completed:
+                    state.status = TaskStatus.FAILED
+                    state.record("subtask_execution_failed", "At least one required subtask did not complete.")
+                    return state
+                verification = self.executor.verify(
+                    root, security_required=plan.security_level in {"sensitive", "high_risk"}
+                )
+                state.record("verification", "Parent task verification executed.", verification=verification)
+                if not verification["verified"]:
+                    state.status = TaskStatus.FAILED
+                    state.record("verification_failed", "Parent verification failed after subtask integration.")
+                    return state
+                state.status = TaskStatus.COMPLETED
+                state.record("completed", "Task completed through logical subtasks and verified.",
+                             subtask_board=board.as_dict(), verification=verification)
+                return state
+            except OrchestrationError as exc:
+                state.record("subtask_decomposition_failed", str(exc))
+                state.record("subtask_fallback", "Falling back to the single approved-plan executor.")
+
+        return self.execute_approved_plan(root, task, plan, state, context=context,
                                           approval_callback=approval_callback,
                                           high_risk_approval_callback=high_risk_approval_callback)
 
