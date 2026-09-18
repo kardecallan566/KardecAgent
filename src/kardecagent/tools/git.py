@@ -108,3 +108,26 @@ def git_changed_paths(root: Path) -> set[str]:
             status_path = status_path.split(" -> ", 1)[1]
         paths.add(status_path.replace("\\", "/"))
     return paths
+
+
+def git_changed_fingerprints(root: Path, paths: set[str] | None = None) -> dict[str, str]:
+    """Hash changed working-tree files so pre-existing dirty files can be monitored."""
+    import hashlib
+
+    changed = paths if paths is not None else git_changed_paths(root)
+    fingerprints: dict[str, str] = {}
+    for raw in changed:
+        path = (root / raw).resolve()
+        try:
+            path.relative_to(root.resolve())
+        except ValueError:
+            continue
+        if not path.is_file():
+            fingerprints[raw] = "<missing>"
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        fingerprints[raw] = digest.hexdigest()
+    return fingerprints
