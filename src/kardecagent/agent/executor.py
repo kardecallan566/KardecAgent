@@ -431,8 +431,8 @@ class AgentExecutor:
                                  {"role": "user", "content": "Provide non-empty evidence for the completion criteria."}]
                     continue
                 security_required = plan.security_level in {"sensitive", "high_risk"}
-                verification = self.verify(root, security_required=security_required)
                 state.transition(TaskStatus.VERIFYING, reason="Completion verification started.")
+                verification = self.verify(root, security_required=security_required)
                 state.record("verification", "Completion verification executed.", verification=verification)
                 if not verification["verified"]:
                     state.record("verification_failed", "Completion verification failed.", verification=verification)
