@@ -61,6 +61,31 @@ class RecoveryManager:
             )
             return RecoveryResult(True)
 
+        # Changes belonging to already completed plan steps are part of the
+        # last consistent state and must survive recovery. Only roll back
+        # mutations from the unfinished portion of the approved plan.
+        completed_steps = [
+            int(event.data["step"])
+            for event in state.events
+            if event.event_type == "plan_step_completed"
+            and isinstance(event.data.get("step"), int)
+        ]
+        last_completed_step = max(completed_steps, default=0)
+        candidates = [
+            item for item in candidates
+            if int(item[1].data.get("plan_step", 0)) > last_completed_step
+        ]
+        if not candidates:
+            state.record(
+                "recovery_skipped",
+                "Audited changes are limited to already completed plan steps; no rollback is required.",
+                subtask_id=subtask_id,
+                iteration=iteration,
+                min_event_index=min_event_index,
+                last_completed_step=last_completed_step,
+            )
+            return RecoveryResult(True, resume_step=last_completed_step + 1)
+
         if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
             state.transition(TaskStatus.RECOVERING, reason="Starting conflict-safe recovery.")
         else:
