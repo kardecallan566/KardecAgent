@@ -137,7 +137,7 @@ def test_plan_change_requires_second_approval(tmp_path: Path):
     )
     responses = [
         _plan(("Create file",)),
-        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"Expanded","steps":["Create file","Add test"],"validation":["Run tests"],"risks":["Extra scope"]}}}',
+        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"Expanded","steps":["Create file","Add test"],"validation":["Run tests"],"risks":["Extra scope"],"completion_criteria":["result works"]}}}',
     ]
     approvals = []
     llm = FakeLLM(responses)
@@ -162,7 +162,7 @@ def test_rejected_plan_change_keeps_original_plan(tmp_path: Path):
     )
     llm = FakeLLM([
         _plan(("Original step",)),
-        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"Expanded","steps":["Original step","New step"],"validation":["Run tests"],"risks":[]}}}',
+        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"Expanded","steps":["Original step","New step"],"validation":["Run tests"],"risks":[],"completion_criteria":["result works"]}}}',
     ])
     approvals = []
 
