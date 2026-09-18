@@ -288,8 +288,9 @@ class AgentExecutor:
         approval_callback: Callable | None = None,
         high_risk_approval_callback: Callable | None = None,
         persistence_callback: Callable[[TaskState, ExecutionPlan], None] | None = None,
+        resume_step: int = 1,
     ) -> TaskState:
-        tracker = PlanTracker(plan)
+        tracker = PlanTracker.resume_from(plan, resume_step)
         root = root.resolve()
         profile = detect_project(root)
         execution_context = {
@@ -304,7 +305,9 @@ class AgentExecutor:
             "security_requirements": plan.security_requirements,
             "scope": list(allowed_scope or ()),
             "plan_progress": tracker.as_dict(),
-            "instruction": "Execute only the approved plan. Mutating actions must use the active plan_step. " +
+            "resume_step": resume_step,
+            "instruction": "Resume from the specified active plan step. Do not redo completed steps unless verification requires it. " +
+                           "Execute only the approved plan. Mutating actions must use the active plan_step. " +
                            "Complete each step with evidence. Never expand scope.",
         }
         messages = [
@@ -312,7 +315,8 @@ class AgentExecutor:
              tool_instructions()},
             {"role": "user", "content": json.dumps(execution_context, ensure_ascii=False)},
         ]
-        state.record("plan_progress", "Plan execution initialized.", progress=tracker.as_dict())
+        state.record("plan_progress", "Plan execution initialized.", progress=tracker.as_dict(),
+                     resume_step=resume_step)
         state.record("execution_started", "Approved plan execution started.",
                      scope=list(allowed_scope or ()), subtask=bool(context))
 
