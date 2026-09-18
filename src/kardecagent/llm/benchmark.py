@@ -780,7 +780,11 @@ def run_agentic_benchmark(
                             "Tests failed. Treat the output above as the debugging feedback, "
                             "inspect the relevant files, apply a fix, and run pytest again."
                         )
-                    messages.append({"role": "user", "content": "\n\n".join(feedback)})\n                    # Keep the task/system context plus only the recent tool exchange.\n                    # Replaying many full-file WRITE responses quickly overwhelms small models.\n                    if len(messages) > 8:\n                        messages = [messages[0], messages[1], *messages[-6:]]
+                    messages.append({"role": "user", "content": "\n\n".join(feedback)})
+                    # Keep the task/system context plus only the recent tool exchange.
+                    # Replaying many full-file WRITE responses quickly overwhelms small models.
+                    if len(messages) > 8:
+                        messages = [messages[0], messages[1], *messages[-6:]]
 
                 if not passed:
                     error = f"Agent did not reach a passing test state within {max_steps} steps."
