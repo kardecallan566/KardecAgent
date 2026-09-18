@@ -24,10 +24,10 @@ def discover_audit_command(root: Path) -> tuple[str, str] | None:
     package = _has(root, "package.json")
     if package:
         if (root / "pnpm-lock.yaml").exists():
-            return "node", "pnpm audit --json"
+            return "npm", "pnpm audit --json"
         if (root / "yarn.lock").exists():
-            return "node", "yarn npm audit --json"
-        return "node", "npm audit --json"
+            return "npm", "yarn npm audit --json"
+        return "npm", "npm audit --json"
     if _has(root, "requirements.txt", "pyproject.toml", "Pipfile", "poetry.lock"):
         return "python", "python -m pip_audit -f json"
     return None
