@@ -229,5 +229,14 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Subtasks cannot request parent-plan changes.
 - [x] Large approved plans automatically route through logical subtasks.
 - [x] Parent verification runs after all subtasks complete.
-- [ ] Post-command changed-file scope enforcement.
+- [x] Post-command changed-file scope enforcement.
 - [ ] Persistent subtask board.
+
+
+### M3 implementation notes — command side-effect isolation
+
+- [x] Capture working-tree paths before scoped commands.
+- [x] Detect newly introduced changed paths after commands.
+- [x] Fingerprint pre-existing dirty files so in-place changes are detected.
+- [x] Reject command execution results that introduce changes outside the subtask scope.
+- [ ] Automatic safe remediation/rollback for out-of-scope command side effects.
