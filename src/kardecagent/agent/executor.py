@@ -165,23 +165,15 @@ class AgentExecutor:
             return json.dumps({"ok": True, "changed_files": list(result.changed_files),
                                 "method": "unified_patch"})
         if action.tool == "run_command":
-            scoped_git = bool(scope and git_is_repo(root))
-            before = git_changed_paths(root) if scoped_git else set()
-            before_fingerprints = (
-                git_changed_fingerprints(root, before) if scoped_git else {}
+            scoped = bool(scope)
+            snapshot = WorkspaceSnapshot.for_git_repo(root) if git_is_repo(root) and scoped else (
+                WorkspaceSnapshot.for_project(root) if scoped else None
             )
-            snapshot = WorkspaceSnapshot.for_git_repo(root) if scoped_git else None
             result = run_command(root, args["command"], timeout=self.settings.command_timeout_seconds,
                                  max_output_chars=self.settings.max_command_output_chars)
-            if scoped_git:
-                after = git_changed_paths(root)
-                after_fingerprints = git_changed_fingerprints(root, after)
-                introduced = sorted(after - before)
-                modified_existing = sorted(
-                    path for path in (before & after)
-                    if before_fingerprints.get(path) != after_fingerprints.get(path)
-                )
-                changed = sorted(set(introduced) | set(modified_existing))
+            if scoped:
+                after_snapshot = WorkspaceSnapshot.for_git_repo(root) if git_is_repo(root) else WorkspaceSnapshot.for_project(root)
+                changed = sorted(snapshot.changed_paths(after_snapshot) if snapshot else set())
                 outside = sorted(
                     path for path in changed if not self._scope_allows(root, path, scope)
                 )
