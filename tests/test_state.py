@@ -56,3 +56,17 @@ def test_events_have_monotonic_sequences():
     state.record("work", "done")
     state.transition(TaskStatus.VERIFYING)
     assert [event.sequence for event in state.events] == [1, 2, 3]
+
+
+def test_execution_cursor_tracks_plan_and_subtask():
+    state = TaskState("cursor", ".")
+    state.transition(TaskStatus.RUNNING)
+    state.record("plan_step_started", "step 2", step=2)
+    state.record("subtask_started", "subtask 1", subtask_id="1")
+    state.record("subtask_progress", "subtask step 2", subtask_id="1", plan_step=2)
+    assert state.active_plan_step == 2
+    assert state.active_subtask_id == "1"
+    assert state.active_subtask_step == 2
+    state.record("subtask_completed", "done", subtask_id="1")
+    assert state.active_subtask_id is None
+    assert state.active_subtask_step == 1
