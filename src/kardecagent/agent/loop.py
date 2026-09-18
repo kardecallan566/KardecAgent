@@ -42,8 +42,6 @@ class AgentLoop:
         }
 
     def _create_plan(self, root: Path, task: str, state: TaskState) -> ExecutionPlan | None:
-        store.save(state, plan=plan, approved=True)
-
         context = self._build_context(root, task)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT + "\n" + plan_instructions() +
@@ -182,21 +180,36 @@ class AgentLoop:
         state, plan, board = store.load(task)
         if state.status is TaskStatus.COMPLETED:
             return state
-        if state.status is not TaskStatus.RUNNING:
-            if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
-                # A persisted failure may already have completed controller-owned
-                # recovery. Do not blindly roll back older audited operations here.
-                state.transition(TaskStatus.RECOVERING, reason="Persisted task resume requested.")
-                state.transition(TaskStatus.RESUMING, reason="Persisted task is eligible for resume.")
-            elif state.status is TaskStatus.VERIFYING:
-                # Verification is idempotent/read-only; rerun it from the durable
-                # execution state rather than treating an interrupted verification
-                # as a fresh implementation run.
-                state.transition(TaskStatus.RUNNING, reason="Resuming after interrupted verification.")
-            elif state.status is TaskStatus.PENDING:
-                state.transition(TaskStatus.RUNNING, reason="Persisted task had not started.")
-            else:
-                raise PersistenceError(f"cannot resume task from status {state.status.value}")
+
+        if state.status is TaskStatus.RECOVERING:
+            recovery = self.recovery.resume_pending_recovery(
+                root,
+                state,
+                persistence_callback=lambda s: store.save(
+                    s, plan=plan, board=board, approved=True
+                ),
+            )
+            if not recovery.recovered:
+                store.save(state, plan=plan, board=board, approved=True)
+                return state
+        elif state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
+            recovery = self.recovery.recover(
+                root,
+                state,
+                persistence_callback=lambda s: store.save(
+                    s, plan=plan, board=board, approved=True
+                ),
+            )
+            if not recovery.recovered:
+                store.save(state, plan=plan, board=board, approved=True)
+                return state
+        elif state.status is TaskStatus.VERIFYING:
+            state.transition(TaskStatus.RUNNING, reason="Resuming after interrupted verification.")
+        elif state.status is TaskStatus.PENDING:
+            state.transition(TaskStatus.RUNNING, reason="Persisted task had not started.")
+        elif state.status is not TaskStatus.RUNNING and state.status is not TaskStatus.RESUMING:
+            raise PersistenceError(f"cannot resume task from status {state.status.value}")
+
         state.record("resume_started", "Resuming previously approved persisted task.")
         if board is not None:
             from .orchestrator import Orchestrator
@@ -252,10 +265,16 @@ class AgentLoop:
             persistence_callback=persistence_callback,
             resume_step=resume_step,
         )
-        # Parent execution owns recovery when no logical subtask scope exists.
-        # Subtasks are recovered by the orchestrator using their subtask ID.
         if result.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS} and not (context or {}).get("subtask"):
-            recovery = self.recovery.recover(project_root, result, min_event_index=recovery_start_index)
+            recovery = self.recovery.recover(
+                project_root,
+                result,
+                min_event_index=recovery_start_index,
+                persistence_callback=(
+                    (lambda s: persistence_callback(s, plan))
+                    if persistence_callback is not None else None
+                ),
+            )
             result.record(
                 "task_recovery",
                 "Recovery attempted after approved-plan execution failure.",
@@ -267,7 +286,6 @@ class AgentLoop:
             if persistence_callback is not None:
                 persistence_callback(result, plan)
             if recovery.recovered and recovery.rolled_back_events:
-                # One deterministic retry from the last consistent approved step.
                 result.record(
                     "resume_retry_started",
                     "Retrying the approved plan from the last consistent plan step.",
