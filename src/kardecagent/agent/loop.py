@@ -19,6 +19,7 @@ from ..tools import (
     search_text,
 )
 from .state import TaskState, TaskStatus
+from .plan import PlanError, parse_plan, plan_instructions
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
 
 
@@ -133,68 +134,112 @@ class AgentLoop:
             return json.dumps(result, ensure_ascii=False)
         raise ToolCallError("unsupported tool: " + action.tool)
 
-    def run(self, project_root: Path, task: str) -> TaskState:
+    def run(
+        self,
+        project_root: Path,
+        task: str,
+        *,
+        approval_callback=None,
+    ) -> TaskState:
+        """Create a plan, wait for explicit approval, then execute it.
+
+        approval_callback receives ExecutionPlan and must return True to approve.
+        If omitted, the loop is non-interactive and requires explicit approval
+        from the caller through the CLI layer.
+        """
         state = TaskState(task, str(project_root))
         state.status = TaskStatus.RUNNING
 
         if git_is_repo(project_root):
             checkpoint = create_checkpoint(project_root, task)
             if checkpoint.returncode == 0:
-                state.record(
-                    "checkpoint_created",
-                    "Created pre-task Git checkpoint.",
-                    branch=checkpoint.command,
-                    dirty=git_has_uncommitted_changes(project_root),
-                    current_branch=git_current_branch(project_root).stdout.strip(),
-                )
+                state.record("checkpoint_created", "Created pre-task Git checkpoint.",
+                             branch=checkpoint.command,
+                             dirty=git_has_uncommitted_changes(project_root),
+                             current_branch=git_current_branch(project_root).stdout.strip())
             else:
-                state.record(
-                    "checkpoint_error",
-                    "Could not create pre-task Git checkpoint.",
-                    error=checkpoint.stderr.strip(),
-                )
+                state.record("checkpoint_error", "Could not create pre-task Git checkpoint.",
+                             error=checkpoint.stderr.strip())
         else:
             state.record("checkpoint_skipped", "Project is not a Git repository.")
 
         profile = detect_project(project_root)
-        state.record(
-            "project_detected",
-            f"Detected project kind: {profile.kind}.",
-            kind=profile.kind,
-            language=profile.language,
-            framework=profile.framework,
-            package_manager=profile.package_manager,
-            commands=profile.commands,
-        )
+        state.record("project_detected", f"Detected project kind: {profile.kind}.",
+                     kind=profile.kind, language=profile.language,
+                     framework=profile.framework, package_manager=profile.package_manager,
+                     commands=profile.commands)
+
+        context = {
+            "task": task,
+            "project": {
+                "kind": profile.kind,
+                "language": profile.language,
+                "framework": profile.framework,
+                "package_manager": profile.package_manager,
+                "commands": profile.commands,
+            },
+            "project_files": project_snapshot(project_root),
+        }
+
+        plan_messages = [
+            {"role": "system", "content": (
+                SYSTEM_PROMPT + "\n" + plan_instructions() +
+                " You are in the planning phase. Do not call implementation tools."
+            )},
+            {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+        ]
+
+        plan = None
+        for _ in range(min(5, self.settings.max_iterations)):
+            response = self.llm.chat(plan_messages)
+            state.record("plan_response", response.content)
+            try:
+                plan = parse_plan(response.content)
+                break
+            except PlanError as exc:
+                state.record("plan_error", str(exc))
+                plan_messages += [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": "Invalid plan: " + str(exc) + ". " + plan_instructions()},
+                ]
+
+        if plan is None:
+            state.status = TaskStatus.FAILED
+            state.record("plan_failed", "Could not produce a valid execution plan.")
+            return state
+
+        state.record("plan_created", "Execution plan created.", plan=plan.as_dict())
+
+        if approval_callback is None:
+            state.status = TaskStatus.FAILED
+            state.record("approval_required", "Execution stopped: explicit plan approval is required.")
+            return state
+
+        approved = bool(approval_callback(plan))
+        state.record("plan_approval", "Execution plan approved." if approved else "Execution plan rejected.",
+                     approved=approved)
+        if not approved:
+            state.status = TaskStatus.FAILED
+            return state
+
+        state.record("execution_started", "Approved plan execution started.")
 
         messages = [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT + "\n" + tool_instructions(),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "task": task,
-                        "project": {
-                            "kind": profile.kind,
-                            "language": profile.language,
-                            "framework": profile.framework,
-                            "package_manager": profile.package_manager,
-                            "commands": profile.commands,
-                        },
-                        "project_files": project_snapshot(project_root),
-                    },
-                    ensure_ascii=False,
-                ),
-            },
+            {"role": "system", "content": (
+                SYSTEM_PROMPT + "\n" + tool_instructions() +
+                "\nThe following execution plan was explicitly approved by the user. "
+                "Follow it. If the plan becomes impossible or a requirement changes, stop and report it."
+            )},
+            {"role": "user", "content": json.dumps({
+                **context,
+                "approved_plan": plan.as_dict(),
+                "instruction": "Execute the approved plan. Do not deviate without asking for approval.",
+            }, ensure_ascii=False)},
         ]
 
         for iteration in range(1, self.settings.max_iterations + 1):
             state.iteration = iteration
             state.record("iteration_started", f"Starting iteration {iteration}.")
-
             response = self.llm.chat(messages)
             state.record("model_response", response.content)
 
@@ -204,71 +249,38 @@ class AgentLoop:
                 state.record("model_error", str(exc))
                 messages += [
                     {"role": "assistant", "content": response.content},
-                    {
-                        "role": "user",
-                        "content": "Invalid tool call: " + str(exc) + ". " + tool_instructions(),
-                    },
+                    {"role": "user", "content": "Invalid tool call: " + str(exc) + ". " + tool_instructions()},
                 ]
                 continue
 
             if action.tool == "finish":
                 verification = self._verify_completion(project_root)
-                state.record(
-                    "verification",
-                    "Completion verification executed.",
-                    verified=verification["verified"],
-                    checks=verification["checks"],
-                )
+                state.record("verification", "Completion verification executed.",
+                             verified=verification["verified"], checks=verification["checks"])
                 if verification["verified"]:
                     state.status = TaskStatus.COMPLETED
                     state.record("completed", action.arguments["reason"])
                     return state
-
-                state.record(
-                    "verification_failed",
-                    "Completion was rejected because verification did not pass.",
-                )
+                state.record("verification_failed", "Completion was rejected because verification did not pass.")
                 messages += [
                     {"role": "assistant", "content": response.content},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "verification": verification,
-                                "instruction": (
-                                    "Do not finish yet. Diagnose the failed checks, "
-                                    "make the necessary changes, and run the relevant "
-                                    "checks again."
-                                ),
-                            },
-                            ensure_ascii=False,
-                        ),
-                    },
+                    {"role": "user", "content": json.dumps({
+                        "verification": verification,
+                        "instruction": "Do not finish yet. Diagnose failed checks, make necessary changes, and run checks again.",
+                    }, ensure_ascii=False)},
                 ]
                 continue
 
             try:
                 result = self._execute(project_root, action)
             except Exception as exc:
-                result = json.dumps(
-                    {
-                        "ok": False,
-                        "error": type(exc).__name__,
-                        "message": str(exc),
-                    },
-                    ensure_ascii=False,
-                )
+                result = json.dumps({"ok": False, "error": type(exc).__name__, "message": str(exc)},
+                                    ensure_ascii=False)
 
             state.record("tool_result", result)
             messages += [
                 {"role": "assistant", "content": response.content},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"tool_result": result},
-                        ensure_ascii=False,
-                    ),
-                },
+                {"role": "user", "content": json.dumps({"tool_result": result}, ensure_ascii=False)},
             ]
 
         state.status = TaskStatus.MAX_ITERATIONS
