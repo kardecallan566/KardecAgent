@@ -14,6 +14,7 @@ class RecoveryResult:
     rolled_back_files: tuple[str, ...] = ()
     conflict_paths: tuple[str, ...] = ()
     error: str | None = None
+    resume_step: int = 1
 
 
 class RecoveryManager:
@@ -108,17 +109,26 @@ class RecoveryManager:
                 error=str(exc),
             )
 
+        completed_steps = [
+            int(event.data["step"])
+            for event in state.events
+            if event.event_type == "plan_step_completed"
+            and isinstance(event.data.get("step"), int)
+        ]
+        resume_step = max(completed_steps, default=0) + 1
         state.record(
             "recovery_completed",
             "Audited workspace changes were recovered successfully.",
             rolled_back_events=rolled_back_events,
             rolled_back_files=rolled_back_files,
             subtask_id=subtask_id,
+            resume_step=resume_step,
         )
         return RecoveryResult(
             True,
             tuple(rolled_back_events),
             tuple(rolled_back_files),
+            resume_step=resume_step,
         )
 
     @staticmethod
