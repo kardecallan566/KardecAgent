@@ -7,11 +7,13 @@ from .search import search_text
 from .patch import PatchResult, apply_unified_patch
 from .terminal import CommandResult, is_command_allowed, is_command_blocked, run_command
 from .web import WebPage, WebResult, fetch_web_page, search_web
+from .workspace import FileSnapshot, WorkspaceSnapshot, git_has_rename_or_copy
 
 __all__ = [
     "ProjectFilesystem", "GitResult", "git_status", "git_diff", "git_log",
     "git_is_repo", "git_current_branch", "git_has_uncommitted_changes", "git_changed_paths", "git_changed_fingerprints",
     "create_checkpoint", "rollback_to", "search_text", "PatchResult", "apply_unified_patch", "CommandResult",
     "is_command_allowed", "is_command_blocked", "run_command",
-    "WebPage", "WebResult", "search_web", "fetch_web_page",
+    "WebPage", "WebResult", "search_web", "fetch_web_page", "FileSnapshot",
+    "WorkspaceSnapshot", "git_has_rename_or_copy",
 ]
