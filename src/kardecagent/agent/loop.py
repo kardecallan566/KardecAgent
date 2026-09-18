@@ -40,7 +40,28 @@ class AgentLoop:
         self.settings = settings
 
     def _run_check(self, root: Path, kind: str) -> dict:
-        if kind == "dependency_audit":\n            discovered = discover_audit_command(root)\n            if not discovered:\n                return {"kind": kind, "available": False}\n            ecosystem, command = discovered\n            result = run_command(root, command, timeout=self.settings.command_timeout_seconds, max_output_chars=self.settings.max_command_output_chars)\n            audit = summarize_audit(ecosystem, result.stdout, result.stderr, result.returncode, result.timed_out)\n            return {"kind": kind, "available": audit.available, "ecosystem": ecosystem, "command": command, "passed": audit.passed, "summary": audit.summary, "output": audit.raw_output}\n\n        if kind == "security":
+        if kind == "dependency_audit":
+            discovered = discover_audit_command(root)
+            if not discovered:
+                return {"kind": kind, "available": False}
+            ecosystem, command = discovered
+            result = run_command(
+                root, command,
+                timeout=self.settings.command_timeout_seconds,
+                max_output_chars=self.settings.max_command_output_chars,
+            )
+            audit = summarize_audit(
+                ecosystem, result.stdout, result.stderr,
+                result.returncode, result.timed_out,
+            )
+            return {
+                "kind": kind, "available": audit.available,
+                "ecosystem": ecosystem, "command": command,
+                "passed": audit.passed, "summary": audit.summary,
+                "output": audit.raw_output,
+            }
+
+        if kind == "security":
             result = scan_project(root)
             return {"kind": kind, "available": True, **result.as_dict()}
 
@@ -50,10 +71,8 @@ class AgentLoop:
                 return {"kind": kind, "available": False, "project_kind": profile.kind}
             result = validate_project(root, profile.kind)
             return {
-                "kind": kind,
-                "available": True,
-                "project_kind": profile.kind,
-                **result.as_dict(),
+                "kind": kind, "available": True,
+                "project_kind": profile.kind, **result.as_dict(),
             }
 
         command = discover_command(root, kind)
@@ -61,19 +80,14 @@ class AgentLoop:
             return {"kind": kind, "available": False}
 
         result = run_command(
-            root,
-            command,
+            root, command,
             timeout=self.settings.command_timeout_seconds,
             max_output_chars=self.settings.max_command_output_chars,
         )
         return {
-            "kind": kind,
-            "available": True,
-            "command": command,
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "timed_out": result.timed_out,
+            "kind": kind, "available": True, "command": command,
+            "returncode": result.returncode, "stdout": result.stdout,
+            "stderr": result.stderr, "timed_out": result.timed_out,
             "passed": result.returncode == 0 and not result.timed_out,
         }
 
@@ -140,6 +154,8 @@ class AgentLoop:
             return json.dumps(fs.list_files(args.get("limit", 500)), ensure_ascii=False)
         if action.tool == "read_file":
             return fs.read_file(args["path"])
+        if action.tool == "search_web":
+            return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
         if action.tool == "search_web":
             return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
         if action.tool == "search_files":
