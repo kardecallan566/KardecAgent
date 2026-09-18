@@ -19,7 +19,7 @@ from ..tools import (
     search_text,
 )
 from .state import TaskState, TaskStatus
-from .plan import PlanError, PlanTracker, parse_plan, plan_instructions
+from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan, plan_instructions
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
 
 
@@ -253,6 +253,56 @@ class AgentLoop:
                 messages += [
                     {"role": "assistant", "content": response.content},
                     {"role": "user", "content": "Invalid tool call: " + str(exc) + ". " + tool_instructions()},
+                ]
+                continue
+
+            if action.tool == "request_plan_change":
+                try:
+                    proposed_plan = parse_plan(json.dumps(action.arguments["plan"], ensure_ascii=False))
+                except PlanError as exc:
+                    state.record("plan_change_error", str(exc))
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": "Invalid proposed plan: " + str(exc)},
+                    ]
+                    continue
+
+                state.record("plan_change_proposed", "Model proposed a replacement execution plan.",
+                             previous_plan=plan.as_dict(), proposed_plan=proposed_plan.as_dict())
+
+                if approval_callback is None:
+                    state.status = TaskStatus.FAILED
+                    state.record("approval_required", "Plan change requires explicit user approval.")
+                    return state
+
+                changed = bool(approval_callback(proposed_plan))
+                state.record("plan_change_approval",
+                             "Replacement plan approved." if changed else "Replacement plan rejected.",
+                             approved=changed)
+
+                if not changed:
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "plan_change": "rejected",
+                            "instruction": "Continue using the currently approved plan. Do not deviate.",
+                            "plan_progress": tracker.as_dict(),
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
+
+                plan = proposed_plan
+                tracker = PlanTracker(plan)
+                state.record("plan_changed", "Approved replacement plan is now active.",
+                             plan=plan.as_dict(), progress=tracker.as_dict())
+                messages += [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": json.dumps({
+                        "plan_change": "approved",
+                        "approved_plan": plan.as_dict(),
+                        "plan_progress": tracker.as_dict(),
+                        "instruction": "Use only the newly approved plan. Start at its active step.",
+                    }, ensure_ascii=False)},
                 ]
                 continue
 
