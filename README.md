@@ -54,3 +54,4 @@ $env:KARDEC_WEB_DENY_DOMAINS="example-malicious-site.com"
 An allowlist restricts both search results and page retrieval to matching domains/subdomains. A denylist always blocks matching domains. Redirect destinations are checked again, so a permitted source cannot redirect the agent into a blocked destination.
 
 Web content remains untrusted data even when it comes from an official or repository domain. It must never override the user's approved plan, system policy, security controls, or tool restrictions.
+\n\n### Terminal Safety\n\nTerminal execution does not invoke a shell. Commands are parsed into an argv list, shell operators such as `&&`, `||`, `;`, pipes, redirection, and cmd escaping are rejected outside quoted arguments, and the executable must pass the configured development-command allowlist. Shell executables such as PowerShell, cmd, bash, and WSL are not allowed through the terminal tool. Timeouts and bounded stdout/stderr remain enabled.\n
