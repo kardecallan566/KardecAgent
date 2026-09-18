@@ -76,6 +76,7 @@ class RecoveryManager:
             if int(item[1].data.get("plan_step", 0)) > last_completed_step
         ]
         if not candidates:
+            resume_step = last_completed_step + 1
             state.record(
                 "recovery_skipped",
                 "Audited changes are limited to already completed plan steps; no rollback is required.",
@@ -83,8 +84,24 @@ class RecoveryManager:
                 iteration=iteration,
                 min_event_index=min_event_index,
                 last_completed_step=last_completed_step,
+                resume_step=resume_step,
             )
-            return RecoveryResult(True, resume_step=last_completed_step + 1)
+            if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
+                state.transition(
+                    TaskStatus.RESUMING,
+                    reason="Recovery found no unfinished changes to roll back.",
+                    resume_step=resume_step,
+                )
+                state.record(
+                    "recovery_completed",
+                    "Recovery completed without rollback because the last consistent plan step is intact.",
+                    subtask_id=subtask_id,
+                    resume_step=resume_step,
+                    rolled_back_events=[],
+                    rolled_back_files=[],
+                )
+                self._persist(persistence_callback, state)
+            return RecoveryResult(True, resume_step=resume_step)
 
         if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
             state.transition(TaskStatus.RECOVERING, reason="Starting conflict-safe recovery.")
