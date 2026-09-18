@@ -7,6 +7,7 @@ from typing import Callable
 from ..config import Settings
 from ..project import detect_project, discover_command, project_snapshot, scan_project, validate_project
 from ..project.dependencies import discover_audit_command, summarize_audit
+from ..project.test_results import format_for_model, parse_test_result
 from ..tools import (
     ProjectFilesystem, apply_unified_patch, git_diff, git_has_uncommitted_changes,
     git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
@@ -87,11 +88,11 @@ class AgentExecutor:
         if not command:
             return {"kind": kind, "available": False}
         result = run_command(root, command, timeout=self.settings.command_timeout_seconds,
-                             max_output_chars=self.settings.max_command_output_chars)
-        return {"kind": kind, "available": True, "command": command,
-                "returncode": result.returncode, "stdout": result.stdout,
-                "stderr": result.stderr, "timed_out": result.timed_out,
-                "passed": result.returncode == 0 and not result.timed_out}
+                                 max_output_chars=self.settings.max_command_output_chars)
+        parsed = parse_test_result(kind, result.stdout, result.stderr,
+                                   result.returncode, result.timed_out)
+        return {"kind": kind, "available": parsed.available, "command": command,
+                **format_for_model(parsed)}
 
     def verify(self, root: Path, *, security_required: bool = False) -> dict:
         checks = [self._run_check(root, kind) for kind in CHECK_KINDS]
