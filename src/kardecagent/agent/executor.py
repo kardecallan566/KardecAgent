@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from typing import Callable
@@ -12,7 +13,7 @@ from ..tools import (
     ProjectFilesystem, apply_unified_patch, git_diff, git_has_uncommitted_changes,
     git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
     fetch_web_page,
-    WorkspaceSnapshot, git_has_rename_or_copy,
+    WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change,
 )
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
 from .security import assess_security, security_requirements_for
@@ -152,6 +153,7 @@ class AgentExecutor:
                 "exists_after": bool(after_item and after_item.exists),
                 "sha256_before": before_item.digest if before_item else None,
                 "sha256_after": after_item.digest if after_item else None,
+                "before_data_b64": base64.b64encode(before_item.data).decode("ascii") if before_item and before_item.data is not None else None,
                 "tool": tool,
                 "plan_step": plan_step,
                 "subtask": subtask,
@@ -183,7 +185,7 @@ class AgentExecutor:
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
             fs.write_file(args["path"], args["content"])
-            integrity_after = self._workspace_snapshot(root, bool(scope))
+            integrity_after = self._workspace_snapshot(root, True)
             if state is not None and integrity_before is not None and integrity_after is not None:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
@@ -234,7 +236,7 @@ class AgentExecutor:
                     )
                 if state is not None and snapshot is not None:
                     self._record_integrity(state, snapshot, after_snapshot, changed,
-                                          tool=action.tool, plan_step=action.plan_step, subtask=True)
+                                          tool=action.tool, plan_step=action.plan_step, subtask=bool(scope))
                 if changed:
                     return json.dumps({
                         **result.__dict__,
@@ -251,6 +253,18 @@ class AgentExecutor:
         if action.tool == "git_log":
             return json.dumps(git_log(root, args.get("limit", 10)).__dict__, ensure_ascii=False)
         raise ToolCallError("unsupported tool: " + action.tool)
+
+    def rollback_operation(self, root: Path, state: TaskState, event_index: int) -> TaskState:
+        """Rollback one audited integrity event with a conflict guard."""
+        events = [event for event in state.events if event.event_type == "integrity_change"]
+        if event_index < 0 or event_index >= len(events):
+            raise ValueError("invalid integrity event index")
+        event = events[event_index]
+        changes = event.data.get("changes", [])
+        for change in reversed(changes):
+            rollback_file_change(root, change)
+        state.record("integrity_rollback", "Audited operation rolled back safely.", event_index=event_index, changes=changes)
+        return state
 
     @staticmethod
     def _patch_paths(patch: str) -> list[str]:
