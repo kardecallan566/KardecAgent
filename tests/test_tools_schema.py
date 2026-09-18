@@ -13,3 +13,13 @@ def test_invalid_json():
     with pytest.raises(ToolCallError, match='invalid JSON'): parse_tool_call('not json')
 def test_fence_rejected():
     with pytest.raises(ToolCallError, match='code fences'): parse_tool_call('```json\\n{}\\n```')
+
+def test_validate_kind():
+    assert parse_tool_call(
+        '{"tool":"run_checks","arguments":{"kind":"validate"}}'
+    ).arguments["kind"] == "validate"
+
+
+def test_invalid_check_kind():
+    with pytest.raises(ToolCallError, match="must be one of"):
+        parse_tool_call('{"tool":"run_checks","arguments":{"kind":"deploy"}}')
