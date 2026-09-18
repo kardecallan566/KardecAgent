@@ -130,10 +130,18 @@ class AgenticResult:
     files_changed: tuple[str, ...]
     test_output: str
     error: str = ""
+    attempts: int = 0
+    tool_calls: int = 0
+    recovery_attempts: int = 0
+    first_attempt_passed: bool = False
 
 
 _FILE_RE = re.compile(
-    r"(?ms)^===\s*FILE:\s*([^\r\n]+)\s*===\s*\n(.*?)^===\s*END FILE\s*===\s*$"
+    r"(?ms)^===\\s*FILE:\\s*([^\\r\\n]+)\\s*===\\s*\\n(.*?)^===\\s*END FILE\\s*===\\s*$"
+)
+
+_ACTION_RE = re.compile(
+    r"(?ms)^===\\s*(READ|WRITE|RUN):\\s*([^\\r\\n]+?)\\s*===\\s*\\n(.*?)^===\\s*END \\1\\s*===\\s*$"
 )
 
 
@@ -149,16 +157,24 @@ def _parse_files(text: str) -> dict[str, str]:
     return files
 
 
+def _safe_relative_path(path: str) -> str:
+    normalized = path.strip().replace("\\", "/")
+    if not normalized or normalized.startswith("/") or ":" in normalized or ".." in Path(normalized).parts:
+        raise ValueError(f"Unsafe benchmark path: {path!r}")
+    return normalized
+
+
 def _write_files(root: Path, files: dict[str, str]) -> None:
     root = root.resolve()
     for relative, content in files.items():
-        target = (root / relative).resolve()
+        target = (root / _safe_relative_path(relative)).resolve()
         if root not in target.parents:
             raise ValueError(f"Benchmark attempted to escape fixture: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
 
+def _fixture_cases() -> tuple[AgenticCase, ...]:
 def _fixture_cases() -> tuple[AgenticCase, ...]:
     return (
         AgenticCase(
@@ -493,69 +509,197 @@ def _prepare_fixture(root: Path, case: AgenticCase) -> None:
         target.write_text(content, encoding="utf-8")
 
 
+def _project_snapshot(root: Path) -> str:
+    files = []
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts:
+            files.append(path.relative_to(root).as_posix())
+    return "\\n".join(files)
+
+
+def _read_project_file(root: Path, relative: str) -> str:
+    target = (root / _safe_relative_path(relative)).resolve()
+    if root.resolve() not in target.parents:
+        raise ValueError(f"Read attempted to escape fixture: {relative}")
+    if not target.is_file():
+        raise FileNotFoundError(f"Project file not found: {relative}")
+    return target.read_text(encoding="utf-8")
+
+
+def _run_benchmark_test(root: Path, case: AgenticCase) -> tuple[int, str]:
+    import os
+    env = dict(os.environ)
+    src = root / "src"
+    env["PYTHONPATH"] = str(src) + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        case.test_command,
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    output = (proc.stdout + "\\n" + proc.stderr).strip()[-6000:]
+    return proc.returncode, output
+
+
+def _parse_agent_actions(text: str) -> list[tuple[str, str, str]]:
+    actions = []
+    for match in _ACTION_RE.finditer(text):
+        kind = match.group(1).upper()
+        target = match.group(2).strip()
+        body = match.group(3)
+        actions.append((kind, target, body))
+    if not actions:
+        raise ValueError(
+            "Model returned no tool actions. Expected READ, WRITE, RUN, or DONE blocks."
+        )
+    return actions
+
+
 def run_agentic_benchmark(
     client: OllamaClient,
     *,
     cases: tuple[AgenticCase, ...] | None = None,
+    max_steps: int = 8,
 ) -> list[AgenticResult]:
+    """Run a real tool-feedback coding loop in an isolated fixture.
+
+    The model must explicitly inspect files, write changes, run the fixture tests,
+    and recover from failures using the returned test output.
+    """
     results: list[AgenticResult] = []
     for case in cases or _fixture_cases():
         started = perf_counter()
         with tempfile.TemporaryDirectory(prefix="kardecagent-bench-") as temp:
             root = Path(temp)
             _prepare_fixture(root, case)
-            eval_tokens = 0
-            tps = 0.0
-            files: dict[str, str] = {}
+            total_tokens = 0
+            weighted_tps = 0.0
+            tps_samples = 0
+            tool_calls = 0
+            attempts = 0
+            recovery_attempts = 0
+            first_attempt_passed = False
+            changed: set[str] = set()
             output = ""
+            error = ""
+            passed = False
+            messages: list[dict[str, str]] = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an autonomous coding benchmark agent. You have a small "
+                        "tool protocol and MUST use it. Never output markdown or explanations. "
+                        "Inspect before editing. Available actions:\n"
+                        "=== READ: relative/path ===\n=== END READ ===\n"
+                        "=== WRITE: relative/path ===\n<complete file contents>\n=== END WRITE ===\n"
+                        "=== RUN: python -m pytest -q ===\n=== END RUN ===\n"
+                        "=== DONE: success ===\n=== END DONE ===\n"
+                        "Only use the exact test command shown. Do not access files outside the project. "
+                        "After a failed test, inspect the traceback, fix the code, and run tests again. "
+                        "Finish with DONE only after the tests pass."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Task: {case.prompt}\n\n"
+                        "Project files:\n"
+                        f"{_project_snapshot(root)}\n\n"
+                        "Start by reading the files relevant to the task."
+                    ),
+                },
+            ]
             try:
-                response = client.chat(
-                    [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a coding benchmark. Inspect the project and return "
-                                "only complete FILE blocks. Do not use markdown fences or explanations."
-                            ),
-                        },
-                        {"role": "user", "content": case.prompt},
-                    ],
-                    temperature=0.0,
-                )
-                raw = response.raw
-                eval_tokens = int(raw.get("eval_count") or 0)
-                eval_duration_ns = int(raw.get("eval_duration") or 0)
-                tps = (
-                    eval_tokens / (eval_duration_ns / 1_000_000_000)
-                    if eval_tokens and eval_duration_ns
-                    else 0.0
-                )
-                files = _parse_files(response.content)
-                _write_files(root, files)
-                missing = [p for p in case.expected_files if not (root / p).exists()]
-                if missing:
-                    raise ValueError("Missing expected files: " + ", ".join(missing))
-                env = dict(__import__("os").environ)
-                src = root / "src"
-                env["PYTHONPATH"] = str(src) + __import__("os").pathsep + env.get("PYTHONPATH", "")
-                proc = subprocess.run(
-                    case.test_command,
-                    cwd=root,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    check=False,
-                )
-                passed = proc.returncode == 0 and case.verify(root)
-                output = (proc.stdout + "\n" + proc.stderr).strip()[-4000:]
-                results.append(AgenticResult(
-                    client.model, case.name, passed, perf_counter() - started,
-                    eval_tokens, tps, tuple(sorted(files)), output,
-                ))
+                for step in range(max_steps):
+                    response = client.chat(messages, temperature=0.0)
+                    raw = response.raw
+                    count = int(raw.get("eval_count") or 0)
+                    duration_ns = int(raw.get("eval_duration") or 0)
+                    total_tokens += count
+                    if count and duration_ns:
+                        sample_tps = count / (duration_ns / 1_000_000_000)
+                        weighted_tps += sample_tps
+                        tps_samples += 1
+
+                    actions = _parse_agent_actions(response.content)
+                    messages.append({"role": "assistant", "content": response.content})
+
+                    step_had_test = False
+                    step_test_passed = False
+                    feedback: list[str] = []
+
+                    for kind, target, body in actions:
+                        tool_calls += 1
+                        if kind == "READ":
+                            content = _read_project_file(root, target)
+                            feedback.append(f"READ {target}:\\n{content}")
+                        elif kind == "WRITE":
+                            relative = _safe_relative_path(target)
+                            _write_files(root, {relative: body})
+                            changed.add(relative)
+                            feedback.append(f"WRITE {relative}: OK")
+                        elif kind == "RUN":
+                            if target.strip() != "python -m pytest -q":
+                                raise ValueError(f"Unsupported benchmark command: {target}")
+                            attempts += 1
+                            step_had_test = True
+                            code, output = _run_benchmark_test(root, case)
+                            step_test_passed = code == 0 and case.verify(root)
+                            feedback.append(
+                                f"RUN {target}: {'PASS' if step_test_passed else 'FAIL'}\\n{output}"
+                            )
+                            if step_test_passed:
+                                if attempts == 1:
+                                    first_attempt_passed = True
+                                passed = True
+                            else:
+                                recovery_attempts = max(recovery_attempts, attempts - 1)
+                        elif kind == "DONE":
+                            if not passed:
+                                raise ValueError("Model declared DONE before tests passed.")
+                            passed = True
+                        else:
+                            raise ValueError(f"Unsupported action: {kind}")
+
+                    if passed:
+                        break
+
+                    if not step_had_test:
+                        feedback.append(
+                            "No test was run. Continue by inspecting/editing the project and "
+                            "then run the exact pytest command."
+                        )
+                    elif not step_test_passed:
+                        feedback.append(
+                            "Tests failed. Treat the output above as the debugging feedback, "
+                            "inspect the relevant files, apply a fix, and run pytest again."
+                        )
+                    messages.append({"role": "user", "content": "\\n\\n".join(feedback)})
+
+                if not passed:
+                    error = f"Agent did not reach a passing test state within {max_steps} steps."
             except Exception as exc:
-                results.append(AgenticResult(
-                    client.model, case.name, False, perf_counter() - started,
-                    eval_tokens, tps, tuple(sorted(files)), output, str(exc),
-                ))
+                error = str(exc)
+
+            results.append(
+                AgenticResult(
+                    model=client.model,
+                    case=case.name,
+                    passed=passed,
+                    elapsed_seconds=perf_counter() - started,
+                    eval_tokens=total_tokens,
+                    tokens_per_second=(weighted_tps / tps_samples if tps_samples else 0.0),
+                    files_changed=tuple(sorted(changed)),
+                    test_output=output,
+                    error=error,
+                    attempts=attempts,
+                    tool_calls=tool_calls,
+                    recovery_attempts=recovery_attempts,
+                    first_attempt_passed=first_attempt_passed,
+                )
+            )
     return results
+
