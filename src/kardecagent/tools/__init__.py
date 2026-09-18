@@ -7,7 +7,7 @@ from .search import search_text
 from .patch import PatchResult, apply_unified_patch
 from .terminal import CommandResult, is_command_allowed, is_command_blocked, run_command
 from .web import WebPage, WebResult, fetch_web_page, search_web
-from .workspace import FileSnapshot, WorkspaceSnapshot, git_has_rename_or_copy
+from .workspace import FileSnapshot, WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change
 
 __all__ = [
     "ProjectFilesystem", "GitResult", "git_status", "git_diff", "git_log",
@@ -15,5 +15,5 @@ __all__ = [
     "create_checkpoint", "rollback_to", "search_text", "PatchResult", "apply_unified_patch", "CommandResult",
     "is_command_allowed", "is_command_blocked", "run_command",
     "WebPage", "WebResult", "search_web", "fetch_web_page", "FileSnapshot",
-    "WorkspaceSnapshot", "git_has_rename_or_copy",
+    "WorkspaceSnapshot", "git_has_rename_or_copy", "rollback_file_change",
 ]
