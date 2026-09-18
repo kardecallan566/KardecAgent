@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..tools.workspace import rollback_file_change
-from .state import TaskState
+from .state import TaskState, TaskStatus
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,11 @@ class RecoveryManager:
             )
             return RecoveryResult(True)
 
+        if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
+            state.transition(TaskStatus.RECOVERING, reason="Starting conflict-safe recovery.")
+        elif state.status is not TaskStatus.RECOVERING:
+            raise ValueError(f"cannot recover task from status {state.status.value}")
+
         state.record(
             "recovery_started",
             "Starting conflict-safe recovery of audited workspace changes.",
@@ -77,6 +82,7 @@ class RecoveryManager:
                 "Recovery blocked because audited after-state hashes no longer match.",
                 conflict_paths=conflicts,
             )
+            state.transition(TaskStatus.FAILED, reason="Recovery blocked by workspace conflicts.")
             return RecoveryResult(False, conflict_paths=tuple(conflicts),
                                   error="recovery conflict: workspace changed after audit")
 
@@ -102,6 +108,7 @@ class RecoveryManager:
                 error=str(exc),
                 rolled_back_files=rolled_back_files,
             )
+            state.transition(TaskStatus.FAILED, reason="Recovery failed during rollback.")
             return RecoveryResult(
                 False,
                 tuple(rolled_back_events),
@@ -116,6 +123,8 @@ class RecoveryManager:
             and isinstance(event.data.get("step"), int)
         ]
         resume_step = max(completed_steps, default=0) + 1
+        state.transition(TaskStatus.RESUMING, reason="Recovery completed; task may resume.",
+                         resume_step=resume_step)
         state.record(
             "recovery_completed",
             "Audited workspace changes were recovered successfully.",
