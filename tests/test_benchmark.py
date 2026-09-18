@@ -31,3 +31,25 @@ def test_run_benchmark_collects_metrics():
     assert results[0].passed is True
     assert results[0].eval_tokens == 10
     assert results[0].tokens_per_second == 5.0
+
+
+def test_agentic_benchmark_has_real_coding_cases():
+    from kardecagent.llm.benchmark import _fixture_cases
+    cases = _fixture_cases()
+    assert len(cases) >= 8
+    assert any(c.test_command == ("python", "-m", "pytest", "-q") for c in cases)
+
+
+def test_agentic_file_parser_rejects_unsafe_paths():
+    import pytest
+    from kardecagent.llm.benchmark import _parse_files
+
+    with pytest.raises(ValueError):
+        _parse_files("=== FILE: ../escape.py ===\nprint(1)\n=== END FILE ===")
+
+
+def test_agentic_file_parser_accepts_complete_file_blocks():
+    from kardecagent.llm.benchmark import _parse_files
+
+    files = _parse_files("=== FILE: src/a.py ===\nprint('ok')\n=== END FILE ===")
+    assert files == {"src/a.py": "print('ok')\n"}
