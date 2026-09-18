@@ -198,7 +198,7 @@ class AgentExecutor:
             result = apply_unified_patch(root, args["patch"])
             if not result.applied:
                 raise ValueError(result.error or "Patch was not applied.")
-            integrity_after = self._workspace_snapshot(root, bool(scope))
+            integrity_after = self._workspace_snapshot(root, True)
             if state is not None and integrity_before is not None and integrity_after is not None:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
@@ -237,7 +237,8 @@ class AgentExecutor:
                     )
                 if state is not None and snapshot is not None:
                     self._record_integrity(state, snapshot, after_snapshot, changed,
-                                          tool=action.tool, plan_step=action.plan_step, subtask=bool(scope))
+                                          tool=action.tool, plan_step=action.plan_step, subtask=bool(scope),
+                                          subtask_id=subtask_id)
                 if changed:
                     return json.dumps({
                         **result.__dict__,
