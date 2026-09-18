@@ -137,11 +137,11 @@ class AgenticResult:
 
 
 _FILE_RE = re.compile(
-    r"(?ms)^===\\s*FILE:\\s*([^\\r\\n]+)\\s*===\\s*\\n(.*?)^===\\s*END FILE\\s*===\\s*$"
+    r"(?ms)^===\s*FILE:\s*([^\r\n]+)\s*===\s*\n(.*?)^===\s*END FILE\s*===\s*$"
 )
 
 _ACTION_RE = re.compile(
-    r"(?ms)^===\\s*(READ|WRITE|RUN):\\s*([^\\r\\n]+?)\\s*===\\s*\\n(.*?)^===\\s*END \\1\\s*===\\s*$"
+    r"(?ms)^===\s*(READ|WRITE|RUN):\s*([^\r\n]+?)\s*===\s*\n(.*?)^===\s*END \1\s*===\s*$"
 )
 
 
@@ -549,7 +549,7 @@ def _parse_agent_actions(text: str) -> list[tuple[str, str, str]]:
         actions.append(
             (match.start(), match.group(1).upper(), match.group(2).strip(), match.group(3))
         )
-    done_re = re.compile(r"(?m)^===\\s*DONE:\\s*([^\\r\\n]*)\\s*===\\s*$")
+    done_re = re.compile(r"(?m)^===\s*DONE:\s*([^\r\n]*)\s*===\s*$")
     for match in done_re.finditer(text):
         actions.append((match.start(), "DONE", match.group(1).strip(), ""))
     actions.sort(key=lambda item: item[0])
