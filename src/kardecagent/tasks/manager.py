@@ -58,6 +58,9 @@ class SubtaskManager:
             scope = self._paths(item.get("scope", []))
             dependencies = self._strings(item.get("dependencies", []), "dependencies")
             criteria = self._strings(item.get("completion_criteria", []), "completion_criteria")
+            plan_steps = item.get("plan_steps", [])
+            if not isinstance(plan_steps, list) or any(isinstance(x, bool) or not isinstance(x, int) or x < 1 for x in plan_steps):
+                raise SubtaskDecompositionError("plan_steps must be a list of positive integers")
             board.add(Subtask(
                 id=sid,
                 title=title.strip(),
@@ -65,6 +68,7 @@ class SubtaskManager:
                 scope=tuple(scope),
                 dependencies=tuple(dependencies),
                 completion_criteria=tuple(criteria),
+                plan_steps=tuple(plan_steps),
             ))
 
         self._validate_dependencies(board)
