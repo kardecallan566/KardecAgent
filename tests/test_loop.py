@@ -105,7 +105,7 @@ def test_approved_plan_starts_execution_and_checkpoint_after_approval(tmp_path: 
     )
     llm = FakeLLM([
         _plan(),
-        '{"tool":"finish","arguments":{"reason":"done"}}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["verified"]}}',
     ])
     state = AgentLoop(llm, Settings(max_iterations=1)).run(
         tmp_path, "do task", approval_callback=lambda plan: True
