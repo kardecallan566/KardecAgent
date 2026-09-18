@@ -109,7 +109,7 @@ def parse_command(command: str) -> ParsedCommand | None:
 
 
 def _strip_outer_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {\'"\', "\\'"}:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
 
