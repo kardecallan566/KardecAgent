@@ -13,6 +13,7 @@ class ExecutionPlan:
     steps: list[str]
     validation: list[str]
     risks: list[str] = field(default_factory=list)
+    completion_criteria: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {"summary": self.summary, "steps": self.steps, "validation": self.validation, "risks": self.risks}
@@ -23,6 +24,9 @@ class ExecutionPlan:
         lines.append("")
         lines.append("Validação:")
         lines.extend(f"- {item}" for item in self.validation)
+        lines.append("")
+        lines.append("Critérios de conclusão:")
+        lines.extend(f"- {item}" for item in self.completion_criteria)
         if self.risks:
             lines.extend(["", "Riscos / observações:"])
             lines.extend(f"- {item}" for item in self.risks)
@@ -77,13 +81,15 @@ def parse_plan(content: str) -> ExecutionPlan:
     if not isinstance(payload, dict): raise PlanError("plan must be a JSON object")
     summary, steps = payload.get("summary"), payload.get("steps")
     validation, risks = payload.get("validation", []), payload.get("risks", [])
+    completion_criteria = payload.get("completion_criteria", [])
     if not isinstance(summary, str) or not summary.strip(): raise PlanError("plan requires a non-empty summary")
     if not isinstance(steps, list) or not steps or not all(isinstance(x, str) and x.strip() for x in steps): raise PlanError("plan requires a non-empty list of textual steps")
     if not isinstance(validation, list) or not all(isinstance(x, str) and x.strip() for x in validation): raise PlanError("validation must be a list of textual checks")
     if not isinstance(risks, list) or not all(isinstance(x, str) and x.strip() for x in risks): raise PlanError("risks must be a list of textual notes")
-    return ExecutionPlan(summary.strip(), [x.strip() for x in steps], [x.strip() for x in validation], [x.strip() for x in risks])
+    if not isinstance(completion_criteria, list) or not completion_criteria or not all(isinstance(x, str) and x.strip() for x in completion_criteria): raise PlanError("completion_criteria must be a non-empty list of textual criteria")
+    return ExecutionPlan(summary.strip(), [x.strip() for x in steps], [x.strip() for x in validation], [x.strip() for x in risks], [x.strip() for x in completion_criteria])
 
 def plan_instructions() -> str:
     return ('Return ONLY JSON for the execution plan: {"summary":"...","steps":["..."],"validation":["..."],"risks":["..."]}. '
             'Create a concrete implementation plan based on the detected project and task. '
-            'Include files/components likely to be created or changed, implementation order, and how the result will be validated. Do not modify files while planning.')
+            'Include files/components likely to be created or changed, implementation order, how the result will be validated, and concrete completion criteria that can be checked from implementation evidence and automated validation. Do not modify files while planning.')
