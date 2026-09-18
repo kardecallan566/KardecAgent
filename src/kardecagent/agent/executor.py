@@ -240,6 +240,7 @@ class AgentExecutor:
         max_iterations: int | None = None, allow_plan_changes: bool = True,
         approval_callback: Callable | None = None,
         high_risk_approval_callback: Callable | None = None,
+        persistence_callback: Callable[[TaskState, ExecutionPlan], None] | None = None,
     ) -> TaskState:
         tracker = PlanTracker(plan)
         root = root.resolve()
@@ -272,6 +273,8 @@ class AgentExecutor:
         for iteration in range(1, limit + 1):
             state.iteration = iteration
             state.record("iteration_started", f"Starting iteration {iteration}.")
+            if persistence_callback is not None:
+                persistence_callback(state, plan)
             response = self.llm.chat(messages)
             state.record("model_response", response.content)
             try:
@@ -321,6 +324,8 @@ class AgentExecutor:
                 plan, tracker = proposed, PlanTracker(proposed)
                 state.record("plan_changed", "Approved replacement plan is now active.",
                              plan=plan.as_dict(), progress=tracker.as_dict())
+                if persistence_callback is not None:
+                    persistence_callback(state, plan)
                 continue
 
             if action.tool in {"write_file", "apply_patch", "run_command", "run_checks", "complete_step"}:
@@ -416,4 +421,6 @@ class AgentExecutor:
 
         state.status = TaskStatus.MAX_ITERATIONS
         state.record("max_iterations", "Maximum execution iterations reached.")
+        if persistence_callback is not None:
+            persistence_callback(state, plan)
         return state
