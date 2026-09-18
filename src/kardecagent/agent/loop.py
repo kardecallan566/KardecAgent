@@ -235,6 +235,7 @@ class AgentLoop:
             {"role": "user", "content": json.dumps({
                 **context,
                 "approved_plan": plan.as_dict(),
+                "completion_criteria": plan.completion_criteria,
                 "instruction": "Execute the approved plan step by step. Mutating actions must name the active plan_step. After each step, call complete_step with evidence. Do not deviate without asking for approval.",
                 "plan_progress": tracker.as_dict(),
             }, ensure_ascii=False)},
@@ -358,12 +359,34 @@ class AgentLoop:
                     ]
                     continue
 
+                evidence = action.arguments["criteria_evidence"]
+                criteria_count = len(plan.completion_criteria)
+                if len(evidence) != criteria_count:
+                    state.record("completion_criteria_failed", "Finish rejected: evidence must cover every completion criterion.",
+                                 expected=criteria_count, received=len(evidence))
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "error": "completion_criteria_incomplete",
+                            "completion_criteria": plan.completion_criteria,
+                            "received_evidence": len(evidence),
+                            "instruction": "Provide exactly one concrete evidence item for every completion criterion before finishing.",
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
+
                 verification = self._verify_completion(project_root)
+                verification["completion_criteria"] = [
+                    {"criterion": criterion, "evidence": evidence[index]}
+                    for index, criterion in enumerate(plan.completion_criteria)
+                ]
                 state.record("verification", "Completion verification executed.",
-                             verified=verification["verified"], checks=verification["checks"])
+                             verified=verification["verified"], checks=verification["checks"],
+                             completion_criteria=verification["completion_criteria"])
                 if verification["verified"]:
                     state.status = TaskStatus.COMPLETED
-                    state.record("completed", action.arguments["reason"])
+                    state.record("completed", action.arguments["reason"],
+                                 completion_criteria=verification["completion_criteria"])
                     return state
                 state.record("verification_failed", "Completion was rejected because verification did not pass.")
                 messages += [
