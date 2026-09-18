@@ -200,7 +200,33 @@ class Orchestrator:
                     rolled_back_files=list(recovery.rolled_back_files),
                     conflict_paths=list(recovery.conflict_paths),
                 )
-                if not recovery.recovered:
+                if recovery.recovered and recovery.rolled_back_events:
+                    result_state.record(
+                        "subtask_resume_retry_started",
+                        "Retrying the approved subtask plan from the last consistent step.",
+                        resume_step=recovery.resume_step,
+                    )
+                    result_state = self.agent_loop.execute_approved_plan(
+                        project_root,
+                        f"{parent_task} :: {subtask.objective}",
+                        subplan,
+                        result_state,
+                        context={
+                            "parent_task": parent_task,
+                            "parent_plan": parent_plan.as_dict(),
+                            "subtask": subtask.as_dict(),
+                        },
+                        allowed_scope=subtask.scope,
+                        max_iterations=self.settings.max_iterations,
+                        allow_plan_changes=False,
+                        resume_step=recovery.resume_step,
+                    )
+                    summary = (
+                        "Subtask retry completed and verified."
+                        if result_state.status is TaskStatus.COMPLETED
+                        else f"Subtask retry stopped with status {result_state.status.value}."
+                    )
+                elif not recovery.recovered:
                     summary = (
                         f"Subtask stopped with status {result_state.status.value}; "
                         "recovery was blocked by workspace conflicts."
@@ -208,7 +234,7 @@ class Orchestrator:
                 else:
                     summary = (
                         f"Subtask stopped with status {result_state.status.value}; "
-                        "audited changes were rolled back."
+                        "there were no audited changes to retry."
                     )
             else:
                 summary = "Subtask completed and verified."
