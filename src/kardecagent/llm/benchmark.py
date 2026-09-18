@@ -389,6 +389,10 @@ def run_agentic_benchmark(
         with tempfile.TemporaryDirectory(prefix="kardecagent-bench-") as temp:
             root = Path(temp)
             _prepare_fixture(root, case)
+            eval_tokens = 0
+            tps = 0.0
+            files: dict[str, str] = {}
+            output = ""
             try:
                 response = client.chat(
                     [
@@ -416,9 +420,13 @@ def run_agentic_benchmark(
                 missing = [p for p in case.expected_files if not (root / p).exists()]
                 if missing:
                     raise ValueError("Missing expected files: " + ", ".join(missing))
+                env = dict(__import__("os").environ)
+                src = root / "src"
+                env["PYTHONPATH"] = str(src) + __import__("os").pathsep + env.get("PYTHONPATH", "")
                 proc = subprocess.run(
                     case.test_command,
                     cwd=root,
+                    env=env,
                     capture_output=True,
                     text=True,
                     timeout=60,
@@ -433,6 +441,6 @@ def run_agentic_benchmark(
             except Exception as exc:
                 results.append(AgenticResult(
                     client.model, case.name, False, perf_counter() - started,
-                    0, 0.0, (), "", str(exc),
+                    eval_tokens, tps, tuple(sorted(files)), output, str(exc),
                 ))
     return results
