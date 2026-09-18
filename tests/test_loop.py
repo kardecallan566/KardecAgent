@@ -128,3 +128,53 @@ def test_plan_scope_violation_is_rejected(tmp_path: Path):
     )
     assert any(event.event_type == "plan_scope_violation" for event in state.events)
     assert not (tmp_path / "x.txt").exists()
+
+
+def test_plan_change_requires_second_approval(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    responses = [
+        _plan(("Create file",)),
+        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"Expanded","steps":["Create file","Add test"],"validation":["Run tests"],"risks":["Extra scope"]}}}',
+    ]
+    approvals = []
+    llm = FakeLLM(responses)
+
+    def approve(plan):
+        approvals.append(plan.summary)
+        return len(approvals) == 1
+
+    state = AgentLoop(llm, Settings(max_iterations=2)).run(
+        tmp_path, "do task", approval_callback=approve
+    )
+    assert approvals == ["Do task", "Expanded"]
+    assert any(event.event_type == "plan_change_proposed" for event in state.events)
+    assert any(event.event_type == "plan_change_approval" for event in state.events)
+    assert any(event.event_type == "plan_changed" for event in state.events)
+
+
+def test_rejected_plan_change_keeps_original_plan(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    llm = FakeLLM([
+        _plan(("Original step",)),
+        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"Expanded","steps":["Original step","New step"],"validation":["Run tests"],"risks":[]}}}',
+    ])
+    approvals = []
+
+    def approve(plan):
+        approvals.append(plan.summary)
+        return len(approvals) == 1
+
+    state = AgentLoop(llm, Settings(max_iterations=2)).run(
+        tmp_path, "do task", approval_callback=approve
+    )
+    assert approvals == ["Do task", "Expanded"]
+    assert any(
+        event.event_type == "plan_change_approval" and event.data.get("approved") is False
+        for event in state.events
+    )
