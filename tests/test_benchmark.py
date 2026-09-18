@@ -237,9 +237,8 @@ def clamp(value, minimum, maximum):
     if minimum > maximum:
         raise ValueError("invalid range")
     return max(minimum, min(value, maximum))
-=== END WRITE ===
-=== RUN: python -m pytest -q ===
-=== END RUN ===""",
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
     case = _fixture_cases()[0]
     result = run_agentic_benchmark(client, cases=(case,), max_steps=4)[0]
@@ -275,17 +274,15 @@ def test_agentic_recovery_prompt_mentions_authoritative_failure():
         """=== WRITE: src/math_utils.py ===
 def clamp(value, minimum, maximum):
     return value
-=== END WRITE ===
-=== RUN: python -m pytest -q ===
-=== END RUN ===""",
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
         """=== WRITE: src/math_utils.py ===
 def clamp(value, minimum, maximum):
     if minimum > maximum:
         raise ValueError("invalid range")
     return max(minimum, min(value, maximum))
-=== END WRITE ===
-=== RUN: python -m pytest -q ===
-=== END RUN ===""",
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
     result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=2)[0]
     assert result.passed is True
