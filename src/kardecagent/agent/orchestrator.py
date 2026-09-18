@@ -272,7 +272,7 @@ class Orchestrator:
                     rolled_back_files=list(recovery.rolled_back_files),
                     conflict_paths=list(recovery.conflict_paths),
                 )
-                if recovery.recovered and recovery.rolled_back_events:
+                if recovery.recovered:
                     result_state.record(
                         "subtask_resume_retry_started",
                         "Retrying the approved subtask plan from the last consistent step.",
