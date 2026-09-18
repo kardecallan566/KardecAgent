@@ -6,6 +6,7 @@ import logging
 from .agent import AgentLoop
 from .config import Settings, resolve_project_root
 from .llm import LocalLLMClient, OllamaClient
+from .llm.benchmark import default_models, run_benchmark
 from .project import detect_project
 from .agent.persistence import TaskStore, PersistenceError
 
@@ -28,6 +29,9 @@ def build_parser():
     doctor.add_argument("--project", required=True)
     tasks = subs.add_parser("tasks", help="List persisted tasks for a project.")
     tasks.add_argument("--project", required=True)
+    benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
+    benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
+    benchmark.add_argument("--timeout", type=float, default=300.0)
     return parser
 
 
@@ -122,6 +126,59 @@ def _doctor(settings: Settings, root) -> int:
         return 1
 
 
+def _benchmark(settings: Settings, models_arg: str | None, timeout: float) -> int:
+    if settings.llm_provider != "ollama":
+        print("[FAIL] benchmark requires LLM provider 'ollama'.")
+        return 1
+    models = tuple(x.strip() for x in models_arg.split(",") if x.strip()) if models_arg else default_models()
+    client = OllamaClient(settings.ollama_base_url, models[0], timeout)
+    try:
+        installed = {item.get("name") for item in client.list_models() if isinstance(item, dict)}
+    except Exception as exc:
+        print(f"[FAIL] Ollama: {exc}")
+        return 1
+
+    print("KardecAgent Ollama benchmark")
+    print("Models:", ", ".join(models))
+    print()
+    overall: list[tuple[str, int, int, float, float]] = []
+    for model in models:
+        if model not in installed:
+            print(f"[SKIP] {model} - not installed")
+            continue
+        model_client = OllamaClient(settings.ollama_base_url, model, timeout)
+        try:
+            results = run_benchmark(model_client)
+        except Exception as exc:
+            print(f"[FAIL] {model} - {exc}")
+            continue
+        passed = sum(r.passed for r in results)
+        total = len(results)
+        elapsed = sum(r.elapsed_seconds for r in results)
+        tps = sum(r.tokens_per_second for r in results if r.tokens_per_second) / max(
+            1, sum(1 for r in results if r.tokens_per_second)
+        )
+        overall.append((model, passed, total, elapsed, tps))
+        for result in results:
+            status = "PASS" if result.passed else "FAIL"
+            print(
+                f"[{status}] {model} / {result.case} | "
+                f"{result.elapsed_seconds:.2f}s | {result.tokens_per_second:.2f} tok/s"
+            )
+        print()
+
+    if not overall:
+        print("No installed benchmark models were found.")
+        return 1
+
+    print("Summary")
+    for model, passed, total, elapsed, tps in overall:
+        print(f"- {model}: {passed}/{total} passed | {elapsed:.2f}s total | {tps:.2f} tok/s avg")
+    print()
+    print("Use the results to choose the model; no automatic winner is selected.")
+    return 0
+
+
 def _tasks(root) -> int:
     store = TaskStore(root)
     try:
@@ -156,6 +213,8 @@ def main() -> int:
     if args.command == "tasks":
         root = resolve_project_root(args.project)
         return _tasks(root)
+    if args.command == "benchmark":
+        return _benchmark(settings, args.models, args.timeout)
 
     if args.max_iterations is not None:
         settings = Settings(**{
