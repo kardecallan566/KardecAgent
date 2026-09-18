@@ -178,7 +178,7 @@ class AgentExecutor:
                     path for path in changed if not self._scope_allows(root, path, scope)
                 )
                 if outside:
-                    if git_has_rename_or_copy(root):
+                    if git_is_repo(root) and git_has_rename_or_copy(root):
                         raise RuntimeError(
                             "subtask scope violation: automatic remediation refused because "
                             "the working tree contains a rename/copy operation"
