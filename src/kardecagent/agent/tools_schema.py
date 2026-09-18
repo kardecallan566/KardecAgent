@@ -50,7 +50,7 @@ def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     if tool == "finish" and (not arguments.get("criteria_evidence") or not all(isinstance(x, str) and x.strip() for x in arguments["criteria_evidence"])):
         raise ToolCallError("criteria_evidence must be a non-empty list of textual evidence")
     if tool == "run_checks" and arguments.get("kind") not in {"test", "lint", "typecheck", "build", "validate", "security", "dependency_audit"}:
-        raise ToolCallError("argument 'kind' must be one of: test, lint, typecheck, build, validate, security")
+        raise ToolCallError("argument 'kind' must be one of: test, lint, typecheck, build, validate, security, dependency_audit")
     for key in ("limit", "max_results", "max_chars"):
         if key in arguments and arguments[key] < 1: raise ToolCallError(f"argument '{key}' must be at least 1")
     return arguments
