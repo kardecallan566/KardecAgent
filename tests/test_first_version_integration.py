@@ -142,10 +142,10 @@ def test_first_version_failure_rolls_back_and_retries_approved_plan(tmp_path: Pa
         [
             _plan("Create feature.py"),
             # First execution changes the real workspace but never completes the step.
-            _write_file("BROKEN = True\n"),
+            _write_file("BROKEN = True\\n"),
             _finish(),
-            # Retry starts from the last consistent step after recovery.
-            _write_file("VALUE = 42\n"),
+            # Recovery rolls the mutation back and retries the same approved step.
+            _write_file("VALUE = 42\\n"),
             _complete(),
             _finish(),
         ]
@@ -158,9 +158,47 @@ def test_first_version_failure_rolls_back_and_retries_approved_plan(tmp_path: Pa
     )
 
     assert state.status.value == "completed"
-    assert (tmp_path / "feature.py").read_text(encoding="utf-8") == "VALUE = 42\n"
+    assert (tmp_path / "feature.py").read_text(encoding="utf-8") == "VALUE = 42\\n"
     assert any(event.event_type == "recovery_started" for event in state.events)
     assert any(event.event_type == "recovery_completed" for event in state.events)
     assert any(event.event_type == "resume_retry_started" for event in state.events)
     assert any(event.event_type == "resume_retry_finished" for event in state.events)
+    assert any(
+        event.event_type == "recovery_file_rolled_back"
+        and event.data.get("path") == "feature.py"
+        for event in state.events
+    )
+    assert llm.calls == 6
+
+
+def test_first_version_recovery_preserves_completed_step_and_resumes_next_step(tmp_path: Path):
+    _python_fixture(tmp_path)
+    llm = DeterministicLLM(
+        [
+            _plan("Create feature.py", "Run validation"),
+            _write_file("VALUE = 42\\n", step=1),
+            _complete(step=1),
+            # The first execution reaches max iterations after a completed step.
+            '{"tool":"run_checks","arguments":{"kind":"test"},"plan_step":2}',
+            _complete(step=2),
+            _finish(),
+        ]
+    )
+
+    state = AgentLoop(llm, Settings(max_iterations=2)).run(
+        tmp_path,
+        "create feature.py with VALUE = 42",
+        approval_callback=lambda plan: True,
+    )
+
+    assert state.status.value == "completed"
+    assert (tmp_path / "feature.py").read_text(encoding="utf-8") == "VALUE = 42\\n"
+    assert any(event.event_type == "recovery_skipped" for event in state.events)
+    assert any(event.event_type == "recovery_completed" for event in state.events)
+    assert any(event.event_type == "resume_retry_started" for event in state.events)
+    assert any(
+        event.event_type == "plan_step_completed"
+        and event.data.get("step") == 1
+        for event in state.events
+    )
     assert llm.calls == 6
