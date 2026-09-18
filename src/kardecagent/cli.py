@@ -6,6 +6,8 @@ import logging
 from .agent import AgentLoop
 from .config import Settings, resolve_project_root
 from .llm import LocalLLMClient
+from .project import detect_project
+from .agent.persistence import TaskStore, PersistenceError
 
 
 def build_parser():
@@ -22,6 +24,10 @@ def build_parser():
     resume.add_argument("--project", required=True)
     resume.add_argument("--task", required=True)
     resume.add_argument("--max-iterations", type=int, default=None)
+    doctor = subs.add_parser("doctor", help="Check local project and LLM configuration without changing files.")
+    doctor.add_argument("--project", required=True)
+    tasks = subs.add_parser("tasks", help="List persisted tasks for a project.")
+    tasks.add_argument("--project", required=True)
     return parser
 
 
@@ -36,7 +42,6 @@ def _approve_plan(plan) -> bool:
         if answer in {"", "n", "nao", "não", "no"}:
             return False
         print("Resposta inválida. Digite 's' para aprovar ou Enter/N para rejeitar.")
-
 
 
 def _approve_high_risk(plan) -> bool:
@@ -55,42 +60,94 @@ def _approve_high_risk(plan) -> bool:
         print("Resposta inválida. Digite 's' para aprovar ou Enter/N para rejeitar.")
 
 
+def _doctor(settings: Settings, root) -> int:
+    profile = detect_project(root)
+    print("KardecAgent doctor")
+    print(f"[OK] Project: {root}")
+    print(f"[OK] Kind: {profile.kind}")
+    print(f"[OK] Language: {profile.language}")
+    print(f"[OK] Framework: {profile.framework or 'none'}")
+    print(f"[OK] Package manager: {profile.package_manager or 'none'}")
+    print(f"[OK] LLM base URL: {settings.llm_base_url}")
+    print(f"[OK] LLM model: {settings.llm_model}")
+
+    try:
+        client = LocalLLMClient(
+            settings.llm_base_url, settings.llm_model,
+            settings.llm_api_key, min(settings.llm_timeout_seconds, 10.0),
+        )
+        response = client.chat([
+            {"role": "system", "content": "Reply with exactly: KARDECAGENT_OK"},
+            {"role": "user", "content": "Health check."},
+        ], temperature=0.0)
+        if response.content.strip() != "KARDECAGENT_OK":
+            print("[FAIL] LLM responded, but health-check content was unexpected.")
+            return 1
+        print("[OK] Local LLM: reachable and responding")
+    except Exception as exc:
+        print(f"[FAIL] Local LLM: {exc}")
+        print("Configure KARDEC_LLM_BASE_URL/KARDEC_LLM_MODEL if your server differs.")
+        return 1
+    return 0
+
+
+def _tasks(root) -> int:
+    store = TaskStore(root)
+    try:
+        paths = sorted(store.directory.glob("*.json"))
+    except OSError as exc:
+        print(f"[FAIL] Cannot read task store: {exc}")
+        return 1
+    if not paths:
+        print("No persisted tasks.")
+        return 0
+    print("Persisted tasks:")
+    for path in paths:
+        task_id = path.stem
+        try:
+            state, plan, board = store.load(task_id)
+            print(f"- {task_id}: {state.status.value} | iteration={state.iteration} | plan={plan.summary}")
+            if board is not None:
+                print(f"  subtasks: {len(board.subtasks)} | completed={board.completed}")
+        except PersistenceError as exc:
+            print(f"- {task_id}: CORRUPT/UNREADABLE | {exc}")
+    return 0
+
+
 def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     args = build_parser().parse_args()
     settings = Settings.from_env()
 
-    if args.command in {"run", "resume"}:
-        if args.max_iterations is not None:
-            settings = Settings(**{
-                **settings.__dict__,
-                "max_iterations": args.max_iterations,
-            })
-
-        agent = AgentLoop(
-            LocalLLMClient(
-                settings.llm_base_url,
-                settings.llm_model,
-                settings.llm_api_key,
-                settings.llm_timeout_seconds,
-            ),
-            settings,
-        )
+    if args.command == "doctor":
         root = resolve_project_root(args.project)
-        if args.command == "run":
-            state = agent.run(
-                root, args.task,
-                approval_callback=_approve_plan,
-                high_risk_approval_callback=_approve_high_risk,
-            )
-        else:
-            state = agent.resume(root, args.task)
-        print(f"Status: {state.status.value}\nIterations: {state.iteration}")
-        for event in state.events[-10:]:
-            print(f"[{event.event_type}] {event.message}")
-        return 0 if state.status.value == "completed" else 1
+        return _doctor(settings, root)
+    if args.command == "tasks":
+        root = resolve_project_root(args.project)
+        return _tasks(root)
 
-    return 2
+    if args.max_iterations is not None:
+        settings = Settings(**{
+            **settings.__dict__,
+            "max_iterations": args.max_iterations,
+        })
+
+    agent = AgentLoop(
+        LocalLLMClient(
+            settings.llm_base_url,
+            settings.llm_model,
+            settings.llm_api_key,
+            settings.llm_timeout_seconds,
+        ),
+        settings,
+    )
+    root = resolve_project_root(args.project)
+    if args.command == "run":
+        state = agent.run(root, args.task, approval_callback=_approve_plan,
+                          high_risk_approval_callback=_approve_high_risk)
+    else:
+        state = agent.resume(root, args.task)
+    print(f"Status: {state.status.value}\nIterations: {state.iteration}")
+    for event in state.events[-10:]:
+        print(f"[{event.event_type}] {event.message}")
+    return 0 if state.status.value == "completed" else 1
