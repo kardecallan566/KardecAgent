@@ -161,3 +161,58 @@ Task: add the feature."""
     assert "Return ONLY complete modified files as FILE blocks" not in normalized
     assert "=== FILE: path ===" not in normalized
     assert "READ/WRITE/RUN" in normalized
+
+
+def test_agentic_benchmark_blocks_duplicate_reads_and_repeated_runs():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        "=== READ: src/cart.py ===\n=== END READ ===",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
+        """=== WRITE: src/cart.py ===
+def total(items):
+    if not items:
+        return 0
+    total = 0
+    for item in items:
+        total += item["price"] * item.get("quantity", 1)
+    return total
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+    ])
+    case = _fixture_cases()[1]
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=4)[0]
+
+    assert result.passed is True
+    assert result.runs == 2
+    assert result.writes == 1
+    assert result.recovery_attempts == 1
+    assert any("BLOCKED_AFTER_FAIL" in item for item in result.action_trace)
+
+
+def test_agentic_benchmark_rejects_duplicate_read_without_executing_it():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        "=== READ: src/math_utils.py ===\n=== END READ ===",
+        "=== READ: src/math_utils.py ===\n=== END READ ===",
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+    ])
+    case = _fixture_cases()[0]
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=4)[0]
+
+    assert result.passed is True
+    assert result.reads == 1
+    assert result.writes == 1
+    assert result.runs == 1
+    assert result.invalid_actions == 1
+    assert any(item.endswith("READ src/math_utils.py DUPLICATE") for item in result.action_trace)
