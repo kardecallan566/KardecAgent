@@ -149,6 +149,7 @@ class AgentLoop:
                     state.transition(TaskStatus.FAILED, reason="At least one required subtask did not complete.")
                     state.record("subtask_execution_failed", "At least one required subtask did not complete.")
                     return state
+                state.transition(TaskStatus.VERIFYING, reason="Parent verification after subtask execution started.")
                 verification = self.executor.verify(
                     root, security_required=plan.security_level in {"sensitive", "high_risk"}
                 )
@@ -157,7 +158,6 @@ class AgentLoop:
                     state.transition(TaskStatus.FAILED, reason="Parent verification failed after subtask integration.")
                     state.record("verification_failed", "Parent verification failed after subtask integration.")
                     return state
-                state.transition(TaskStatus.VERIFYING, reason="Parent verification after subtask execution started.")
                 state.transition(TaskStatus.VERIFIED, reason="Parent verification after subtask execution passed.")
                 state.transition(TaskStatus.COMPLETED, reason="Task completed through logical subtasks and verified.")
                 state.record("completed", "Task completed through logical subtasks and verified.",
