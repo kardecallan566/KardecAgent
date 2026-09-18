@@ -218,3 +218,16 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Orchestrator rejects subtasks outside the approved plan.
 - [ ] Adapter to execute subtasks through a reusable approved-plan AgentExecutor.
 - [ ] Parallel execution of independent subtasks.
+
+
+### M3 implementation notes — execution integration
+
+- [x] Reusable AgentExecutor extracted from the public AgentLoop workflow.
+- [x] Approved plans can execute without a second planning/approval cycle.
+- [x] Parent plan context is inherited by logical subtasks.
+- [x] Subtask scopes are enforced for direct file mutations.
+- [x] Subtasks cannot request parent-plan changes.
+- [x] Large approved plans automatically route through logical subtasks.
+- [x] Parent verification runs after all subtasks complete.
+- [ ] Post-command changed-file scope enforcement.
+- [ ] Persistent subtask board.
