@@ -679,45 +679,45 @@ def run_agentic_benchmark(
                         tool_calls += 1
                         action_trace.append(f"step={step + 1} {kind} {target}".rstrip())
                         if kind == "READ":
-                            relative = _safe_relative_path(target)
-                            if relative in read_history:
-                                invalid_actions += 1
-                                action_trace[-1] += " DUPLICATE"
-                                feedback.append(
-                                    f"READ {relative}: already read. Do not read it again; "
-                                    "move to WRITE or RUN."
-                                )
-                                continue
+                        relative = _safe_relative_path(target)
+                        if relative in read_history:
+                            invalid_actions += 1
+                            action_trace[-1] += " DUPLICATE"
+                            feedback.append(
+                                f"READ {relative}: already read. Do not read it again; "
+                                "move to WRITE or RUN."
+                            )
+                        else:
                             reads += 1
                             read_history.add(relative)
                             content = _read_project_file(root, relative)
                             feedback.append(f"READ {relative}:\n{content}")
-                        elif kind == "WRITE":
-                            writes += 1
-                            relative = _safe_relative_path(target)
-                            previous = last_written_contents.get(relative)
-                            if previous is not None and previous == body:
-                                invalid_actions += 1
-                                action_trace[-1] += " NOOP"
-                                feedback.append(
-                                    f"WRITE {relative}: no change from the previous WRITE. "
-                                    "Change the implementation based on the test failure before running again."
-                                )
-                                continue
+                    elif kind == "WRITE":
+                        writes += 1
+                        relative = _safe_relative_path(target)
+                        previous = last_written_contents.get(relative)
+                        if previous is not None and previous == body:
+                            invalid_actions += 1
+                            action_trace[-1] += " NOOP"
+                            feedback.append(
+                                f"WRITE {relative}: no change from the previous WRITE. "
+                                "Change the implementation based on the test failure before running again."
+                            )
+                        else:
                             _write_files(root, {relative: body})
                             changed.add(relative)
                             last_written_contents[relative] = body
                             needs_write_after_failure = False
                             feedback.append(f"WRITE {relative}: OK")
-                        elif kind == "RUN":
-                            if needs_write_after_failure:
-                                invalid_actions += 1
-                                action_trace[-1] += " BLOCKED_AFTER_FAIL"
-                                feedback.append(
-                                    "RUN blocked: the previous pytest run failed and no new code has been "
-                                    "written since that failure. Use WRITE to change the implementation first."
-                                )
-                                continue
+                    elif kind == "RUN":
+                        if needs_write_after_failure:
+                            invalid_actions += 1
+                            action_trace[-1] += " BLOCKED_AFTER_FAIL"
+                            feedback.append(
+                                "RUN blocked: the previous pytest run failed and no new code has been "
+                                "written since that failure. Use WRITE to change the implementation first."
+                            )
+                        else:
                             runs += 1
                             if target.strip() != "python -m pytest -q":
                                 raise ValueError(f"Unsupported benchmark command: {target}")
@@ -734,8 +734,6 @@ def run_agentic_benchmark(
                                     first_attempt_passed = True
                                 passed = True
                             else:
-                                # Every failed test run creates one recovery attempt.
-                                # The first failed test run is what triggers recovery.
                                 recovery_attempts += 1
                                 needs_write_after_failure = True
                                 current_files = []
@@ -747,19 +745,19 @@ def run_agentic_benchmark(
                                     except (FileNotFoundError, ValueError):
                                         pass
                                 feedback.extend(current_files)
-                        elif kind == "DONE":
-                            dones += 1
-                            if not passed:
-                                invalid_actions += 1
-                                action_trace[-1] += " INVALID_BEFORE_PASS"
-                                feedback.append(
-                                    "DONE rejected: tests have not passed. Continue working; "
-                                    "use WRITE and then RUN pytest."
-                                )
-                                continue
-                            passed = True
+                    elif kind == "DONE":
+                        dones += 1
+                        if not passed:
+                            invalid_actions += 1
+                            action_trace[-1] += " INVALID_BEFORE_PASS"
+                            feedback.append(
+                                "DONE rejected: tests have not passed. Continue working; "
+                                "use WRITE and then RUN pytest."
+                            )
                         else:
-                            raise ValueError(f"Unsupported action: {kind}")
+                            passed = True
+                    else:
+                        raise ValueError(f"Unsupported action: {kind}")
 
                     if passed:
                         break
