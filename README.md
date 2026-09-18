@@ -55,3 +55,30 @@ An allowlist restricts both search results and page retrieval to matching domain
 
 Web content remains untrusted data even when it comes from an official or repository domain. It must never override the user's approved plan, system policy, security controls, or tool restrictions.
 \n\n### Terminal Safety\n\nTerminal execution does not invoke a shell. Commands are parsed into an argv list, shell operators such as `&&`, `||`, `;`, pipes, redirection, and cmd escaping are rejected outside quoted arguments, and the executable must pass the configured development-command allowlist. Shell executables such as PowerShell, cmd, bash, and WSL are not allowed through the terminal tool. Timeouts and bounded stdout/stderr remain enabled.\n
+
+## Logical Subtasks
+
+Large approved plans can be decomposed into logical subtasks after the single parent approval gate. Subtasks reuse the same loaded LLM instead of spawning additional model processes.
+
+The flow is:
+
+1. Create the parent plan.
+2. Ask the user for explicit approval.
+3. Create the post-approval Git checkpoint.
+4. Decompose only when the task/project is large enough.
+5. Validate dependencies, plan-step references, and project-relative scopes.
+6. Execute subtasks sequentially with inherited parent context.
+7. Prevent subtasks from changing the parent plan.
+8. Verify the complete project after all subtasks finish.
+
+This keeps the initial implementation simple and avoids loading multiple 27B models into memory. Parallel execution is intentionally deferred until the sequential orchestration path is reliable.
+
+Each subtask receives:
+- parent task and approved parent plan;
+- its own objective and completion criteria;
+- the approved parent plan steps it is allowed to implement;
+- an explicit project-relative scope;
+- the shared project context.
+
+A subtask never receives a new approval gate. If it needs work outside the approved parent plan, the parent execution must stop and request a new plan approval.
+
