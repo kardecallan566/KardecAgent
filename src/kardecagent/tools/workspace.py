@@ -58,7 +58,8 @@ class WorkspaceSnapshot:
         for raw in sorted(paths):
             snapshot = self.files.get(raw)
             if snapshot is None:
-                raise RuntimeError(f"no pre-command snapshot available for {raw}")
+                # Absent from the pre-command tracked/dirty snapshot means it was newly created.
+                snapshot = FileSnapshot(raw, False, False, False, None, None)
             target = _safe_remediation_path(self.root, raw)
             if target.is_symlink():
                 raise RuntimeError(f"refusing remediation through symlink: {raw}")
