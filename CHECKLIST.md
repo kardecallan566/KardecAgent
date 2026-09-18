@@ -194,7 +194,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Add tests for security classification and mandatory requirements.
 - [x] Require an additional approval gate for high-risk implementation.
 - [x] Security reviewer phase with structured findings.
-- [x] Automated basic secret scanning for common hardcoded credentials/keys/tokens.\n- [x] Dependency vulnerability checks.
+- [x] Automated basic secret scanning for common hardcoded credentials/keys/tokens.\n- [x] Dependency vulnerability checks.\n- [x] Independent security review phase with structured findings.
 
 
 ## Web Research
