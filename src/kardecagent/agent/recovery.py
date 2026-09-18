@@ -145,20 +145,17 @@ class RecoveryManager:
         import hashlib
 
         conflicts: list[str] = []
-        seen: set[str] = set()
+        virtual_digest: dict[str, str | None] = {}
+
         for change in changes:
             raw = str(change["path"])
-            if raw in seen:
-                # Multiple operations may touch the same path. The newest
-                # audited after-state is the state that must be present.
-                continue
-            seen.add(raw)
             target = root / raw
             try:
                 target.relative_to(root.resolve())
             except ValueError:
                 conflicts.append(raw)
                 continue
+
             current = target
             unsafe = False
             while current != root:
@@ -169,7 +166,20 @@ class RecoveryManager:
             if unsafe or target.is_symlink() or (target.exists() and not target.is_file()):
                 conflicts.append(raw)
                 continue
-            digest = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
-            if digest != change.get("sha256_after"):
+
+            if raw not in virtual_digest:
+                virtual_digest[raw] = (
+                    hashlib.sha256(target.read_bytes()).hexdigest()
+                    if target.is_file() else None
+                )
+
+            expected_after = change.get("sha256_after")
+            if virtual_digest[raw] != expected_after:
                 conflicts.append(raw)
+                continue
+
+            # Simulate this rollback in memory so repeated edits to the same
+            # file are checked against each operation's own after-state.
+            virtual_digest[raw] = change.get("sha256_before")
+
         return sorted(set(conflicts))
