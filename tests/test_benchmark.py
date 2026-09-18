@@ -184,12 +184,11 @@ def total(items):
     for item in items:
         total += item["price"] * item.get("quantity", 1)
     return total
-=== END WRITE ===
-=== RUN: python -m pytest -q ===
-=== END RUN ===""",
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
     case = _fixture_cases()[1]
-    result = run_agentic_benchmark(client, cases=(case,), max_steps=4)[0]
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=5)[0]
 
     assert result.passed is True
     assert result.runs == 2
@@ -197,6 +196,35 @@ def total(items):
     assert result.recovery_attempts == 1
     assert any("BLOCKED_AFTER_FAIL" in item for item in result.action_trace)
 
+
+def test_agentic_benchmark_executes_only_one_action_per_turn():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        """=== READ: src/math_utils.py ===
+=== END READ ===
+=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===""",
+        "=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=3)[0]
+
+    assert result.passed is True
+    assert result.tool_calls == 3
+    assert result.reads == 1
+    assert result.writes == 1
+    assert result.runs == 1
+    assert result.invalid_actions >= 1
 
 def test_agentic_benchmark_rejects_duplicate_read_without_executing_it():
     from kardecagent.llm.benchmark import _fixture_cases
