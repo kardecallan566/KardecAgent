@@ -636,6 +636,7 @@ def run_agentic_benchmark(
                         "After a failed test, the next productive action MUST be WRITE; do not run the same failing "
                         "test again until you have changed a file. Use the pytest output as debugging feedback. "
                         "Do not repeat the same WRITE unless you are changing the implementation. "
+                        "Exactly ONE action block is allowed in each response. If you need another action, wait for the next turn. "
                         "After a successful test run, you may finish; DONE is accepted only after tests pass."
                     ),
                 },
@@ -686,6 +687,11 @@ def run_agentic_benchmark(
 
                     kind, target, body = actions[0]
                     tool_calls += 1
+                    if len(actions) > 1:
+                        feedback.append(
+                            f"You emitted {len(actions)} actions, but only the first was executed. "
+                            "The remaining actions were discarded. Continue with exactly ONE action in the next turn."
+                        )
                     action_trace.append(f"step={step + 1} {kind} {target}".rstrip())
 
                     if kind == "READ":
@@ -719,6 +725,10 @@ def run_agentic_benchmark(
                             last_written_contents[relative] = body
                             needs_write_after_failure = False
                             feedback.append(f"WRITE {relative}: OK")
+                            feedback.append(
+                                "WRITE accepted. This turn is complete. Choose exactly ONE next action. "
+                                "If the required implementation is complete, the next action should be RUN."
+                            )
                     elif kind == "RUN":
                         if needs_write_after_failure:
                             invalid_actions += 1
