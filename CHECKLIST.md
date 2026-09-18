@@ -108,7 +108,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Approved plan passed to execution context
 - [ ] Stored plan
 - [x] Plan progress
-- [ ] Completion criteria
+- [x] Completion criteria
 - [ ] Reviewer phase
 - [ ] Reviewer findings
 - [ ] Reviewer → coder feedback
@@ -175,3 +175,10 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 
 - [x] Replacement plan must be complete and structurally validated before approval.
 - [x] Rejected plan changes leave the currently approved plan active.
+
+
+## M2 implementation notes
+
+- [x] Completion criteria are part of the approved plan.
+- [x] Finish requires one non-empty evidence item for every completion criterion.
+- [x] Completion evidence is recorded in the final verification event.
