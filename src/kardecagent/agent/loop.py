@@ -168,6 +168,43 @@ class AgentLoop:
                                           high_risk_approval_callback=high_risk_approval_callback,
                                           persistence_callback=lambda s, p: store.save(s, plan=p, approved=True))
 
+    def resume(self, project_root: Path, task: str) -> TaskState:
+        """Resume an approved persisted task without creating a new plan or approval gate."""
+        root = project_root.resolve()
+        store = TaskStore(root)
+        state, plan, board = store.load(task)
+        if state.status is TaskStatus.COMPLETED:
+            return state
+        state.status = TaskStatus.RUNNING
+        state.record("resume_started", "Resuming previously approved persisted task.")
+        if board is not None:
+            from .orchestrator import Orchestrator
+            orchestrator = Orchestrator(self.llm, self.settings)
+            board = orchestrator.execute_approved_plan(
+                root, task, plan, board,
+                progress_callback=lambda current: store.save(state, plan=plan, board=current, approved=True),
+            )
+            state.record("subtask_execution_resumed", "Persisted logical subtask board resumed.",
+                         board=board.as_dict())
+            if board.completed:
+                verification = self.executor.verify(
+                    root, security_required=plan.security_level in {"sensitive", "high_risk"}
+                )
+                state.record("verification", "Parent task verification executed after resume.",
+                             verification=verification)
+                state.status = TaskStatus.COMPLETED if verification["verified"] else TaskStatus.FAILED
+            else:
+                state.status = TaskStatus.FAILED
+        else:
+            state = self.execute_approved_plan(
+                root, task, plan, state,
+                persistence_callback=lambda s, p: store.save(s, plan=p, approved=True),
+            )
+        store.save(state, plan=plan, board=board, approved=True)
+        state.record("resume_finished", "Persisted task resume finished.", status=state.status.value)
+        store.save(state, plan=plan, board=board, approved=True)
+        return state
+
     def execute_approved_plan(
         self, project_root: Path, task: str, plan: ExecutionPlan, state: TaskState,
         *, context: dict | None = None, allowed_scope: tuple[str, ...] | None = None,
