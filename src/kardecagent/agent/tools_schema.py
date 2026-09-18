@@ -23,6 +23,11 @@ TOOL_SCHEMAS = {
     "git_status": {"required": [], "types": {}, "optional": {}},
     "git_diff": {"required": [], "types": {}, "optional": {}},
     "git_log": {"required": [], "types": {}, "optional": {"limit": int}},
+    "request_plan_change": {
+        "required": ["plan"],
+        "types": {"plan": dict},
+        "optional": {},
+    },
     "complete_step": {"required": ["step", "evidence"], "types": {"step": int, "evidence": str}, "optional": {}},
     "finish": {"required": ["reason"], "types": {"reason": str}, "optional": {}},
 }
@@ -62,9 +67,15 @@ def parse_tool_call(content: str) -> ToolCall:
     return ToolCall(tool, _validate_arguments(tool, payload.get("arguments", {})), plan_step)
 
 def tool_instructions() -> str:
-    return ('Return ONLY JSON with tool, arguments and optional plan_step. '
-            'plan_step is required for write_file, run_command, run_checks and complete_step. '
-            'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, write_file, run_command, run_checks, '
-            'git_status, git_diff, git_log, complete_step, finish. '
-            'Only execute actions belonging to the active approved plan step. '
-            'Complete a step only after verifying its result. If the plan must change, stop and request approval.')
+    return (
+        'Return ONLY JSON with tool, arguments and optional plan_step. '
+        'plan_step is required for write_file, run_command, run_checks and complete_step. '
+        'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, '
+        'write_file, run_command, run_checks, git_status, git_diff, git_log, '
+        'complete_step, request_plan_change, finish. '
+        'Only execute actions belonging to the active approved plan step. '
+        'Complete a step only after verifying its result. '
+        'If the approved plan is insufficient, use request_plan_change with a complete replacement plan; '
+        'the agent will pause for user approval before applying it. '
+        'Never silently deviate from the approved plan.'
+    )
