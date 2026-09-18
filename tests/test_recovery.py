@@ -126,12 +126,12 @@ def test_recovery_transaction_resumes_after_crash(tmp_path: Path):
     def persist(current: TaskState):
         calls["count"] += 1
         persisted.append(current.events[-1].event_type)
-        if current.events[-1].event_type == "recovery_file_rolled_back" and calls["count"] == 5:
-            raise RuntimeError("simulated process crash")
+        if current.events[-1].event_type == "recovery_rollback_started" and calls["count"] == 5:
+            raise KeyboardInterrupt("simulated process crash")
 
     try:
         manager.recover(tmp_path, state, subtask_id="subtask", persistence_callback=persist)
-    except RuntimeError:
+    except KeyboardInterrupt:
         pass
 
     # Simulate restart from the durable event stream. The transaction has
