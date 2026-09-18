@@ -1,4 +1,4 @@
-from kardecagent.llm.benchmark import CASES, default_models, run_benchmark
+from kardecagent.llm.benchmark import CASES, default_models, run_benchmark, run_agentic_benchmark, AgenticCase
 
 
 class FakeClient:
@@ -56,3 +56,77 @@ def test_agentic_file_parser_accepts_complete_file_blocks():
 
     files = _parse_files("=== FILE: src/a.py ===\nprint('ok')\n=== END FILE ===")
     assert files == {"src/a.py": "print('ok')\n"}
+
+
+class FakeAgenticClient:
+    model = "fake-agent"
+
+    def __init__(self, responses):
+        self.responses = iter(responses)
+
+    def chat(self, messages, *, temperature=0.0):
+        content = next(self.responses)
+        class Response:
+            raw = {"eval_count": 10, "eval_duration": 1_000_000_000}
+        Response.content = content
+        return Response()
+
+
+def test_agentic_benchmark_runs_read_write_and_test_loop():
+    client = FakeAgenticClient([
+        "=== READ: src/math_utils.py ===\n=== END READ ===",
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+    ])
+    case = AgenticCase(
+        "loop_case",
+        "Implement clamp.",
+        ("src/math_utils.py",),
+        ("python", "-m", "pytest", "-q"),
+        lambda root: "raise ValueError" in (root / "src/math_utils.py").read_text(),
+    )
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=3)[0]
+    assert result.passed is True
+    assert result.attempts == 1
+    assert result.tool_calls == 3
+    assert result.first_attempt_passed is True
+    assert result.recovery_attempts == 0
+    assert result.eval_tokens == 20
+
+
+def test_agentic_benchmark_recovers_after_failed_test():
+    client = FakeAgenticClient([
+        "=== READ: src/math_utils.py ===\n=== END READ ===",
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    return value
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+    ])
+    case = AgenticCase(
+        "recovery_case",
+        "Implement clamp.",
+        ("src/math_utils.py",),
+        ("python", "-m", "pytest", "-q"),
+        lambda root: "raise ValueError" in (root / "src/math_utils.py").read_text(),
+    )
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=4)[0]
+    assert result.passed is True
+    assert result.attempts == 2
+    assert result.recovery_attempts == 1
+    assert result.first_attempt_passed is False
