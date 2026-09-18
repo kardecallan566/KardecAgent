@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from kardecagent.agent.persistence import TaskStore, PersistenceError
+from kardecagent.agent.persistence import TaskStore, PersistenceError, TaskJournal
 from kardecagent.agent.plan import ExecutionPlan
 from kardecagent.agent.state import TaskState, TaskStatus
 from kardecagent.tasks import Subtask, SubtaskStatus, TaskBoard
@@ -16,7 +16,7 @@ def make_plan():
 def test_task_store_round_trip(tmp_path: Path):
     store = TaskStore(tmp_path)
     state = TaskState("build feature", str(tmp_path))
-    state.status = TaskStatus.RUNNING
+    state.transition(TaskStatus.RUNNING)
     state.iteration = 4
     state.record("plan_created", "approved")
     board = TaskBoard()
@@ -90,3 +90,70 @@ def test_corrupt_current_task_recovers_from_backup(tmp_path: Path):
     loaded, _, _ = store.load("backup")
     assert loaded.task == "backup"
     assert loaded.status is TaskStatus.RUNNING
+
+
+def test_execution_journal_is_append_only_without_duplicates(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("journal", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    store.save(state, plan=make_plan(), approved=True)
+    journal_path = store.journal_path_for("journal")
+    first_lines = journal_path.read_text(encoding="utf-8").splitlines()
+
+    state.iteration = 1
+    state.record("progress", "step completed")
+    store.save(state, plan=make_plan(), approved=True)
+    second_lines = journal_path.read_text(encoding="utf-8").splitlines()
+
+    assert len(second_lines) == len(first_lines) + 1
+    assert second_lines[:len(first_lines)] == first_lines
+
+
+def test_execution_journal_recovers_truncated_tail(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("truncated", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    store.save(state, plan=make_plan(), approved=True)
+    journal_path = store.journal_path_for("truncated")
+    journal_path.open("ab").write(b'{"interrupted":')
+    
+    loaded, _, _ = store.load("truncated")
+    assert loaded.status is TaskStatus.RUNNING
+    assert len(loaded.events) == len(state.events)
+
+
+def test_execution_journal_rejects_tampered_middle_record(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("tampered", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.record("one", "first")
+    state.record("two", "second")
+    store.save(state, plan=make_plan(), approved=True)
+    journal_path = store.journal_path_for("tampered")
+    lines = journal_path.read_text(encoding="utf-8").splitlines()
+    lines[1] = lines[1].replace('"message": "second"', '"message": "tampered"')
+    journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    try:
+        store.load("tampered")
+    except PersistenceError as exc:
+        assert "journal" in str(exc)
+    else:
+        raise AssertionError("expected journal corruption error")
+
+
+def test_snapshot_corruption_uses_backup_and_keeps_backup(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("backup2", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    path = store.save(state, plan=make_plan(), approved=True)
+    state.record("progress", "second")
+    store.save(state, plan=make_plan(), approved=True)
+    backup = path.with_suffix(path.suffix + ".bak")
+    assert backup.is_file()
+    backup_bytes = backup.read_bytes()
+    path.write_text("{broken", encoding="utf-8")
+
+    loaded, _, _ = store.load("backup2")
+    assert loaded.task == "backup2"
+    assert backup.read_bytes() == backup_bytes
