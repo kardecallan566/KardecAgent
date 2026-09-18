@@ -88,7 +88,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 ## M1 — Reliable Coding Loop
 - [x] Structured tool schema
 - [x] Tool-call validation
-- [ ] Patch-based editing
+- [x] Patch-based editing
 - [ ] File-change verification
 - [x] Automatic test command discovery
 - [x] Typecheck/lint/build detection
@@ -116,10 +116,10 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [ ] Final report
 
 ## M3 — Multi-Agent
-- [ ] Planner role
-- [ ] Coder role
-- [ ] Tester role
-- [ ] Reviewer role
+- [x] Planner role
+- [x] Coder role
+- [x] Tester role
+- [x] Reviewer role
 - [ ] Shared task context
 - [ ] Role prompts
 - [ ] Agent handoffs
@@ -204,3 +204,17 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Deterministic source provenance classification.\n- [x] Source credibility guidance and cross-check policy.
 - [x] Page-content retrieval for selected sources.
 - [x] Basic URL safety / SSRF protections.\n- [x] Domain allow/deny controls.
+
+
+## M3 implementation notes
+
+- [x] Logical subtask model and lifecycle states.
+- [x] Dependency graph validation and cycle detection.
+- [x] Subtask scope validation against project root.
+- [x] Configurable subtask/depth limits.
+- [x] Sequential subtask scheduler.
+- [x] Approved-plan step references on subtasks.
+- [x] Orchestrator decomposition prompt with JSON validation.
+- [x] Orchestrator rejects subtasks outside the approved plan.
+- [ ] Adapter to execute subtasks through a reusable approved-plan AgentExecutor.
+- [ ] Parallel execution of independent subtasks.
