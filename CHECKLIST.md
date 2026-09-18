@@ -201,6 +201,6 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Explicit read-only `search_web` tool.
 - [x] Structured web result output (title, URL, snippet).
 - [x] Query and result-count validation.
-- [ ] Source credibility/cross-check policy.
+- [x] Deterministic source provenance classification.\n- [x] Source credibility guidance and cross-check policy.
 - [x] Page-content retrieval for selected sources.
-- [x] Basic URL safety / SSRF protections.\n- [ ] Domain allow/deny controls.
+- [x] Basic URL safety / SSRF protections.\n- [x] Domain allow/deny controls.
