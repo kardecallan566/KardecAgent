@@ -20,6 +20,7 @@ TOOL_SCHEMAS = {
     "search_web": {"required": ["query"], "types": {"query": str}, "optional": {"max_results": int}},
     "fetch_web_page": {"required": ["url"], "types": {"url": str}, "optional": {"max_chars": int}},
     "write_file": {"required": ["path", "content"], "types": {"path": str, "content": str}, "optional": {}},
+    "apply_patch": {"required": ["patch"], "types": {"patch": str}, "optional": {}},
     "run_command": {"required": ["command"], "types": {"command": str}, "optional": {}},
     "run_checks": {"required": ["kind"], "types": {"kind": str}, "optional": {}},
     "git_status": {"required": [], "types": {}, "optional": {}},
@@ -34,7 +35,7 @@ TOOL_SCHEMAS = {
     "finish": {"required": ["reason", "criteria_evidence"], "types": {"reason": str, "criteria_evidence": list}, "optional": {}},
 }
 
-STEP_REQUIRED_TOOLS = {"write_file", "run_command", "run_checks", "complete_step"}
+STEP_REQUIRED_TOOLS = {"write_file", "apply_patch", "run_command", "run_checks", "complete_step"}
 
 def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     schema = TOOL_SCHEMAS[tool]
@@ -73,9 +74,9 @@ def parse_tool_call(content: str) -> ToolCall:
 def tool_instructions() -> str:
     return (
         'Return ONLY JSON with tool, arguments and optional plan_step. '
-        'plan_step is required for write_file, run_command, run_checks and complete_step. '
+        'plan_step is required for write_file, apply_patch, run_command, run_checks and complete_step. '
         'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, fetch_web_page, '
-        'write_file, run_command, run_checks, git_status, git_diff, git_log, '
+        'write_file, apply_patch, run_command, run_checks, git_status, git_diff, git_log, '
         'complete_step, request_plan_change, finish. finish requires criteria_evidence for every completion criterion. '
         'Only execute actions belonging to the active approved plan step. '
         'Complete a step only after verifying its result. '
