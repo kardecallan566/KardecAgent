@@ -112,6 +112,7 @@ class Orchestrator:
         self,
         board: TaskBoard,
         executor: Callable[[Subtask], SubtaskExecutionResult],
+        progress_callback: Callable[[TaskBoard], None] | None = None,
     ) -> TaskBoard:
         while not board.completed:
             ready = board.ready()
@@ -136,7 +137,11 @@ class Orchestrator:
             else:
                 board.fail(subtask.id, result=result.summary)
                 self._mark_blocked(board)
+                if progress_callback is not None:
+                    progress_callback(board)
                 break
+            if progress_callback is not None:
+                progress_callback(board)
         return board
 
     @staticmethod
@@ -151,6 +156,7 @@ class Orchestrator:
     def execute_approved_plan(
         self, project_root: Path, parent_task: str, parent_plan: ExecutionPlan,
         board: TaskBoard,
+        progress_callback: Callable[[TaskBoard], None] | None = None,
     ) -> TaskBoard:
         """Execute subtasks without replanning or asking for approval again."""
         def execute(subtask: Subtask) -> SubtaskExecutionResult:
@@ -189,4 +195,4 @@ class Orchestrator:
             )
             return SubtaskExecutionResult(subtask.id, result_state.status.value, summary, evidence[-10:])
 
-        return self.execute_sequentially(board, execute)
+        return self.execute_sequentially(board, execute, progress_callback=progress_callback)
