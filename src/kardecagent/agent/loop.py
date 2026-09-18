@@ -20,6 +20,7 @@ from ..tools import (
 )
 from .state import TaskState, TaskStatus
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan, plan_instructions
+from .security import assess_security, security_requirements_for
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
 
 
@@ -195,6 +196,20 @@ class AgentLoop:
             state.record("plan_failed", "Could not produce a valid execution plan.")
             return state
 
+        assessment = assess_security(task)
+        state.record("security_assessment", "Task security sensitivity assessed.",
+                     level=assessment.level, matched_signals=list(assessment.matched_signals))
+        if assessment.sensitive:
+            plan = ExecutionPlan(
+                plan.summary, plan.steps, plan.validation, plan.risks,
+                plan.completion_criteria, assessment.level,
+                security_requirements_for(assessment.level),
+            )
+            state.record("security_mode_enabled",
+                         "Security-sensitive execution controls enabled.",
+                         level=assessment.level,
+                         requirements=plan.security_requirements)
+
         state.record("plan_created", "Execution plan created.", plan=plan.as_dict())
 
         if approval_callback is None:
@@ -236,6 +251,8 @@ class AgentLoop:
                 **context,
                 "approved_plan": plan.as_dict(),
                 "completion_criteria": plan.completion_criteria,
+                "security_level": plan.security_level,
+                "security_requirements": plan.security_requirements,
                 "instruction": "Execute the approved plan step by step. Mutating actions must name the active plan_step. After each step, call complete_step with evidence. Do not deviate without asking for approval.",
                 "plan_progress": tracker.as_dict(),
             }, ensure_ascii=False)},
