@@ -147,9 +147,9 @@ pip install -e ".[dev]"
 kardec-agent doctor --project D:/caminho/para/seu-projeto
 ```
 
-O `doctor` verifica o projeto detectado e faz uma chamada mínima ao servidor OpenAI-compatible local. Ele não executa ferramentas de implementação nem altera arquivos.
+O `doctor` verifica o projeto detectado e faz uma chamada mínima ao servidor Ollama local. Ele não executa ferramentas de implementação nem altera arquivos.
 
-Os padrões do runtime Qwen local são `http://127.0.0.1:8080/v1` e `qwen3.8-27b`. Eles podem ser alterados com `KARDEC_LLM_BASE_URL` e `KARDEC_LLM_MODEL`.
+O padrão do runtime é `http://127.0.0.1:11434` e `qwen2.5-coder:3b`. O modelo pode ser alterado com `KARDECAGENT_LLM_MODEL` e o endereço do Ollama com `KARDECAGENT_OLLAMA_BASE_URL`.
 
 ### 3. Executar uma tarefa real
 
