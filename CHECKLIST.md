@@ -202,5 +202,5 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Structured web result output (title, URL, snippet).
 - [x] Query and result-count validation.
 - [ ] Source credibility/cross-check policy.
-- [ ] Page-content retrieval for selected sources.
-- [ ] Domain allow/deny controls.
+- [x] Page-content retrieval for selected sources.
+- [x] Basic URL safety / SSRF protections.\n- [ ] Domain allow/deny controls.
