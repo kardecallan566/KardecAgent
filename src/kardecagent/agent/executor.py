@@ -142,7 +142,7 @@ class AgentExecutor:
 
     def _record_integrity(self, state: TaskState, before: WorkspaceSnapshot,
                           after: WorkspaceSnapshot, changed: list[str],
-                          *, tool: str, plan_step: int, subtask: bool) -> None:
+                          *, tool: str, plan_step: int, subtask: bool, subtask_id: str | None = None) -> None:
         records = []
         for path in changed:
             before_item = before.files.get(path)
@@ -162,7 +162,7 @@ class AgentExecutor:
             state.record("integrity_change", "Workspace changes recorded with before/after SHA-256 fingerprints.",
                          changes=records)
 
-    def _execute_tool(self, root: Path, action, scope: tuple[str, ...] | None, state: TaskState | None = None) -> str:
+    def _execute_tool(self, root: Path, action, scope: tuple[str, ...] | None, state: TaskState | None = None, subtask_id: str | None = None) -> str:
         args = action.arguments
         fs = ProjectFilesystem(root)
         mutating = action.tool in {"write_file", "apply_patch", "run_command"}
@@ -189,7 +189,7 @@ class AgentExecutor:
             if state is not None and integrity_before is not None and integrity_after is not None:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
-                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope))
+                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
             return json.dumps({"ok": True, "path": args["path"], "method": "full_file"})
         if action.tool == "apply_patch":
             patch_paths = self._patch_paths(args["patch"])
@@ -201,7 +201,7 @@ class AgentExecutor:
             if state is not None and integrity_before is not None and integrity_after is not None:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
-                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope))
+                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
             return json.dumps({"ok": True, "changed_files": list(result.changed_files),
                                 "method": "unified_patch"})
         if action.tool == "run_command":
@@ -449,7 +449,7 @@ class AgentExecutor:
                 return state
 
             try:
-                result = self._execute_tool(root, action, allowed_scope, state)
+                result = self._execute_tool(root, action, allowed_scope, state, (context or {}).get("subtask", {}).get("id"))
                 state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result)
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
