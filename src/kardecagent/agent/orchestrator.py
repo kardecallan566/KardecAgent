@@ -149,7 +149,8 @@ class Orchestrator:
                 )
                 if progress_callback is not None:
                     progress_callback(board)
-            result = executor(subtask, resume_step if subtask.id == resume_subtask_id else 1)
+            requested_step = resume_step if subtask.id == resume_subtask_id else 1
+            result = executor(subtask, requested_step) if resume_subtask_id is not None else executor(subtask)
             resume_subtask_id = None
             resume_step = 1
             subtask.iterations += 1
