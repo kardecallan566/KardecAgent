@@ -16,7 +16,7 @@ class ExecutionPlan:
     completion_criteria: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
-        return {"summary": self.summary, "steps": self.steps, "validation": self.validation, "risks": self.risks}
+        return {"summary": self.summary, "steps": self.steps, "validation": self.validation, "risks": self.risks, "completion_criteria": self.completion_criteria}
 
     def format_for_review(self) -> str:
         lines = ["PLANO DE EXECUÇÃO", "", self.summary, "", "Etapas:"]
@@ -90,6 +90,6 @@ def parse_plan(content: str) -> ExecutionPlan:
     return ExecutionPlan(summary.strip(), [x.strip() for x in steps], [x.strip() for x in validation], [x.strip() for x in risks], [x.strip() for x in completion_criteria])
 
 def plan_instructions() -> str:
-    return ('Return ONLY JSON for the execution plan: {"summary":"...","steps":["..."],"validation":["..."],"risks":["..."]}. '
+    return ('Return ONLY JSON for the execution plan: {"summary":"...","steps":["..."],"validation":["..."],"risks":["..."],"completion_criteria":["..."]}. '
             'Create a concrete implementation plan based on the detected project and task. '
             'Include files/components likely to be created or changed, implementation order, how the result will be validated, and concrete completion criteria that can be checked from implementation evidence and automated validation. Do not modify files while planning.')
