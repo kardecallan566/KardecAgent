@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from kardecagent.agent.recovery import RecoveryManager
-from kardecagent.agent.state import TaskState
+from kardecagent.agent.state import TaskState, TaskStatus
 
 
 def _event(state: TaskState, path: Path, content: str, subtask_id: str) -> None:
@@ -30,6 +30,8 @@ def _event(state: TaskState, path: Path, content: str, subtask_id: str) -> None:
 
 def test_recovery_rolls_back_only_failed_subtask(tmp_path: Path):
     state = TaskState("task", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.transition(__import__("kardecagent.agent.state", fromlist=["TaskStatus"]).TaskStatus.FAILED)
     _event(state, tmp_path / "first.txt", "keep", "subtask-1")
     _event(state, tmp_path / "failed.txt", "remove", "subtask-2")
 
@@ -44,6 +46,8 @@ def test_recovery_rolls_back_only_failed_subtask(tmp_path: Path):
 
 def test_recovery_preflight_conflict_changes_nothing(tmp_path: Path):
     state = TaskState("task", str(tmp_path))
+    state.transition(__import__("kardecagent.agent.state", fromlist=["TaskStatus"]).TaskStatus.RUNNING)
+    state.transition(__import__("kardecagent.agent.state", fromlist=["TaskStatus"]).TaskStatus.FAILED)
     _event(state, tmp_path / "failed.txt", "audit", "subtask-2")
     (tmp_path / "failed.txt").write_text("changed externally", encoding="utf-8")
 
@@ -57,6 +61,8 @@ def test_recovery_preflight_conflict_changes_nothing(tmp_path: Path):
 
 def test_recovery_reports_last_consistent_plan_step(tmp_path: Path):
     state = TaskState("task", str(tmp_path))
+    state.transition(__import__("kardecagent.agent.state", fromlist=["TaskStatus"]).TaskStatus.RUNNING)
+    state.transition(__import__("kardecagent.agent.state", fromlist=["TaskStatus"]).TaskStatus.FAILED)
     state.record("plan_step_completed", "step 1", step=1)
     state.record("plan_step_completed", "step 2", step=2)
     _event(state, tmp_path / "failed.txt", "remove", "subtask-2")
