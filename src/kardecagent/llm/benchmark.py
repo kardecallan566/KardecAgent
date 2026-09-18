@@ -658,7 +658,9 @@ def run_agentic_benchmark(
                                     first_attempt_passed = True
                                 passed = True
                             else:
-                                recovery_attempts = max(recovery_attempts, attempts - 1)
+                                # Every failed test run creates one recovery attempt.
+                                # The first failed test run is what triggers recovery.
+                                recovery_attempts += 1
                         elif kind == "DONE":
                             if not passed:
                                 raise ValueError("Model declared DONE before tests passed.")
