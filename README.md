@@ -235,13 +235,18 @@ kardec-agent benchmark --level basic
 Também é possível comparar modelos específicos:
 
 ```powershell
-kardec-agent benchmark --models "qwen2.5-coder:1.5b,qwen2.5-coder:3b,qwen2.5-coder:7b,Qwen3-Coder-Next-GGUF"
+kardec-agent benchmark --models "qwen2.5-coder:1.5b,qwen2.5-coder:3b,qwen2.5-coder:7b,qwen3.5:4b,deepseek-coder:1.3b-instruct,deepseek-coder:6.7b"
 ```
 
-O `Qwen3-Coder-Next-GGUF` também faz parte da lista padrão do benchmark. O benchmark não baixa modelos automaticamente: o nome precisa aparecer exatamente na lista do Ollama. Se a importação do GGUF usar outro nome/tag, passe esse nome com `--models`, por exemplo:
+A lista padrão prioriza modelos pequenos que podem ser úteis em uma máquina local com memória limitada:
 
-```powershell
-kardec-agent benchmark --models "Qwen3-Coder-Next-GGUF"
-```
+- `qwen2.5-coder:1.5b`
+- `qwen2.5-coder:3b`
+- `qwen2.5-coder:7b`
+- `qwen3.5:4b`
+- `deepseek-coder:1.3b-instruct`
+- `deepseek-coder:6.7b`
 
-Cada tarefa do benchmark agentic é executada em uma pasta temporária isolada; o resultado não altera o projeto do usuário.
+O benchmark agentic agora possui 12 cenários, incluindo implementação, debugging, mudança multi-arquivo, criação de testes, refatoração, reparo a partir de falha, contrato de API, máquina de estados, regressões de segurança e validação cruzada entre módulos. Cada caso gera um projeto temporário, aplica os arquivos produzidos pelo modelo, executa a suíte de testes e verifica critérios adicionais específicos do caso.
+
+O benchmark não baixa modelos automaticamente. Use `ollama pull` antes de executá-lo. Cada tarefa é executada em uma pasta temporária isolada; o resultado não altera o projeto do usuário.
