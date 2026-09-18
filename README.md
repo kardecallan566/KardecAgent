@@ -95,3 +95,17 @@ Remediation is deliberately conservative:
 - remediation never uses `git reset --hard` or `git checkout`, so it cannot discard unrelated user work.
 
 Scoped command remediation currently applies to Git repositories, where tracked files and pre-existing working-tree changes are snapshotted before the command.
+
+### Persistent tasks and resume
+
+Approved tasks are persisted locally under `.kardecagent/tasks/` using atomic JSON writes. The persisted record contains the approved plan, execution events, current status and, for decomposed work, the logical subtask board. A task is resumable only when its approval was already recorded; `resume` never creates a new plan or silently bypasses the original approval gate.
+
+If execution is interrupted while a subtask is running, that subtask is returned to `pending` when the state is loaded, because its completion was not durably recorded. Completed subtasks remain completed and their dependencies are preserved, so resume continues from the first runnable unfinished subtask.
+
+Use the CLI with:
+
+```powershell
+kardec-agent resume --project D:\path\to\project --task "implement feature"
+```
+
+The persistence file is written atomically and remains inside the project. It should be treated as local execution state, not as a substitute for Git history or backups.
