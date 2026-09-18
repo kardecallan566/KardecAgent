@@ -59,3 +59,45 @@ def test_subtask_scope_blocks_write_outside_scope(tmp_path: Path):
     assert result.status.value == "max_iterations"
     assert not (tmp_path / "outside.txt").exists()
     assert any(e.event_type == "tool_error" and "scope violation" in e.message for e in result.events)
+
+
+def test_run_command_detects_new_file_outside_scope(tmp_path: Path):
+    import json
+    from kardecagent.agent.tools_schema import parse_tool_call
+
+    (tmp_path / "inside").mkdir()
+    llm = FakeLLM([])
+    loop = AgentLoop(llm, Settings())
+    plan = ExecutionPlan("Scoped", ["Command"], ["checks"], [], ["done"])
+    state = make_state(tmp_path)
+    action = parse_tool_call(
+        '{"tool":"run_command","arguments":{"command":"python -c \\"open(\\\'outside.txt\\\', \\'w\\\').write(\\\'x\\\')\\"},"plan_step":1}'
+    )
+    try:
+        loop.executor._execute_tool(tmp_path, action, ("inside",))
+    except ValueError as exc:
+        assert "scope violation" in str(exc)
+    else:
+        raise AssertionError("expected scope violation")
+    assert (tmp_path / "outside.txt").exists()
+
+
+def test_run_command_detects_change_to_preexisting_dirty_file(tmp_path: Path):
+    import subprocess
+    (tmp_path / "inside").mkdir()
+    (tmp_path / "outside.txt").write_text("before", encoding="utf-8")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                    "commit", "-m", "fixture"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "outside.txt").write_text("already dirty", encoding="utf-8")
+    loop = AgentLoop(FakeLLM([]), Settings())
+    action = __import__("kardecagent.agent.tools_schema", fromlist=["parse_tool_call"]).parse_tool_call(
+        '{"tool":"run_command","arguments":{"command":"python -c \\"open(\\\'outside.txt\\\', \\'w\\\').write(\\\'changed\\\')\\"},"plan_step":1}'
+    )
+    try:
+        loop.executor._execute_tool(tmp_path, action, ("inside",))
+    except ValueError as exc:
+        assert "scope violation" in str(exc)
+    else:
+        raise AssertionError("expected scope violation")
