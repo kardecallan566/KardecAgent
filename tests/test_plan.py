@@ -10,11 +10,12 @@ def test_parse_plan():
     )
     assert plan.summary == "Create a site"
     assert plan.steps == ["Create HTML", "Create CSS"]
+    assert plan.completion_criteria == ["result is correct"]
 
 
 def test_invalid_plan():
     with pytest.raises(PlanError, match="non-empty list"):
-        parse_plan('{"summary":"x","steps":[],"validation":[]}')
+        parse_plan('{"summary":"x","steps":[],"validation":[],"completion_criteria":["x"]}')
 
 
 def test_plan_tracker_enforces_sequential_steps():
@@ -32,3 +33,8 @@ def test_plan_tracker_enforces_sequential_steps():
     tracker.complete(2)
     assert tracker.completed
     assert tracker.as_dict()["current_step"] is None
+
+
+def test_completion_criteria_are_required():
+    with pytest.raises(PlanError, match="completion_criteria"):
+        parse_plan('{"summary":"x","steps":["one"],"validation":[]}')
