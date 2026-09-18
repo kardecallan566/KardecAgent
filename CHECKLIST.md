@@ -182,3 +182,16 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Completion criteria are part of the approved plan.
 - [x] Finish requires one non-empty evidence item for every completion criterion.
 - [x] Completion evidence is recorded in the final verification event.
+
+
+## Security-Sensitive Execution
+
+- [x] Classify tasks as normal, low-risk, sensitive, or high-risk.
+- [x] Detect authentication, authorization, credentials, secrets, tokens, sessions, cryptography, and related security scope.
+- [x] Automatically inject mandatory security requirements into sensitive/high-risk plans.
+- [x] Show security level and requirements during plan approval.
+- [x] Pass security mode and requirements into the execution context.
+- [x] Add tests for security classification and mandatory requirements.
+- [ ] Require an additional approval gate for high-risk implementation.
+- [ ] Security reviewer phase with independent findings.
+- [ ] Automated secret scanning and dependency vulnerability checks.
