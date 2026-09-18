@@ -98,9 +98,9 @@ Scoped command remediation currently applies to Git repositories, where tracked 
 
 ### Persistent tasks and resume
 
-Approved tasks are persisted locally under `.kardecagent/tasks/` using atomic JSON writes. The persisted record contains the approved plan, execution events, current status and, for decomposed work, the logical subtask board. A task is resumable only when its approval was already recorded; `resume` never creates a new plan or silently bypasses the original approval gate.
+Approved tasks are persisted locally under `.kardecagent/tasks/` using atomic JSON writes plus an append-only, hash-chained execution journal. The persisted record contains the approved plan, execution events, current status and, for decomposed work, the logical subtask board. The journal is authoritative when it is ahead of the snapshot, including the execution cursor: active parent plan step, active subtask and that subtask's current plan step.
 
-If execution is interrupted while a subtask is running, that subtask is returned to `pending` when the state is loaded, because its completion was not durably recorded. Completed subtasks remain completed and their dependencies are preserved, so resume continues from the first runnable unfinished subtask.
+Subtask lifecycle events persist a board snapshot and cursor metadata, so a crash between snapshot writes does not lose which logical subtask was active. If execution is interrupted while a subtask is running, that subtask is returned to `pending` when the state is loaded, because its completion was not durably recorded; the recovered cursor still identifies the interrupted subtask and exact subtask step for resume. Completed subtasks remain completed and their dependencies are preserved. Resume therefore prioritizes the journal's active subtask and starts its approved subplan at the recovered step, without creating a new plan or approval gate.
 
 Use the CLI with:
 
