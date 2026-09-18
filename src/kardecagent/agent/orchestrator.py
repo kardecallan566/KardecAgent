@@ -66,7 +66,6 @@ class Orchestrator:
                 data = json.loads(response.content.strip())
                 board = manager.parse_decomposition(data)
                 self._validate_plan_steps(data, plan)
-                self._validate_scopes(board)
                 return board
             except (json.JSONDecodeError, OrchestrationError, ValueError) as exc:
                 last_error = str(exc)
@@ -154,6 +153,10 @@ class Orchestrator:
     ) -> TaskBoard:
         """Execute subtasks without replanning or asking for approval again."""
         def execute(subtask: Subtask) -> SubtaskExecutionResult:
+            if not subtask.scope:
+                return SubtaskExecutionResult(
+                    subtask.id, "failed", "Implementation subtasks require an explicit scope.", []
+                )
             subplan = self._subtask_plan(parent_plan, subtask)
             from .state import TaskState
             state = TaskState(
