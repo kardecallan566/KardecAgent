@@ -18,6 +18,10 @@ def build_parser():
     run.add_argument("--project", required=True)
     run.add_argument("--task", required=True)
     run.add_argument("--max-iterations", type=int, default=None)
+    resume = subs.add_parser("resume", help="Resume a previously approved interrupted task.")
+    resume.add_argument("--project", required=True)
+    resume.add_argument("--task", required=True)
+    resume.add_argument("--max-iterations", type=int, default=None)
     return parser
 
 
@@ -59,14 +63,14 @@ def main() -> int:
     args = build_parser().parse_args()
     settings = Settings.from_env()
 
-    if args.command == "run":
+    if args.command in {"run", "resume"}:
         if args.max_iterations is not None:
             settings = Settings(**{
                 **settings.__dict__,
                 "max_iterations": args.max_iterations,
             })
 
-        state = AgentLoop(
+        agent = AgentLoop(
             LocalLLMClient(
                 settings.llm_base_url,
                 settings.llm_model,
@@ -74,13 +78,16 @@ def main() -> int:
                 settings.llm_timeout_seconds,
             ),
             settings,
-        ).run(
-            resolve_project_root(args.project),
-            args.task,
-            approval_callback=_approve_plan,
-            high_risk_approval_callback=_approve_high_risk,
         )
-
+        root = resolve_project_root(args.project)
+        if args.command == "run":
+            state = agent.run(
+                root, args.task,
+                approval_callback=_approve_plan,
+                high_risk_approval_callback=_approve_high_risk,
+            )
+        else:
+            state = agent.resume(root, args.task)
         print(f"Status: {state.status.value}\nIterations: {state.iteration}")
         for event in state.events[-10:]:
             print(f"[{event.event_type}] {event.message}")
