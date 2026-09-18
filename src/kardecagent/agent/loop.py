@@ -147,6 +147,7 @@ class AgentLoop:
         task: str,
         *,
         approval_callback=None,
+        high_risk_approval_callback=None,
     ) -> TaskState:
         """Create a plan, wait for explicit approval, then execute it.
 
@@ -229,6 +230,20 @@ class AgentLoop:
         if not approved:
             state.status = TaskStatus.FAILED
             return state
+
+        if plan.security_level == "high_risk":
+            if high_risk_approval_callback is None:
+                state.status = TaskStatus.FAILED
+                state.record("high_risk_approval_required",
+                             "High-risk execution requires a separate explicit approval.")
+                return state
+            security_approved = bool(high_risk_approval_callback(plan))
+            state.record("high_risk_approval",
+                         "High-risk execution approved." if security_approved else "High-risk execution rejected.",
+                         approved=security_approved)
+            if not security_approved:
+                state.status = TaskStatus.FAILED
+                return state
 
         if git_is_repo(project_root):
             checkpoint = create_checkpoint(project_root, task)
