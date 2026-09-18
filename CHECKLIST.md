@@ -38,7 +38,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Read/write files
 - [x] Text search
 - [ ] Symbol-aware search
-- [ ] Language detection
+- [x] Language detection
 - [ ] Context extraction
 
 ### Terminal
@@ -86,8 +86,8 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [ ] Produce final execution report
 
 ## M1 — Reliable Coding Loop
-- [ ] Structured tool schema
-- [ ] Tool-call validation
+- [x] Structured tool schema
+- [x] Tool-call validation
 - [ ] Patch-based editing
 - [ ] File-change verification
 - [x] Automatic test command discovery
