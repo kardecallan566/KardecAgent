@@ -157,10 +157,11 @@ class AgentExecutor:
                 "tool": tool,
                 "plan_step": plan_step,
                 "subtask": subtask,
+                "subtask_id": subtask_id,
             })
         if records:
             state.record("integrity_change", "Workspace changes recorded with before/after SHA-256 fingerprints.",
-                         changes=records)
+                         changes=records, subtask_id=subtask_id)
 
     def _execute_tool(self, root: Path, action, scope: tuple[str, ...] | None, state: TaskState | None = None, subtask_id: str | None = None) -> str:
         args = action.arguments
