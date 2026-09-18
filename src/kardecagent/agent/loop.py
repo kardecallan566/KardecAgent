@@ -12,6 +12,7 @@ from .plan import ExecutionPlan, PlanError, parse_plan, plan_instructions
 from .security import assess_security, security_requirements_for
 from .state import TaskState, TaskStatus
 from .persistence import TaskStore, PersistenceError
+from .recovery import RecoveryManager
 from .tools_schema import ToolCallError
 
 SYSTEM_PROMPT = (
@@ -26,6 +27,7 @@ class AgentLoop:
         self.llm = llm
         self.settings = settings
         self.executor = AgentExecutor(llm, settings)
+        self.recovery = RecoveryManager()
 
     def _build_context(self, root: Path, task: str) -> dict:
         profile = detect_project(root)
@@ -212,7 +214,7 @@ class AgentLoop:
         approval_callback=None, high_risk_approval_callback=None, persistence_callback=None,
     ) -> TaskState:
         """Execute an already-approved plan without creating another plan or approval gate."""
-        return self.executor.execute(
+        result = self.executor.execute(
             project_root, task, plan, state, context=context,
             allowed_scope=allowed_scope, max_iterations=max_iterations,
             allow_plan_changes=allow_plan_changes,
@@ -220,3 +222,17 @@ class AgentLoop:
             high_risk_approval_callback=high_risk_approval_callback,
             persistence_callback=persistence_callback,
         )
+        # Parent execution owns recovery when no logical subtask scope exists.
+        # Subtasks are recovered by the orchestrator using their subtask ID.
+        if result.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS} and not (context or {}).get("subtask"):
+            recovery = self.recovery.recover(project_root, result)
+            result.record(
+                "task_recovery",
+                "Recovery attempted after approved-plan execution failure.",
+                recovered=recovery.recovered,
+                rolled_back_files=list(recovery.rolled_back_files),
+                conflict_paths=list(recovery.conflict_paths),
+            )
+            if persistence_callback is not None:
+                persistence_callback(result, plan)
+        return result
