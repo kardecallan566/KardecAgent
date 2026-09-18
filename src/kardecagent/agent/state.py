@@ -51,8 +51,30 @@ class TaskState:
     status: TaskStatus = TaskStatus.PENDING
     iteration: int = 0
     events: list[AgentEvent] = field(default_factory=list)
+    active_plan_step: int = 1
+    active_subtask_id: str | None = None
 
     def record(self, event_type: str, message: str, **data) -> None:
+        # Keep the in-memory cursor synchronized. The journal replays the same
+        # lifecycle events and is the durable source of truth when loading.
+        if event_type == "plan_step_started":
+            step = data.get("step")
+            if isinstance(step, int) and step > 0:
+                self.active_plan_step = step
+        elif event_type == "plan_step_completed":
+            step = data.get("step")
+            if isinstance(step, int) and step > 0:
+                self.active_plan_step = step + 1
+        elif event_type in {"recovery_completed", "subtask_resume_retry_started"}:
+            step = data.get("resume_step")
+            if isinstance(step, int) and step > 0:
+                self.active_plan_step = step
+        elif event_type == "subtask_started":
+            value = data.get("subtask_id")
+            self.active_subtask_id = value if isinstance(value, str) else None
+        elif event_type in {"subtask_completed", "subtask_failed", "subtask_blocked"}:
+            if data.get("subtask_id") == self.active_subtask_id:
+                self.active_subtask_id = None
         self.events.append(AgentEvent(self.iteration, event_type, message, data, sequence=len(self.events) + 1))
 
     def transition(self, new_status: TaskStatus, *, reason: str = "", **data) -> None:
