@@ -79,6 +79,7 @@ def test_run_command_detects_new_file_outside_scope(tmp_path: Path):
         assert "scope violation" in str(exc)
     else:
         raise AssertionError("expected scope violation")
+    assert (tmp_path / "outside.txt").read_text(encoding="utf-8") == "already dirty"
     assert (tmp_path / "outside.txt").exists()
 
 
