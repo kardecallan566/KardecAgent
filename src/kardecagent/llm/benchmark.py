@@ -100,3 +100,339 @@ def run_benchmark(
             )
         )
     return results
+
+
+# --- Agentic benchmark -----------------------------------------------------
+
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+
+
+@dataclass(frozen=True)
+class AgenticCase:
+    name: str
+    prompt: str
+    expected_files: tuple[str, ...]
+    test_command: tuple[str, ...]
+    verify: Callable[[Path], bool]
+
+
+@dataclass(frozen=True)
+class AgenticResult:
+    model: str
+    case: str
+    passed: bool
+    elapsed_seconds: float
+    eval_tokens: int
+    tokens_per_second: float
+    files_changed: tuple[str, ...]
+    test_output: str
+    error: str = ""
+
+
+_FILE_RE = re.compile(
+    r"(?ms)^===\s*FILE:\s*([^\r\n]+)\s*===\s*\n(.*?)^===\s*END FILE\s*===\s*$"
+)
+
+
+def _parse_files(text: str) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for match in _FILE_RE.finditer(text):
+        path = match.group(1).strip().replace("\\", "/")
+        if not path or path.startswith("/") or ":" in path or ".." in Path(path).parts:
+            raise ValueError(f"Unsafe benchmark file path: {path!r}")
+        files[path] = match.group(2)
+    if not files:
+        raise ValueError("Model returned no FILE blocks.")
+    return files
+
+
+def _write_files(root: Path, files: dict[str, str]) -> None:
+    root = root.resolve()
+    for relative, content in files.items():
+        target = (root / relative).resolve()
+        if root not in target.parents:
+            raise ValueError(f"Benchmark attempted to escape fixture: {relative}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def _fixture_cases() -> tuple[AgenticCase, ...]:
+    return (
+        AgenticCase(
+            "implement_existing_function",
+            """Inspect the project and implement the task. Return ONLY complete modified files as FILE blocks.
+Format:
+=== FILE: path ===
+<complete file>
+=== END FILE ===
+
+src/math_utils.py:
+def clamp(value, minimum, maximum):
+    pass
+
+tests/test_math_utils.py:
+from math_utils import clamp
+def test_clamp():
+    assert clamp(5, 0, 10) == 5
+    assert clamp(-1, 0, 10) == 0
+    assert clamp(20, 0, 10) == 10
+
+Task: implement clamp and raise ValueError when minimum > maximum.""",
+            ("src/math_utils.py",),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "raise ValueError" in (root / "src/math_utils.py").read_text(),
+        ),
+        AgenticCase(
+            "debug_existing_code",
+            """Fix the bug. Return ONLY complete modified files as FILE blocks.
+
+src/cart.py:
+def total(items):
+    total = 0
+    for item in items:
+        total += item["price"] * item.get("quantity", 1)
+    return total / len(items)
+
+tests/test_cart.py:
+from cart import total
+def test_total_empty_cart():
+    assert total([]) == 0
+def test_total():
+    assert total([{"price": 10, "quantity": 2}, {"price": 5}]) == 25
+
+Task: make total([]) return 0 without changing non-empty behavior.""",
+            ("src/cart.py",),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "if not items" in (root / "src/cart.py").read_text(),
+        ),
+        AgenticCase(
+            "multi_file_feature",
+            """Implement the feature and tests. Return ONLY complete modified files as FILE blocks.
+
+src/config.py:
+DEFAULTS = {"retries": 3}
+
+src/service.py:
+from config import DEFAULTS
+def retry_count(config=None):
+    config = config or DEFAULTS
+    return config["retries"]
+
+tests/test_service.py:
+from service import retry_count
+def test_default():
+    assert retry_count() == 3
+
+Task: accept only integer retries >= 0; invalid values raise ValueError. Preserve the public API and default behavior. Add regression tests.""",
+            ("src/service.py", "tests/test_service.py"),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "ValueError" in (root / "src/service.py").read_text(),
+        ),
+        AgenticCase(
+            "create_tests",
+            """Create useful pytest tests. Return ONLY the new/modified test file as FILE blocks.
+
+src/parser.py:
+def parse_port(value):
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise ValueError("invalid port")
+    return port
+
+Task: test a valid port, a non-numeric value, zero, and 65536. Do not modify parser.py.""",
+            ("tests/test_parser.py",),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: (root / "tests/test_parser.py").exists()
+            and all(x in (root / "tests/test_parser.py").read_text() for x in ("65536", "0", "parse_port")),
+        ),
+        AgenticCase(
+            "refactor_without_regression",
+            """Refactor without changing behavior. Return ONLY complete modified files as FILE blocks.
+
+src/names.py:
+def normalize_names(names):
+    result = []
+    for name in names:
+        cleaned = name.strip().lower()
+        if cleaned:
+            result.append(cleaned)
+    return result
+
+tests/test_names.py:
+from names import normalize_names
+def test_names():
+    assert normalize_names([" Alice ", "", "BOB"]) == ["alice", "bob"]
+
+Task: improve readability while preserving behavior. Do not add dependencies.""",
+            ("src/names.py",),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: (root / "src/names.py").exists(),
+        ),
+        AgenticCase(
+            "traceback_repair",
+            """Repair the failing project. Return ONLY complete modified files as FILE blocks.
+
+src/report.py:
+def average(values):
+    return sum(values) / len(values)
+
+tests/test_report.py:
+from report import average
+def test_empty():
+    assert average([]) == 0
+def test_values():
+    assert average([2, 4, 6]) == 4
+
+Task: fix the ZeroDivisionError for an empty list while preserving normal averages.""",
+            ("src/report.py",),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "if not values" in (root / "src/report.py").read_text(),
+        ),
+        AgenticCase(
+            "feature_with_tests",
+            """Implement the feature and tests. Return ONLY complete modified files as FILE blocks.
+
+src/todo.py:
+def add_todo(items, title):
+    items.append({"title": title, "done": False})
+    return items[-1]
+
+tests/test_todo.py:
+from todo import add_todo
+def test_add():
+    items = []
+    assert add_todo(items, "Study") == {"title": "Study", "done": False}
+
+Task: add complete_todo(items, index), mark one item done, return it, and raise IndexError for invalid index. Add tests.""",
+            ("src/todo.py", "tests/test_todo.py"),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "def complete_todo" in (root / "src/todo.py").read_text(),
+        ),
+        AgenticCase(
+            "review_and_fix",
+            """Review and fix the implementation. Return ONLY complete modified files as FILE blocks.
+
+src/auth.py:
+def is_admin(user):
+    return user.get("role") == "admin" or user.get("is_admin") == True
+
+tests/test_auth.py:
+from auth import is_admin
+def test_role():
+    assert is_admin({"role": "admin"}) is True
+def test_false_flag():
+    assert is_admin({"role": "user", "is_admin": False}) is False
+def test_none():
+    assert is_admin(None) is False
+
+Task: preserve behavior, use an idiomatic boolean check, and safely handle user=None.""",
+            ("src/auth.py",),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "user is None" in (root / "src/auth.py").read_text()
+            or "not user" in (root / "src/auth.py").read_text(),
+        ),
+    )
+
+
+def _prepare_fixture(root: Path, case: AgenticCase) -> None:
+    fixtures: dict[str, dict[str, str]] = {
+        "implement_existing_function": {
+            "src/math_utils.py": "def clamp(value, minimum, maximum):\n    pass\n",
+            "tests/test_math_utils.py": "from math_utils import clamp\n\ndef test_clamp():\n    assert clamp(5, 0, 10) == 5\n    assert clamp(-1, 0, 10) == 0\n    assert clamp(20, 0, 10) == 10\n    import pytest\n    with pytest.raises(ValueError):\n        clamp(1, 10, 0)\n",
+        },
+        "debug_existing_code": {
+            "src/cart.py": "def total(items):\n    total = 0\n    for item in items:\n        total += item['price'] * item.get('quantity', 1)\n    return total / len(items)\n",
+            "tests/test_cart.py": "from cart import total\n\ndef test_total_empty_cart():\n    assert total([]) == 0\n\ndef test_total():\n    assert total([{'price': 10, 'quantity': 2}, {'price': 5}]) == 25\n",
+        },
+        "multi_file_feature": {
+            "src/config.py": 'DEFAULTS = {"retries": 3}\n',
+            "src/service.py": "from config import DEFAULTS\n\ndef retry_count(config=None):\n    config = config or DEFAULTS\n    return config['retries']\n",
+            "tests/test_service.py": "from service import retry_count\n\ndef test_default():\n    assert retry_count() == 3\n\ndef test_invalid():\n    import pytest\n    with pytest.raises(ValueError):\n        retry_count({'retries': -1})\n",
+        },
+        "create_tests": {
+            "src/parser.py": "def parse_port(value):\n    port = int(value)\n    if not 1 <= port <= 65535:\n        raise ValueError('invalid port')\n    return port\n",
+        },
+        "refactor_without_regression": {
+            "src/names.py": "def normalize_names(names):\n    result = []\n    for name in names:\n        cleaned = name.strip().lower()\n        if cleaned:\n            result.append(cleaned)\n    return result\n",
+            "tests/test_names.py": "from names import normalize_names\n\ndef test_names():\n    assert normalize_names([' Alice ', '', 'BOB']) == ['alice', 'bob']\n",
+        },
+        "traceback_repair": {
+            "src/report.py": "def average(values):\n    return sum(values) / len(values)\n",
+            "tests/test_report.py": "from report import average\n\ndef test_empty():\n    assert average([]) == 0\n\ndef test_values():\n    assert average([2, 4, 6]) == 4\n",
+        },
+        "feature_with_tests": {
+            "src/todo.py": "def add_todo(items, title):\n    items.append({'title': title, 'done': False})\n    return items[-1]\n",
+            "tests/test_todo.py": "from todo import add_todo\n\ndef test_add():\n    items = []\n    assert add_todo(items, 'Study') == {'title': 'Study', 'done': False}\n\ndef test_complete():\n    from todo import complete_todo\n    items = [{'title': 'Study', 'done': False}]\n    assert complete_todo(items, 0)['done'] is True\n\ndef test_invalid():\n    import pytest\n    with pytest.raises(IndexError):\n        complete_todo([], 0)\n",
+        },
+        "review_and_fix": {
+            "src/auth.py": "def is_admin(user):\n    return user.get('role') == 'admin' or user.get('is_admin') == True\n",
+            "tests/test_auth.py": "from auth import is_admin\n\ndef test_role():\n    assert is_admin({'role': 'admin'}) is True\n\ndef test_false_flag():\n    assert is_admin({'role': 'user', 'is_admin': False}) is False\n\ndef test_none():\n    assert is_admin(None) is False\n",
+        },
+    }
+    for relative, content in fixtures[case.name].items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def run_agentic_benchmark(
+    client: OllamaClient,
+    *,
+    cases: tuple[AgenticCase, ...] | None = None,
+) -> list[AgenticResult]:
+    results: list[AgenticResult] = []
+    for case in cases or _fixture_cases():
+        started = perf_counter()
+        with tempfile.TemporaryDirectory(prefix="kardecagent-bench-") as temp:
+            root = Path(temp)
+            _prepare_fixture(root, case)
+            try:
+                response = client.chat(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a coding benchmark. Inspect the project and return "
+                                "only complete FILE blocks. Do not use markdown fences or explanations."
+                            ),
+                        },
+                        {"role": "user", "content": case.prompt},
+                    ],
+                    temperature=0.0,
+                )
+                raw = response.raw
+                eval_tokens = int(raw.get("eval_count") or 0)
+                eval_duration_ns = int(raw.get("eval_duration") or 0)
+                tps = (
+                    eval_tokens / (eval_duration_ns / 1_000_000_000)
+                    if eval_tokens and eval_duration_ns
+                    else 0.0
+                )
+                files = _parse_files(response.content)
+                _write_files(root, files)
+                missing = [p for p in case.expected_files if not (root / p).exists()]
+                if missing:
+                    raise ValueError("Missing expected files: " + ", ".join(missing))
+                proc = subprocess.run(
+                    case.test_command,
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
+                passed = proc.returncode == 0 and case.verify(root)
+                output = (proc.stdout + "\n" + proc.stderr).strip()[-4000:]
+                results.append(AgenticResult(
+                    client.model, case.name, passed, perf_counter() - started,
+                    eval_tokens, tps, tuple(sorted(files)), output,
+                ))
+            except Exception as exc:
+                results.append(AgenticResult(
+                    client.model, case.name, False, perf_counter() - started,
+                    0, 0.0, (), "", str(exc),
+                ))
+    return results
