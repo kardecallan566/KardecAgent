@@ -53,6 +53,7 @@ class TaskState:
     events: list[AgentEvent] = field(default_factory=list)
     active_plan_step: int = 1
     active_subtask_id: str | None = None
+    active_subtask_step: int = 1
 
     def record(self, event_type: str, message: str, **data) -> None:
         # Keep the in-memory cursor synchronized. The journal replays the same
@@ -72,9 +73,15 @@ class TaskState:
         elif event_type == "subtask_started":
             value = data.get("subtask_id")
             self.active_subtask_id = value if isinstance(value, str) else None
+            self.active_subtask_step = 1
+        elif event_type in {"subtask_progress", "subtask_retry_started"}:
+            step = data.get("plan_step") if event_type == "subtask_progress" else data.get("resume_step")
+            if isinstance(step, int) and step > 0:
+                self.active_subtask_step = step
         elif event_type in {"subtask_completed", "subtask_failed", "subtask_blocked"}:
             if data.get("subtask_id") == self.active_subtask_id:
                 self.active_subtask_id = None
+                self.active_subtask_step = 1
         self.events.append(AgentEvent(self.iteration, event_type, message, data, sequence=len(self.events) + 1))
 
     def transition(self, new_status: TaskStatus, *, reason: str = "", **data) -> None:
