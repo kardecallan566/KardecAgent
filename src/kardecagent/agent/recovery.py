@@ -132,12 +132,18 @@ class RecoveryManager:
             seen.add(raw)
             target = root / raw
             try:
-                target = target.resolve(strict=False)
                 target.relative_to(root.resolve())
             except ValueError:
                 conflicts.append(raw)
                 continue
-            if target.is_symlink() or (target.exists() and not target.is_file()):
+            current = target
+            unsafe = False
+            while current != root:
+                if current.is_symlink():
+                    unsafe = True
+                    break
+                current = current.parent
+            if unsafe or target.is_symlink() or (target.exists() and not target.is_file()):
                 conflicts.append(raw)
                 continue
             digest = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
