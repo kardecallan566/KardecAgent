@@ -58,6 +58,15 @@ def test_inside_scope_changes_can_be_kept(tmp_path: Path):
     assert snapshot.restore(set()) == []
 
 
+def test_project_snapshot_detects_non_git_changes(tmp_path: Path):
+    (tmp_path / "inside.txt").write_text("before", encoding="utf-8")
+    snapshot = WorkspaceSnapshot.for_project(tmp_path)
+    (tmp_path / "new.txt").write_text("created", encoding="utf-8")
+    (tmp_path / "inside.txt").write_text("after", encoding="utf-8")
+    after = WorkspaceSnapshot.for_project(tmp_path)
+    assert after.changed_paths(snapshot) == {"inside.txt", "new.txt"}
+
+
 def test_symlink_is_not_auto_remediated(tmp_path: Path):
     (tmp_path / "outside.txt").write_text("safe", encoding="utf-8")
     init_git(tmp_path)
