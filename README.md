@@ -16,7 +16,7 @@ Current security layers:
 - deterministic secret/credential scanning;
 - security check required during sensitive/high-risk completion verification.
 
-Planned next layers include independent security review, dependency vulnerability analysis, and stronger secret scanning.
+Independent security review and dependency vulnerability analysis are also enforced for sensitive/high-risk completion. Stronger secret scanning remains a future hardening layer.
 
 
 ### Web Search Tool
@@ -109,3 +109,20 @@ kardec-agent resume --project D:\path\to\project --task "implement feature"
 ```
 
 The persistence file is written atomically and remains inside the project. It should be treated as local execution state, not as a substitute for Git history or backups.
+
+
+### Formal execution state machine
+
+Task execution is controller-owned and follows a validated state machine. Direct model actions cannot choose task status transitions.
+
+Normal completion flow:
+
+`PENDING -> RUNNING -> VERIFYING -> VERIFIED -> COMPLETED`
+
+Failure and recovery flow:
+
+`RUNNING -> FAILED/MAX_ITERATIONS -> RECOVERING -> RESUMING -> RUNNING`
+
+Recovery may instead end in `FAILED` when workspace conflicts, invalid audit data, or rollback errors prevent a safe resume. Invalid transitions are rejected by `TaskState.transition()`, and every valid transition is recorded as a `status_changed` event for persistence and auditability.
+
+Recovered executions resume only from the last consistently completed approved plan step. Subtasks use the same state machine and can perform one deterministic retry after audited changes are safely rolled back.
