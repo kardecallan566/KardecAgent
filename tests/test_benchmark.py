@@ -94,6 +94,12 @@ def clamp(value, minimum, maximum):
     assert result.first_attempt_passed is True
     assert result.recovery_attempts == 0
     assert result.eval_tokens == 20
+    assert result.reads == 1
+    assert result.writes == 1
+    assert result.runs == 1
+    assert result.dones == 0
+    assert result.invalid_actions == 0
+    assert result.action_trace == ("step=1 READ src/math_utils.py", "step=2 WRITE src/math_utils.py", "step=2 RUN python -m pytest -q PASS")
 
 
 def test_agentic_benchmark_recovers_after_failed_test():
@@ -122,3 +128,21 @@ def clamp(value, minimum, maximum):
     assert result.attempts == 2
     assert result.recovery_attempts == 1
     assert result.first_attempt_passed is False
+
+
+def test_agentic_benchmark_records_invalid_response_and_recovers_protocol():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        "I will inspect the project first.",
+        "=== READ: src/math_utils.py ===\n=== END READ ===",
+        "=== WRITE: src/math_utils.py ===\ndef clamp(value, minimum, maximum):\n    if minimum > maximum:\n        raise ValueError(\"invalid range\")\n    return max(minimum, min(value, maximum))\n=== END WRITE ===\n=== RUN: python -m pytest -q ===\n=== END RUN ===",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=4)[0]
+    assert result.passed is True
+    assert result.invalid_actions == 1
+    assert result.reads == 1
+    assert result.writes == 1
+    assert result.runs == 1
+    assert result.action_trace[0].startswith("step=1 INVALID")
+    assert result.action_trace[-1].endswith("PASS")
