@@ -1,4 +1,4 @@
-from kardecagent.llm.benchmark import CASES, default_models, run_benchmark, run_agentic_benchmark, AgenticCase
+from kardecagent.llm.benchmark import CASES, default_models, run_benchmark, run_agentic_benchmark
 
 
 class FakeClient:
@@ -73,6 +73,8 @@ class FakeAgenticClient:
 
 
 def test_agentic_benchmark_runs_read_write_and_test_loop():
+    from kardecagent.llm.benchmark import _fixture_cases
+
     client = FakeAgenticClient([
         "=== READ: src/math_utils.py ===\n=== END READ ===",
         """=== WRITE: src/math_utils.py ===
@@ -84,13 +86,7 @@ def clamp(value, minimum, maximum):
 === RUN: python -m pytest -q ===
 === END RUN ===""",
     ])
-    case = AgenticCase(
-        "loop_case",
-        "Implement clamp.",
-        ("src/math_utils.py",),
-        ("python", "-m", "pytest", "-q"),
-        lambda root: "raise ValueError" in (root / "src/math_utils.py").read_text(),
-    )
+    case = _fixture_cases()[0]
     result = run_agentic_benchmark(client, cases=(case,), max_steps=3)[0]
     assert result.passed is True
     assert result.attempts == 1
@@ -101,6 +97,8 @@ def clamp(value, minimum, maximum):
 
 
 def test_agentic_benchmark_recovers_after_failed_test():
+    from kardecagent.llm.benchmark import _fixture_cases
+
     client = FakeAgenticClient([
         "=== READ: src/math_utils.py ===\n=== END READ ===",
         """=== WRITE: src/math_utils.py ===
@@ -118,13 +116,7 @@ def clamp(value, minimum, maximum):
 === RUN: python -m pytest -q ===
 === END RUN ===""",
     ])
-    case = AgenticCase(
-        "recovery_case",
-        "Implement clamp.",
-        ("src/math_utils.py",),
-        ("python", "-m", "pytest", "-q"),
-        lambda root: "raise ValueError" in (root / "src/math_utils.py").read_text(),
-    )
+    case = _fixture_cases()[0]
     result = run_agentic_benchmark(client, cases=(case,), max_steps=4)[0]
     assert result.passed is True
     assert result.attempts == 2
