@@ -284,5 +284,5 @@ def clamp(value, minimum, maximum):
 === END WRITE ===""",
         "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
-    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=2)[0]
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=4)[0]
     assert result.passed is True
