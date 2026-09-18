@@ -84,7 +84,8 @@ class TaskStore:
                 TaskStatus(payload["status"]), int(payload["iteration"]),
                 [AgentEvent(
                     int(event["iteration"]), event["event_type"],
-                    event["message"], dict(event.get("data", {}))
+                    event["message"], dict(event.get("data", {})),
+                    str(event.get("timestamp", ""))
                 ) for event in payload.get("events", [])],
             )
             board = _board_from_dict(payload.get("board"))
