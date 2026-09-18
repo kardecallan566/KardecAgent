@@ -11,6 +11,7 @@ from .executor import AgentExecutor
 from .plan import ExecutionPlan, PlanError, parse_plan, plan_instructions
 from .security import assess_security, security_requirements_for
 from .state import TaskState, TaskStatus
+from .persistence import TaskStore, PersistenceError
 from .tools_schema import ToolCallError
 
 SYSTEM_PROMPT = (
@@ -111,6 +112,10 @@ class AgentLoop:
                 return state
             state.record("high_risk_approval", "High-risk execution approved.", approved=True)
 
+        store = TaskStore(root)
+        store.save(state, plan=plan, approved=True)
+        state.record("task_persisted", "Approved task state persisted for resume.", path=str(store.path_for(task)))
+
         if git_is_repo(root):
             checkpoint = create_checkpoint(root, task)
             if checkpoint.returncode == 0:
@@ -131,9 +136,11 @@ class AgentLoop:
                          "Approved plan is large enough for logical subtask decomposition.")
             try:
                 board = orchestrator.decompose(plan, root)
+                store.save(state, plan=plan, board=board, approved=True)
                 state.record("subtask_decomposed", "Approved plan decomposed into logical subtasks.",
                              board=board.as_dict())
-                board = orchestrator.execute_approved_plan(root, task, plan, board)
+                board = orchestrator.execute_approved_plan(root, task, plan, board,
+                    progress_callback=lambda current: store.save(state, plan=plan, board=current, approved=True))
                 state.record("subtask_execution_finished", "Logical subtask execution finished.",
                              board=board.as_dict())
                 if not board.completed:
@@ -158,13 +165,14 @@ class AgentLoop:
 
         return self.execute_approved_plan(root, task, plan, state, context=context,
                                           approval_callback=approval_callback,
-                                          high_risk_approval_callback=high_risk_approval_callback)
+                                          high_risk_approval_callback=high_risk_approval_callback,
+                                          persistence_callback=lambda s, p: store.save(s, plan=p, approved=True))
 
     def execute_approved_plan(
         self, project_root: Path, task: str, plan: ExecutionPlan, state: TaskState,
         *, context: dict | None = None, allowed_scope: tuple[str, ...] | None = None,
         max_iterations: int | None = None, allow_plan_changes: bool = True,
-        approval_callback=None, high_risk_approval_callback=None,
+        approval_callback=None, high_risk_approval_callback=None, persistence_callback=None,
     ) -> TaskState:
         """Execute an already-approved plan without creating another plan or approval gate."""
         return self.executor.execute(
@@ -173,4 +181,5 @@ class AgentLoop:
             allow_plan_changes=allow_plan_changes,
             approval_callback=approval_callback,
             high_risk_approval_callback=high_risk_approval_callback,
+            persistence_callback=persistence_callback,
         )
