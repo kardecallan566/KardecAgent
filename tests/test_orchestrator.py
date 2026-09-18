@@ -73,11 +73,6 @@ def test_failed_subtask_blocks_dependents(tmp_path: Path):
 
 def test_sequential_resume_prioritizes_active_subtask_and_step(tmp_path: Path):
     orchestrator = Orchestrator(FakeLLM("{}"), Settings())
-    board = orchestrator.decompose(
-        make_plan(),
-        tmp_path,
-    ) if False else None
-
     from kardecagent.tasks import Subtask, TaskBoard
     board = TaskBoard()
     board.add(Subtask("1", "First", "First", scope=("src",), plan_steps=(1,)))
