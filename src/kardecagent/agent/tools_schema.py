@@ -17,6 +17,7 @@ TOOL_SCHEMAS = {
     "list_files": {"required": [], "types": {}, "optional": {"limit": int}},
     "read_file": {"required": ["path"], "types": {"path": str}, "optional": {}},
     "search_files": {"required": ["query"], "types": {"query": str}, "optional": {"max_results": int}},
+    "search_web": {"required": ["query"], "types": {"query": str}, "optional": {"max_results": int}},
     "write_file": {"required": ["path", "content"], "types": {"path": str, "content": str}, "optional": {}},
     "run_command": {"required": ["command"], "types": {"command": str}, "optional": {}},
     "run_checks": {"required": ["kind"], "types": {"kind": str}, "optional": {}},
@@ -72,7 +73,7 @@ def tool_instructions() -> str:
     return (
         'Return ONLY JSON with tool, arguments and optional plan_step. '
         'plan_step is required for write_file, run_command, run_checks and complete_step. '
-        'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, '
+        'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, '
         'write_file, run_command, run_checks, git_status, git_diff, git_log, '
         'complete_step, request_plan_change, finish. finish requires criteria_evidence for every completion criterion. '
         'Only execute actions belonging to the active approved plan step. '
