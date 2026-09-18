@@ -630,7 +630,7 @@ def run_agentic_benchmark(
                         "=== READ: relative/path ===\n=== END READ ===\n"
                         "=== WRITE: relative/path ===\n<complete file contents>\n=== END WRITE ===\n"
                         "=== RUN: python -m pytest -q ===\n=== END RUN ===\n"
-                        "=== DONE: success ===\n=== END DONE ===\n"
+                        "=== DONE: success ===\n"
                         "Only use the exact test command shown. Do not access files outside the project. "
                         "READ each relevant file at most once. Once the relevant files are read, move to WRITE. "
                         "After a failed test, the next productive action MUST be WRITE; do not run the same failing "
