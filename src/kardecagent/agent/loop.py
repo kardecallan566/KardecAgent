@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ..config import Settings
-from ..project import discover_command, project_snapshot
+from ..project import discover_command, project_snapshot, detect_project, validate_project
 from ..llm import LocalLLMClient
 from ..tools import (
     ProjectFilesystem,
@@ -28,7 +28,7 @@ SYSTEM_PROMPT = (
     "verification. Prefer run_checks after changes."
 )
 
-CHECK_KINDS = ("test", "typecheck", "lint", "build")
+CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate")
 
 
 class AgentLoop:
@@ -37,6 +37,18 @@ class AgentLoop:
         self.settings = settings
 
     def _run_check(self, root: Path, kind: str) -> dict:
+        if kind == "validate":
+            profile = detect_project(root)
+            if profile.kind != "static-html":
+                return {"kind": kind, "available": False, "project_kind": profile.kind}
+            result = validate_project(root, profile.kind)
+            return {
+                "kind": kind,
+                "available": True,
+                "project_kind": profile.kind,
+                **result.as_dict(),
+            }
+
         command = discover_command(root, kind)
         if not command:
             return {"kind": kind, "available": False}
@@ -154,6 +166,13 @@ class AgentLoop:
                 "content": json.dumps(
                     {
                         "task": task,
+                        "project": {
+                            "kind": profile.kind,
+                            "language": profile.language,
+                            "framework": profile.framework,
+                            "package_manager": profile.package_manager,
+                            "commands": profile.commands,
+                        },
                         "project_files": project_snapshot(project_root),
                     },
                     ensure_ascii=False,
