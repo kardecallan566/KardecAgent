@@ -42,6 +42,7 @@ class TaskJournal:
         existing = self.read()
         expected = len(existing) + 1
         previous_hash = existing[-1]["checksum"] if existing else ""
+        current_status = existing[-1]["status"] if existing else TaskStatus.PENDING.value
         pending = [event for event in state.events if event.sequence >= expected]
 
         if pending and pending[0].sequence != expected:
@@ -59,14 +60,16 @@ class TaskJournal:
                         raise PersistenceError(
                             f"journal sequence gap: expected {expected}, got {event.sequence}"
                         )
+                    if event.event_type == "status_changed":
+                        current_status = str(event.data.get("to_status", current_status))
                     record = {
                         "version": self.VERSION,
                         "sequence": event.sequence,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "task": state.task,
                         "event": asdict(event),
-                        "status": state.status.value,
-                        "iteration": state.iteration,
+                        "status": current_status,
+                        "iteration": event.iteration,
                         "previous_checksum": previous_hash,
                     }
                     record["checksum"] = hashlib.sha256(
