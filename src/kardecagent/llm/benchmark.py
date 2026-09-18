@@ -519,7 +519,7 @@ def _project_snapshot(root: Path) -> str:
     for path in sorted(root.rglob("*")):
         if path.is_file() and "__pycache__" not in path.parts:
             files.append(path.relative_to(root).as_posix())
-    return "\\n".join(files)
+    return "\n".join(files)
 
 
 def _read_project_file(root: Path, relative: str) -> str:
@@ -691,7 +691,7 @@ def run_agentic_benchmark(
                             reads += 1
                             read_history.add(relative)
                             content = _read_project_file(root, relative)
-                            feedback.append(f"READ {relative}:\\n{content}")
+                            feedback.append(f"READ {relative}:\n{content}")
                         elif kind == "WRITE":
                             writes += 1
                             relative = _safe_relative_path(target)
@@ -727,7 +727,7 @@ def run_agentic_benchmark(
                             step_test_passed = code == 0 and case.verify(root)
                             action_trace[-1] += f" {'PASS' if step_test_passed else 'FAIL'}"
                             feedback.append(
-                                f"RUN {target}: {'PASS' if step_test_passed else 'FAIL'}\\n{output}"
+                                f"RUN {target}: {'PASS' if step_test_passed else 'FAIL'}\n{output}"
                             )
                             if step_test_passed:
                                 if attempts == 1:
@@ -742,7 +742,7 @@ def run_agentic_benchmark(
                                 for relative in sorted(changed):
                                     try:
                                         current_files.append(
-                                            f"CURRENT {relative}:\\n{_read_project_file(root, relative)}"
+                                            f"CURRENT {relative}:\n{_read_project_file(root, relative)}"
                                         )
                                     except (FileNotFoundError, ValueError):
                                         pass
@@ -780,7 +780,7 @@ def run_agentic_benchmark(
                             "Tests failed. Treat the output above as the debugging feedback, "
                             "inspect the relevant files, apply a fix, and run pytest again."
                         )
-                    messages.append({"role": "user", "content": "\\n\\n".join(feedback)})
+                    messages.append({"role": "user", "content": "\n\n".join(feedback)})\n                    # Keep the task/system context plus only the recent tool exchange.\n                    # Replaying many full-file WRITE responses quickly overwhelms small models.\n                    if len(messages) > 8:\n                        messages = [messages[0], messages[1], *messages[-6:]]
 
                 if not passed:
                     error = f"Agent did not reach a passing test state within {max_steps} steps."
