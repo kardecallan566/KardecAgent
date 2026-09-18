@@ -55,7 +55,7 @@ CASES = (
 
 
 def default_models() -> tuple[str, ...]:
-    return ("qwen2.5-coder:1.5b", "qwen2.5-coder:3b", "qwen2.5-coder:7b", "Qwen3-Coder-Next-GGUF")
+    return ("qwen2.5-coder:1.5b", "qwen2.5-coder:3b", "qwen2.5-coder:7b", "qwen3.5:4b", "deepseek-coder:1.3b-instruct", "deepseek-coder:6.7b")
 
 
 def run_benchmark(
@@ -333,6 +333,105 @@ Task: preserve behavior, use an idiomatic boolean check, and safely handle user=
             ("python", "-m", "pytest", "-q"),
             lambda root: "user is None" in (root / "src/auth.py").read_text()
             or "not user" in (root / "src/auth.py").read_text(),
+        ),
+        AgenticCase(
+            "api_contract_feature",
+            """Implement the feature and regression tests. Return ONLY complete modified files as FILE blocks.
+
+src/users.py:
+def get_user(users, user_id):
+    for user in users:
+        if user["id"] == user_id:
+            return user
+    return None
+
+tests/test_users.py:
+from users import get_user
+def test_existing():
+    assert get_user([{"id": 1, "name": "Ada"}], 1)["name"] == "Ada"
+
+Task: add find_users(users, query) that performs case-insensitive substring matching against the name field, returns a new list, and does not mutate the input. Add tests for case-insensitivity, multiple matches, no matches, and input immutability.""",
+            ("src/users.py", "tests/test_users.py"),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "def find_users" in (root / "src/users.py").read_text()
+            and "lower()" in (root / "src/users.py").read_text(),
+        ),
+        AgenticCase(
+            "state_machine_bug",
+            """Implement the fix and tests. Return ONLY complete modified files as FILE blocks.
+
+src/workflow.py:
+STATES = ("pending", "running", "done")
+
+def transition(state, event):
+    if event == "start":
+        return "running"
+    if event == "finish":
+        return "done"
+    return state
+
+tests/test_workflow.py:
+from workflow import transition
+def test_start():
+    assert transition("pending", "start") == "running"
+def test_finish():
+    assert transition("running", "finish") == "done"
+
+Task: reject invalid transitions with ValueError: pending may only receive start; running may only receive finish; done cannot transition. Preserve valid behavior and add regression tests.""",
+            ("src/workflow.py", "tests/test_workflow.py"),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "ValueError" in (root / "src/workflow.py").read_text(),
+        ),
+        AgenticCase(
+            "security_regression",
+            """Review the code for the requested security behavior and add tests. Return ONLY complete modified files as FILE blocks.
+
+src/redirect.py:
+from urllib.parse import urlparse
+
+def is_safe_redirect(url, allowed_host):
+    parsed = urlparse(url)
+    return parsed.netloc == allowed_host
+
+tests/test_redirect.py:
+from redirect import is_safe_redirect
+def test_allowed():
+    assert is_safe_redirect("https://example.com/dashboard", "example.com") is True
+
+Task: prevent host confusion attacks. The function must accept only an exact hostname match, reject username/password URLs such as https://example.com@evil.com, reject empty hosts, and reject non-http/https schemes. Add regression tests. Do not add dependencies.""",
+            ("src/redirect.py", "tests/test_redirect.py"),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "http" in (root / "src/redirect.py").read_text()
+            and "username" in (root / "src/redirect.py").read_text(),
+        ),
+        AgenticCase(
+            "cross_module_refactor",
+            """Perform the refactor while preserving the public API. Return ONLY complete modified files as FILE blocks.
+
+src/pricing.py:
+def subtotal(items):
+    return sum(item["price"] * item.get("quantity", 1) for item in items)
+
+def discount(total, percent):
+    return total * (1 - percent / 100)
+
+def final_price(items, percent):
+    return discount(subtotal(items), percent)
+
+tests/test_pricing.py:
+from pricing import subtotal, discount, final_price
+def test_pricing():
+    items = [{"price": 10, "quantity": 2}, {"price": 5}]
+    assert subtotal(items) == 25
+    assert discount(25, 20) == 20
+    assert final_price(items, 20) == 20
+
+Task: validate that prices and quantities are non-negative and that discount percent is between 0 and 100 inclusive. Raise ValueError for invalid input. Keep the three public functions and add tests covering boundary and invalid cases.""",
+            ("src/pricing.py", "tests/test_pricing.py"),
+            ("python", "-m", "pytest", "-q"),
+            lambda root: "ValueError" in (root / "src/pricing.py").read_text()
+            and "def subtotal" in (root / "src/pricing.py").read_text()
+            and "def final_price" in (root / "src/pricing.py").read_text(),
         ),
     )
 
