@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ..config import Settings
-from ..project import discover_command, project_snapshot, detect_project, validate_project, scan_project
+from ..project import discover_command, project_snapshot, detect_project, validate_project, scan_project\nfrom ..project.dependencies import discover_audit_command, summarize_audit
 from ..llm import LocalLLMClient
 from ..tools import (
     ProjectFilesystem,
@@ -31,7 +31,7 @@ SYSTEM_PROMPT = (
     "verification. Prefer run_checks after changes."
 )
 
-CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate")
+CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate", "dependency_audit")
 
 
 class AgentLoop:
@@ -40,7 +40,7 @@ class AgentLoop:
         self.settings = settings
 
     def _run_check(self, root: Path, kind: str) -> dict:
-        if kind == "security":
+        if kind == "dependency_audit":\n            discovered = discover_audit_command(root)\n            if not discovered:\n                return {"kind": kind, "available": False}\n            ecosystem, command = discovered\n            result = run_command(root, command, timeout=self.settings.command_timeout_seconds, max_output_chars=self.settings.max_command_output_chars)\n            audit = summarize_audit(ecosystem, result.stdout, result.stderr, result.returncode, result.timed_out)\n            return {"kind": kind, "available": audit.available, "ecosystem": ecosystem, "command": command, "passed": audit.passed, "summary": audit.summary, "output": audit.raw_output}\n\n        if kind == "security":
             result = scan_project(root)
             return {"kind": kind, "available": True, **result.as_dict()}
 
@@ -81,7 +81,7 @@ class AgentLoop:
         """Run all checks the project exposes and require every available check to pass."""
         checks = [self._run_check(root, kind) for kind in CHECK_KINDS]
         if security_required:
-            checks.append(self._run_check(root, "security"))
+            checks.append(self._run_check(root, "security"))\n            checks.append(self._run_check(root, "dependency_audit"))
         available = [check for check in checks if check["available"]]
         failures = [check for check in available if not check["passed"]]
 
