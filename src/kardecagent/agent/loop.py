@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from ..config import Settings
-from ..project import discover_command, project_snapshot, detect_project, validate_project, scan_project\nfrom ..project.dependencies import discover_audit_command, summarize_audit
+from ..project import discover_command, project_snapshot, detect_project, validate_project, scan_project
+from ..project.dependencies import discover_audit_command, summarize_audit
 from ..llm import LocalLLMClient
 from ..tools import (
     ProjectFilesystem,
@@ -97,7 +98,8 @@ class AgentLoop:
         """Run all checks the project exposes and require every available check to pass."""
         checks = [self._run_check(root, kind) for kind in CHECK_KINDS]
         if security_required:
-            checks.append(self._run_check(root, "security"))\n            checks.append(self._run_check(root, "dependency_audit"))
+            checks.append(self._run_check(root, "security"))
+            checks.append(self._run_check(root, "dependency_audit"))
         available = [check for check in checks if check["available"]]
         failures = [check for check in available if not check["passed"]]
 
@@ -229,7 +231,8 @@ class AgentLoop:
 
         plan_messages = [
             {"role": "system", "content": (
-                SYSTEM_PROMPT + "\n" + plan_instructions() +
+                SYSTEM_PROMPT + "
+" + plan_instructions() +
                 " You are in the planning phase. Do not call implementation tools."
             )},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -315,8 +318,10 @@ class AgentLoop:
 
         messages = [
             {"role": "system", "content": (
-                SYSTEM_PROMPT + "\n" + tool_instructions() +
-                "\nThe following execution plan was explicitly approved by the user. "
+                SYSTEM_PROMPT + "
+" + tool_instructions() +
+                "
+The following execution plan was explicitly approved by the user. "
                 "Follow it. If the plan becomes impossible or a requirement changes, stop and report it."
             )},
             {"role": "user", "content": json.dumps({
