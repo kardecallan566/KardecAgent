@@ -49,3 +49,11 @@ def test_complete_step_schema():
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"tests pass"},"plan_step":1}'
     )
     assert action.arguments["step"] == 1
+
+
+def test_plan_change_tool():
+    action = parse_tool_call(
+        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"new","steps":["one"],"validation":["test"],"risks":[]}}}'
+    )
+    assert action.tool == "request_plan_change"
+    assert action.arguments["plan"]["steps"] == ["one"]
