@@ -38,3 +38,18 @@ def test_plan_tracker_enforces_sequential_steps():
 def test_completion_criteria_are_required():
     with pytest.raises(PlanError, match="completion_criteria"):
         parse_plan('{"summary":"x","steps":["one"],"validation":[]}')
+
+
+def test_plan_tracker_can_resume_from_step():
+    plan = ExecutionPlan("x", ["one", "two", "three"], ["validate"])
+    tracker = PlanTracker.resume_from(plan, 3)
+    assert tracker.current_step == 3
+    assert tracker.completed_steps == [1, 2]
+    assert tracker.started_steps == [1, 2]
+    assert tracker.status() == ["completed", "completed", "in_progress"]
+
+
+def test_plan_tracker_rejects_invalid_resume_step():
+    plan = ExecutionPlan("x", ["one"], ["validate"])
+    with pytest.raises(PlanError, match="resume step"):
+        PlanTracker.resume_from(plan, 3)
