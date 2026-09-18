@@ -229,3 +229,35 @@ def test_journal_cursor_advances_after_completed_plan_step(tmp_path: Path):
     loaded, _, _ = store.load("step-cursor")
 
     assert loaded.active_plan_step == 2
+
+
+def test_journal_status_replay_preserves_historical_transitions(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("status-history", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.record("progress", "running")
+    state.transition(TaskStatus.VERIFYING, reason="verify")
+    store.save(state, plan=make_plan(), approved=True)
+
+    records = TaskJournal(store.journal_path_for("status-history")).read()
+
+    assert records[0]["status"] == "running"
+    assert records[1]["status"] == "running"
+    assert records[2]["status"] == "verifying"
+
+
+def test_journal_record_contains_execution_cursor(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("cursor-record", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.record("subtask_started", "started", subtask_id="7", plan_steps=[2])
+    state.record("subtask_progress", "progress", subtask_id="7", plan_step=2, parent_plan_step=2)
+    store.save(state, plan=make_plan(), approved=True)
+
+    records = TaskJournal(store.journal_path_for("cursor-record")).read()
+
+    assert records[-1]["cursor"] == {
+        "plan_step": 2,
+        "subtask_id": "7",
+        "subtask_step": 2,
+    }
