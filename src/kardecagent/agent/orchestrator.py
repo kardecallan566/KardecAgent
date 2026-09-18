@@ -187,11 +187,6 @@ class Orchestrator:
                 max_iterations=self.settings.max_iterations,
                 allow_plan_changes=False,
             )
-            evidence = [
-                event.data.get("result") or event.message
-                for event in result_state.events
-                if event.event_type in {"completed", "verification", "plan_step_completed"}
-            ]
             if result_state.status.value != "completed":
                 recovery = self.recovery.recover(
                     project_root,
@@ -217,6 +212,15 @@ class Orchestrator:
                     )
             else:
                 summary = "Subtask completed and verified."
+            evidence = [
+                event.data.get("result") or event.message
+                for event in result_state.events
+                if event.event_type in {
+                    "completed", "verification", "plan_step_completed",
+                    "recovery_started", "recovery_completed", "recovery_failed",
+                    "subtask_recovery",
+                }
+            ]
             return SubtaskExecutionResult(subtask.id, result_state.status.value, summary, evidence[-10:])
 
         return self.execute_sequentially(board, execute, progress_callback=progress_callback)
