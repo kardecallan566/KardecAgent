@@ -162,8 +162,16 @@ class AgentLoop:
         if action.tool == "search_web":
             return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5), allow_domains=self.settings.web_allow_domains, deny_domains=self.settings.web_deny_domains), ensure_ascii=False)
         if action.tool == "fetch_web_page":
-            return json.dumps(fetch_web_page(args["url"], max_chars=args.get("max_chars", 30000), allow_domains=self.settings.web_allow_domains, deny_domains=self.settings.web_deny_domains), ensure_ascii=False)
-            if action.tool == "search_files":
+            return json.dumps(
+                fetch_web_page(
+                    args["url"],
+                    max_chars=args.get("max_chars", 30000),
+                    allow_domains=self.settings.web_allow_domains,
+                    deny_domains=self.settings.web_deny_domains,
+                ),
+                ensure_ascii=False,
+            )
+        if action.tool == "search_files":
             return json.dumps(
                 search_text(root, args["query"], args.get("max_results", 50)),
                 ensure_ascii=False,
@@ -235,8 +243,7 @@ class AgentLoop:
 
         plan_messages = [
             {"role": "system", "content": (
-                SYSTEM_PROMPT + "
-" + plan_instructions() +
+                SYSTEM_PROMPT + "\n" + plan_instructions() +
                 " You are in the planning phase. Do not call implementation tools."
             )},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -322,10 +329,8 @@ class AgentLoop:
 
         messages = [
             {"role": "system", "content": (
-                SYSTEM_PROMPT + "
-" + tool_instructions() +
-                "
-The following execution plan was explicitly approved by the user. "
+                SYSTEM_PROMPT + "\n" + tool_instructions() +
+                "\nThe following execution plan was explicitly approved by the user. "
                 "Follow it. If the plan becomes impossible or a requirement changes, stop and report it."
             )},
             {"role": "user", "content": json.dumps({
@@ -478,67 +483,3 @@ The following execution plan was explicitly approved by the user. "
                             "error": "plan_incomplete",
                             "plan_progress": tracker.as_dict(),
                             "instruction": "Complete every approved plan step before finishing.",
-                        }, ensure_ascii=False)},
-                    ]
-                    continue
-
-                evidence = action.arguments["criteria_evidence"]
-                criteria_count = len(plan.completion_criteria)
-                if len(evidence) != criteria_count:
-                    state.record("completion_criteria_failed", "Finish rejected: evidence must cover every completion criterion.",
-                                 expected=criteria_count, received=len(evidence))
-                    messages += [
-                        {"role": "assistant", "content": response.content},
-                        {"role": "user", "content": json.dumps({
-                            "error": "completion_criteria_incomplete",
-                            "completion_criteria": plan.completion_criteria,
-                            "received_evidence": len(evidence),
-                            "instruction": "Provide exactly one concrete evidence item for every completion criterion before finishing.",
-                        }, ensure_ascii=False)},
-                    ]
-                    continue
-
-                verification = self._verify_completion(project_root, plan.security_level in {"sensitive", "high_risk"})
-                if verification["verified"] and plan.security_level in {"sensitive", "high_risk"}:
-                    security_review = self._run_security_review(project_root, task, plan)
-                    verification["security_review"] = security_review
-                    state.record("security_review", "Independent security review executed.", review=security_review)
-                    if security_review["status"] != "pass" or security_review["findings"]:
-                        verification["verified"] = False
-                verification["completion_criteria"] = [
-                    {"criterion": criterion, "evidence": evidence[index]}
-                    for index, criterion in enumerate(plan.completion_criteria)
-                ]
-                state.record("verification", "Completion verification executed.",
-                             verified=verification["verified"], checks=verification["checks"],
-                             completion_criteria=verification["completion_criteria"])
-                if verification["verified"]:
-                    state.status = TaskStatus.COMPLETED
-                    state.record("completed", action.arguments["reason"],
-                                 completion_criteria=verification["completion_criteria"])
-                    return state
-                state.record("verification_failed", "Completion was rejected because verification did not pass.")
-                messages += [
-                    {"role": "assistant", "content": response.content},
-                    {"role": "user", "content": json.dumps({
-                        "verification": verification,
-                        "instruction": "Do not finish yet. Diagnose failed checks, make necessary changes, and run checks again.",
-                    }, ensure_ascii=False)},
-                ]
-                continue
-
-            try:
-                result = self._execute(project_root, action)
-            except Exception as exc:
-                result = json.dumps({"ok": False, "error": type(exc).__name__, "message": str(exc)},
-                                    ensure_ascii=False)
-
-            state.record("tool_result", result, tool=action.tool, plan_step=action.plan_step)
-            messages += [
-                {"role": "assistant", "content": response.content},
-                {"role": "user", "content": json.dumps({"tool_result": result}, ensure_ascii=False)},
-            ]
-
-        state.status = TaskStatus.MAX_ITERATIONS
-        state.record("max_iterations", "Maximum agent iterations reached.")
-        return state
