@@ -180,3 +180,40 @@ pytest -q
 ```
 
 A suíte cobre planejamento/aprovação, execução de ferramentas, escopo de subtarefas, persistência/journal, recuperação, rollback seguro e comandos básicos da CLI.
+
+
+## Smoke test da primeira versão
+
+Além da suíte automatizada, o repositório contém um projeto mínimo em `examples/first-version-fixture` para validar o fluxo completo contra um projeto real no disco.
+
+1. Instale o KardecAgent no ambiente virtual:
+
+```powershell
+pip install -e ".[dev]"
+```
+
+2. Verifique o projeto e a conexão com o modelo local:
+
+```powershell
+kardec-agent doctor --project examples/first-version-fixture
+```
+
+3. Execute uma tarefa. O agente deve primeiro mostrar o plano e aguardar sua aprovação antes de alterar qualquer arquivo:
+
+```powershell
+kardec-agent run --project examples/first-version-fixture --task "crie feature.py com uma constante VALUE igual a 42"
+```
+
+4. Para listar tarefas persistidas:
+
+```powershell
+kardec-agent tasks --project examples/first-version-fixture
+```
+
+5. Para continuar uma tarefa persistida interrompida:
+
+```powershell
+kardec-agent resume --project examples/first-version-fixture --task "crie feature.py com uma constante VALUE igual a 42"
+```
+
+A suíte `tests/test_first_version_integration.py` também cobre, com um LLM determinístico, aprovação antes da execução, alteração real de arquivos, verificação, rollback de mudanças não concluídas e retomada a partir do próximo passo aprovado.
