@@ -195,3 +195,12 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Require an additional approval gate for high-risk implementation.
 - [x] Security reviewer phase with structured findings.
 - [x] Automated basic secret scanning for common hardcoded credentials/keys/tokens.\n- [x] Dependency vulnerability checks.
+
+
+## Web Research
+- [x] Explicit read-only `search_web` tool.
+- [x] Structured web result output (title, URL, snippet).
+- [x] Query and result-count validation.
+- [ ] Source credibility/cross-check policy.
+- [ ] Page-content retrieval for selected sources.
+- [ ] Domain allow/deny controls.
