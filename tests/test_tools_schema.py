@@ -53,7 +53,17 @@ def test_complete_step_schema():
 
 def test_plan_change_tool():
     action = parse_tool_call(
-        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"new","steps":["one"],"validation":["test"],"risks":[]}}}'
+        '{"tool":"request_plan_change","arguments":{"plan":{"summary":"new","steps":["one"],"validation":["test"],"risks":[],"completion_criteria":["done"]}}}'
     )
     assert action.tool == "request_plan_change"
     assert action.arguments["plan"]["steps"] == ["one"]
+
+
+def test_finish_requires_completion_evidence():
+    with pytest.raises(ToolCallError, match="criteria_evidence"):
+        parse_tool_call('{"tool":"finish","arguments":{"reason":"ok"}}')
+
+
+def test_finish_accepts_completion_evidence():
+    action = parse_tool_call('{"tool":"finish","arguments":{"reason":"ok","criteria_evidence":["tests passed"]}}')
+    assert action.arguments["criteria_evidence"] == ["tests passed"]
