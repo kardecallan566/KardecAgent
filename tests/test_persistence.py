@@ -157,3 +157,19 @@ def test_snapshot_corruption_uses_backup_and_keeps_backup(tmp_path: Path):
     loaded, _, _ = store.load("backup2")
     assert loaded.task == "backup2"
     assert backup.read_bytes() == backup_bytes
+
+
+def test_load_replays_journal_after_snapshot_boundary(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("crash-window", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    store.save(state, plan=make_plan(), approved=True)
+
+    state.iteration = 2
+    state.record("progress", "durable journal event")
+    TaskJournal(store.journal_path_for("crash-window")).append_events(state)
+
+    loaded, _, _ = store.load("crash-window")
+    assert loaded.iteration == 2
+    assert loaded.events[-1].event_type == "progress"
+    assert loaded.events[-1].sequence == 2
