@@ -174,6 +174,11 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
                     f" | tool_calls={result.tool_calls}"
                     f" | recovery={result.recovery_attempts}"
                     f" | first_pass={'yes' if result.first_attempt_passed else 'no'}"
+                    f" | reads={result.reads}"
+                    f" | writes={result.writes}"
+                    f" | runs={result.runs}"
+                    f" | dones={result.dones}"
+                    f" | invalid={result.invalid_actions}"
                 )
             print(
                 f"[{status}] {model} / {result.case} | "
@@ -182,6 +187,10 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
             )
             if not result.passed and getattr(result, "error", ""):
                 print(f"  error: {result.error}")
+            if level == "agentic" and getattr(result, "action_trace", ()):
+                print("  trace:")
+                for action in result.action_trace:
+                    print(f"    {action}")
 
     if not overall:
         print("No installed benchmark models were found.")
@@ -192,7 +201,7 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
         print(f"- {model}: {passed}/{total} passed | {elapsed:.2f}s total | {tps:.2f} tok/s avg")
     if level == "agentic":
         print()
-        print("Agentic metrics: attempts = test executions; recovery = failed test attempts before a later pass; first_pass = passed on first test.")
+        print("Agentic metrics: attempts = test executions; recovery = failed test runs; first_pass = passed on first test; reads/writes/runs/dones = recognized actions; invalid = malformed or premature actions.")
     print()
     print("Use the results to choose the model; no automatic winner is selected.")
     return 0
