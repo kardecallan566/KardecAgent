@@ -29,7 +29,7 @@ def test_finish_requires_verification(tmp_path: Path):
     llm = FakeLLM([
         _plan(),
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"tests are present"},"plan_step":1}',
-        '{"tool":"finish","arguments":{"reason":"implemented"}}',
+        '{"tool":"finish","arguments":{"reason":"implemented","criteria_evidence":["pytest passed"]}}',
     ])
     state = AgentLoop(llm, Settings(max_iterations=3)).run(
         tmp_path, "verify task", approval_callback=lambda plan: True
@@ -51,8 +51,8 @@ def test_failed_verification_returns_to_model(tmp_path: Path):
     llm = FakeLLM([
         _plan(),
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"attempted"},"plan_step":1}',
-        '{"tool":"finish","arguments":{"reason":"done"}}',
-        '{"tool":"finish","arguments":{"reason":"done again"}}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["verified"]}}',
+        '{"tool":"finish","arguments":{"reason":"done again","criteria_evidence":["verified"]}}',
     ])
     state = AgentLoop(llm, Settings(max_iterations=4)).run(
         tmp_path, "fix task", approval_callback=lambda plan: True
@@ -71,7 +71,7 @@ def test_static_html_finish_is_verified(tmp_path: Path):
     llm = FakeLLM([
         _plan(),
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"HTML created"},"plan_step":1}',
-        '{"tool":"finish","arguments":{"reason":"site implemented"}}',
+        '{"tool":"finish","arguments":{"reason":"site implemented","criteria_evidence":["HTML validator passed"]}}',
     ])
     state = AgentLoop(llm, Settings(max_iterations=3)).run(
         tmp_path, "create site", approval_callback=lambda plan: True
@@ -178,3 +178,21 @@ def test_rejected_plan_change_keeps_original_plan(tmp_path: Path):
         event.event_type == "plan_change_approval" and event.data.get("approved") is False
         for event in state.events
     )
+
+
+def test_finish_requires_evidence_for_every_completion_criterion(tmp_path: Path):
+    (tmp_path / "index.html").write_text(
+        "<!doctype html><html lang='pt-BR'><head><meta name='viewport' content='width=device-width, initial-scale=1'><title>Site</title></head><body>OK</body></html>",
+        encoding="utf-8",
+    )
+    llm = FakeLLM([
+        _plan(),
+        '{"tool":"complete_step","arguments":{"step":1,"evidence":"implemented"},"plan_step":1}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":[]}}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["validator passed"]}}',
+    ])
+    state = AgentLoop(llm, Settings(max_iterations=4)).run(
+        tmp_path, "create site", approval_callback=lambda plan: True
+    )
+    assert state.status.value == "completed"
+    assert any(event.event_type == "completion_criteria_failed" for event in state.events)
