@@ -17,7 +17,9 @@ def test_default_benchmark_models():
         "qwen2.5-coder:1.5b",
         "qwen2.5-coder:3b",
         "qwen2.5-coder:7b",
-        "Qwen3-Coder-Next-GGUF",
+        "qwen3.5:4b",
+        "deepseek-coder:1.3b-instruct",
+        "deepseek-coder:6.7b",
     )
 
 
@@ -37,7 +39,7 @@ def test_run_benchmark_collects_metrics():
 def test_agentic_benchmark_has_real_coding_cases():
     from kardecagent.llm.benchmark import _fixture_cases
     cases = _fixture_cases()
-    assert len(cases) >= 8
+    assert len(cases) >= 12
     assert any(c.test_command == ("python", "-m", "pytest", "-q") for c in cases)
 
 
