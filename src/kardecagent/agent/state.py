@@ -74,10 +74,16 @@ class TaskState:
             value = data.get("subtask_id")
             self.active_subtask_id = value if isinstance(value, str) else None
             self.active_subtask_step = 1
+            steps = data.get("plan_steps")
+            if isinstance(steps, list) and steps and isinstance(steps[0], int) and steps[0] > 0:
+                self.active_plan_step = steps[0]
         elif event_type in {"subtask_progress", "subtask_retry_started"}:
             step = data.get("plan_step") if event_type == "subtask_progress" else data.get("resume_step")
             if isinstance(step, int) and step > 0:
                 self.active_subtask_step = step
+            parent_step = data.get("parent_plan_step")
+            if isinstance(parent_step, int) and parent_step > 0:
+                self.active_plan_step = parent_step
         elif event_type in {"subtask_completed", "subtask_failed", "subtask_blocked"}:
             if data.get("subtask_id") == self.active_subtask_id:
                 self.active_subtask_id = None
