@@ -172,7 +172,7 @@ class Orchestrator:
                 task=f"{parent_task} :: {subtask.title}",
                 project_root=str(project_root.resolve()),
             )
-            state.status = TaskStatus.RUNNING
+            state.transition(TaskStatus.RUNNING, reason="Subtask execution initialized.")
             result_state = self.agent_loop.execute_approved_plan(
                 project_root,
                 f"{parent_task} :: {subtask.objective}",
