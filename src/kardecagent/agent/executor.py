@@ -11,6 +11,7 @@ from ..tools import (
     ProjectFilesystem, apply_unified_patch, git_diff, git_has_uncommitted_changes,
     git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
     fetch_web_page,
+    WorkspaceSnapshot, git_has_rename_or_copy,
 )
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
 from .security import assess_security, security_requirements_for
@@ -163,13 +164,15 @@ class AgentExecutor:
             return json.dumps({"ok": True, "changed_files": list(result.changed_files),
                                 "method": "unified_patch"})
         if action.tool == "run_command":
-            before = git_changed_paths(root) if scope and git_is_repo(root) else set()
+            scoped_git = bool(scope and git_is_repo(root))
+            before = git_changed_paths(root) if scoped_git else set()
             before_fingerprints = (
-                git_changed_fingerprints(root, before) if scope and git_is_repo(root) else {}
+                git_changed_fingerprints(root, before) if scoped_git else {}
             )
+            snapshot = WorkspaceSnapshot.for_git_repo(root) if scoped_git else None
             result = run_command(root, args["command"], timeout=self.settings.command_timeout_seconds,
                                  max_output_chars=self.settings.max_command_output_chars)
-            if scope and git_is_repo(root):
+            if scoped_git:
                 after = git_changed_paths(root)
                 after_fingerprints = git_changed_fingerprints(root, after)
                 introduced = sorted(after - before)
@@ -178,7 +181,28 @@ class AgentExecutor:
                     if before_fingerprints.get(path) != after_fingerprints.get(path)
                 )
                 changed = sorted(set(introduced) | set(modified_existing))
-                self._check_scope(root, changed, scope)
+                outside = sorted(
+                    path for path in changed if not self._scope_allows(root, path, scope)
+                )
+                if outside:
+                    if git_has_rename_or_copy(root):
+                        raise RuntimeError(
+                            "subtask scope violation: automatic remediation refused because "
+                            "the working tree contains a rename/copy operation"
+                        )
+                    try:
+                        restored = snapshot.restore(set(outside)) if snapshot else []
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "subtask scope violation: automatic remediation failed for "
+                            + ", ".join(outside) + f": {exc}"
+                        ) from exc
+                    raise ValueError(
+                        "subtask scope violation: "
+                        + ", ".join(outside)
+                        + "; safely remediated: "
+                        + (", ".join(restored) if restored else "none")
+                    )
                 if changed:
                     return json.dumps({
                         **result.__dict__,
