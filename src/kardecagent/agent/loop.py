@@ -19,7 +19,7 @@ from ..tools import (
     search_text,
 )
 from .state import TaskState, TaskStatus
-from .plan import PlanError, parse_plan, plan_instructions
+from .plan import PlanError, PlanTracker, parse_plan, plan_instructions
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
 
 
@@ -150,19 +150,6 @@ class AgentLoop:
         state = TaskState(task, str(project_root))
         state.status = TaskStatus.RUNNING
 
-        if git_is_repo(project_root):
-            checkpoint = create_checkpoint(project_root, task)
-            if checkpoint.returncode == 0:
-                state.record("checkpoint_created", "Created pre-task Git checkpoint.",
-                             branch=checkpoint.command,
-                             dirty=git_has_uncommitted_changes(project_root),
-                             current_branch=git_current_branch(project_root).stdout.strip())
-            else:
-                state.record("checkpoint_error", "Could not create pre-task Git checkpoint.",
-                             error=checkpoint.stderr.strip())
-        else:
-            state.record("checkpoint_skipped", "Project is not a Git repository.")
-
         profile = detect_project(project_root)
         state.record("project_detected", f"Detected project kind: {profile.kind}.",
                      kind=profile.kind, language=profile.language,
@@ -222,6 +209,21 @@ class AgentLoop:
             state.status = TaskStatus.FAILED
             return state
 
+        if git_is_repo(project_root):
+            checkpoint = create_checkpoint(project_root, task)
+            if checkpoint.returncode == 0:
+                state.record("checkpoint_created", "Created post-approval Git checkpoint.",
+                             branch=checkpoint.command,
+                             dirty=git_has_uncommitted_changes(project_root),
+                             current_branch=git_current_branch(project_root).stdout.strip())
+            else:
+                state.record("checkpoint_error", "Could not create post-approval Git checkpoint.",
+                             error=checkpoint.stderr.strip())
+        else:
+            state.record("checkpoint_skipped", "Project is not a Git repository.")
+
+        tracker = PlanTracker(plan)
+        state.record("plan_progress", "Plan execution initialized.", progress=tracker.as_dict())
         state.record("execution_started", "Approved plan execution started.")
 
         messages = [
@@ -233,7 +235,8 @@ class AgentLoop:
             {"role": "user", "content": json.dumps({
                 **context,
                 "approved_plan": plan.as_dict(),
-                "instruction": "Execute the approved plan. Do not deviate without asking for approval.",
+                "instruction": "Execute the approved plan step by step. Mutating actions must name the active plan_step. After each step, call complete_step with evidence. Do not deviate without asking for approval.",
+                "plan_progress": tracker.as_dict(),
             }, ensure_ascii=False)},
         ]
 
@@ -253,7 +256,58 @@ class AgentLoop:
                 ]
                 continue
 
+            if action.tool in {"write_file", "run_command", "run_checks", "complete_step"}:
+                if action.plan_step != tracker.current_step:
+                    state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
+                                 tool=action.tool, requested_step=action.plan_step,
+                                 active_step=tracker.current_step)
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "error": "plan_scope_violation",
+                            "active_plan_step": tracker.current_step,
+                            "requested_plan_step": action.plan_step,
+                            "instruction": "Use only the active plan_step and complete it before moving on.",
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
+                if action.plan_step not in tracker.started_steps:
+                    tracker.start(action.plan_step)
+                    state.record("plan_step_started", f"Started plan step {action.plan_step}.",
+                                 step=action.plan_step, description=plan.steps[action.plan_step - 1])
+
+            if action.tool == "complete_step":
+                step = action.arguments["step"]
+                if step != action.plan_step or step != tracker.current_step:
+                    state.record("plan_scope_violation", "Step completion rejected: wrong active plan step.",
+                                 requested_step=step, active_step=tracker.current_step)
+                    continue
+                tracker.complete(step)
+                state.record("plan_step_completed", f"Completed plan step {step}.",
+                             step=step, evidence=action.arguments["evidence"], progress=tracker.as_dict())
+                messages += [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": json.dumps({
+                        "plan_progress": tracker.as_dict(),
+                        "instruction": "Continue with the new active plan step.",
+                    }, ensure_ascii=False)},
+                ]
+                continue
+
             if action.tool == "finish":
+                if not tracker.completed:
+                    state.record("plan_scope_violation", "Finish rejected: approved plan has incomplete steps.",
+                                 progress=tracker.as_dict())
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "error": "plan_incomplete",
+                            "plan_progress": tracker.as_dict(),
+                            "instruction": "Complete every approved plan step before finishing.",
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
+
                 verification = self._verify_completion(project_root)
                 state.record("verification", "Completion verification executed.",
                              verified=verification["verified"], checks=verification["checks"])
@@ -277,7 +331,7 @@ class AgentLoop:
                 result = json.dumps({"ok": False, "error": type(exc).__name__, "message": str(exc)},
                                     ensure_ascii=False)
 
-            state.record("tool_result", result)
+            state.record("tool_result", result, tool=action.tool, plan_step=action.plan_step)
             messages += [
                 {"role": "assistant", "content": response.content},
                 {"role": "user", "content": json.dumps({"tool_result": result}, ensure_ascii=False)},
