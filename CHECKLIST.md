@@ -102,7 +102,10 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [ ] Persistent task logs
 
 ## M2 — Planning & Verification
-- [ ] Explicit planning phase
+- [x] Explicit planning phase
+- [x] Structured execution plan
+- [x] Human approval gate before implementation
+- [x] Approved plan passed to execution context
 - [ ] Stored plan
 - [ ] Plan progress
 - [ ] Completion criteria
