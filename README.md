@@ -217,3 +217,25 @@ kardec-agent resume --project examples/first-version-fixture --task "crie featur
 ```
 
 A suíte `tests/test_first_version_integration.py` também cobre, com um LLM determinístico, aprovação antes da execução, alteração real de arquivos, verificação, rollback de mudanças não concluídas e retomada a partir do próximo passo aprovado.
+
+### Benchmark agentic
+
+O benchmark padrão mede tarefas de codificação em projetos temporários e executa pytest depois que o modelo altera os arquivos. Ele mede qualidade real da alteração, tempo e tokens/s.
+
+```powershell
+kardec-agent benchmark
+```
+
+O benchmark básico anterior continua disponível:
+
+```powershell
+kardec-agent benchmark --level basic
+```
+
+Também é possível comparar modelos específicos:
+
+```powershell
+kardec-agent benchmark --models "qwen2.5-coder:1.5b,qwen2.5-coder:3b,qwen2.5-coder:7b"
+```
+
+Cada tarefa do benchmark agentic é executada em uma pasta temporária isolada; o resultado não altera o projeto do usuário.
