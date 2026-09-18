@@ -469,7 +469,23 @@ def _prepare_fixture(root: Path, case: AgenticCase) -> None:
         "review_and_fix": {
             "src/auth.py": "def is_admin(user):\n    return user.get('role') == 'admin' or user.get('is_admin') == True\n",
             "tests/test_auth.py": "from auth import is_admin\n\ndef test_role():\n    assert is_admin({'role': 'admin'}) is True\n\ndef test_false_flag():\n    assert is_admin({'role': 'user', 'is_admin': False}) is False\n\ndef test_none():\n    assert is_admin(None) is False\n",
+        },        "api_contract_feature": {
+            "src/users.py": 'def get_user(users, user_id):\n    for user in users:\n        if user["id"] == user_id:\n            return user\n    return None\n',
+            "tests/test_users.py": "from users import get_user\n\ndef test_existing():\n    assert get_user([{'id': 1, 'name': 'Ada'}], 1)['name'] == 'Ada'\n\ndef test_search():\n    from users import find_users\n    users = [{'id': 1, 'name': 'Ada'}, {'id': 2, 'name': 'Grace'}, {'id': 3, 'name': 'ADAM'}]\n    original = [dict(x) for x in users]\n    assert [u['id'] for u in find_users(users, 'ada')] == [1, 3]\n    assert find_users(users, 'xyz') == []\n    assert users == original\n",
         },
+        "state_machine_bug": {
+            "src/workflow.py": 'STATES = ("pending", "running", "done")\n\ndef transition(state, event):\n    if event == "start":\n        return "running"\n    if event == "finish":\n        return "done"\n    return state\n',
+            "tests/test_workflow.py": "from workflow import transition\n\ndef test_start():\n    assert transition('pending', 'start') == 'running'\n\ndef test_finish():\n    assert transition('running', 'finish') == 'done'\n\ndef test_invalid():\n    import pytest\n    with pytest.raises(ValueError):\n        transition('pending', 'finish')\n    with pytest.raises(ValueError):\n        transition('done', 'start')\n",
+        },
+        "security_regression": {
+            "src/redirect.py": 'from urllib.parse import urlparse\n\ndef is_safe_redirect(url, allowed_host):\n    parsed = urlparse(url)\n    return parsed.netloc == allowed_host\n',
+            "tests/test_redirect.py": "from redirect import is_safe_redirect\n\ndef test_allowed():\n    assert is_safe_redirect('https://example.com/dashboard', 'example.com') is True\n\ndef test_host_confusion():\n    assert is_safe_redirect('https://example.com@evil.com', 'example.com') is False\n    assert is_safe_redirect('', 'example.com') is False\n    assert is_safe_redirect('javascript:alert(1)', 'example.com') is False\n",
+        },
+        "cross_module_refactor": {
+            "src/pricing.py": 'def subtotal(items):\n    return sum(item["price"] * item.get("quantity", 1) for item in items)\n\ndef discount(total, percent):\n    return total * (1 - percent / 100)\n\ndef final_price(items, percent):\n    return discount(subtotal(items), percent)\n',
+            "tests/test_pricing.py": "from pricing import subtotal, discount, final_price\n\ndef test_pricing():\n    items = [{'price': 10, 'quantity': 2}, {'price': 5}]\n    assert subtotal(items) == 25\n    assert discount(25, 20) == 20\n    assert final_price(items, 20) == 20\n\ndef test_boundaries():\n    assert discount(25, 0) == 25\n    assert discount(25, 100) == 0\n\ndef test_invalid():\n    import pytest\n    with pytest.raises(ValueError):\n        subtotal([{'price': -1}])\n    with pytest.raises(ValueError):\n        subtotal([{'price': 1, 'quantity': -1}])\n    with pytest.raises(ValueError):\n        discount(10, 101)\n",
+        },
+
     }
     for relative, content in fixtures[case.name].items():
         target = root / relative
