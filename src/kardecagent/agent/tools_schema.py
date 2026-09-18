@@ -29,7 +29,7 @@ TOOL_SCHEMAS = {
         "optional": {},
     },
     "complete_step": {"required": ["step", "evidence"], "types": {"step": int, "evidence": str}, "optional": {}},
-    "finish": {"required": ["reason"], "types": {"reason": str}, "optional": {}},
+    "finish": {"required": ["reason", "criteria_evidence"], "types": {"reason": str, "criteria_evidence": list}, "optional": {}},
 }
 
 STEP_REQUIRED_TOOLS = {"write_file", "run_command", "run_checks", "complete_step"}
@@ -45,6 +45,8 @@ def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     allowed = set(schema["required"]) | set(schema["types"]) | set(schema["optional"])
     unknown = set(arguments) - allowed
     if unknown: raise ToolCallError("unknown argument(s): " + ", ".join(sorted(unknown)))
+    if tool == "finish" and (not arguments.get("criteria_evidence") or not all(isinstance(x, str) and x.strip() for x in arguments["criteria_evidence"])):
+        raise ToolCallError("criteria_evidence must be a non-empty list of textual evidence")
     if tool == "run_checks" and arguments.get("kind") not in {"test", "lint", "typecheck", "build", "validate"}:
         raise ToolCallError("argument 'kind' must be one of: test, lint, typecheck, build, validate")
     for key in ("limit", "max_results"):
@@ -72,7 +74,7 @@ def tool_instructions() -> str:
         'plan_step is required for write_file, run_command, run_checks and complete_step. '
         'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, '
         'write_file, run_command, run_checks, git_status, git_diff, git_log, '
-        'complete_step, request_plan_change, finish. '
+        'complete_step, request_plan_change, finish. finish requires criteria_evidence for every completion criterion. '
         'Only execute actions belonging to the active approved plan step. '
         'Complete a step only after verifying its result. '
         'If the approved plan is insufficient, use request_plan_change with a complete replacement plan; '
