@@ -171,4 +171,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Agent requires explicit step completion with evidence.
 - [x] Agent rejects finalization until all approved steps are completed.
 - [x] Git checkpoint moved to after explicit plan approval.
-- [ ] Plan deviation flow with a second user approval gate.
+- [x] Plan deviation flow with a second user approval gate.
+
+- [x] Replacement plan must be complete and structurally validated before approval.
+- [x] Rejected plan changes leave the currently approved plan active.
