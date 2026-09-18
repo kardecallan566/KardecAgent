@@ -125,6 +125,7 @@ def test_mutation_records_integrity_fingerprints(tmp_path: Path):
     assert record["tool"] == "write_file"
     assert record["plan_step"] == 1
     assert record["subtask"] is True
+    assert record["subtask_id"] is None
     assert changes[0].timestamp
 
 
