@@ -566,6 +566,23 @@ def _parse_agent_actions(text: str) -> list[tuple[str, str, str]]:
     return [(kind, target, body) for _, kind, target, body in actions]
 
 
+def _normalize_agentic_prompt(prompt: str) -> str:
+    """Remove legacy FILE-block instructions that conflict with the action protocol."""
+    normalized = re.sub(
+        r"Return ONLY complete modified files as FILE blocks\.?",
+        "Use READ/WRITE/RUN actions and finish with DONE only after tests pass.",
+        prompt,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"Format:\s*=== FILE: path ===.*?=== END FILE ===",
+        "Use the READ/WRITE/RUN action protocol shown by the system message.",
+        normalized,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return normalized.strip()
+
+
 def run_agentic_benchmark(
     client: OllamaClient,
     *,
@@ -597,6 +614,7 @@ def run_agentic_benchmark(
             invalid_actions = 0
             action_trace: list[str] = []
             changed: set[str] = set()
+            read_history: set[str] = set()
             output = ""
             error = ""
             passed = False
@@ -619,7 +637,7 @@ def run_agentic_benchmark(
                 {
                     "role": "user",
                     "content": (
-                        f"Task: {case.prompt}\n\n"
+                        f"Task: {_normalize_agentic_prompt(case.prompt)}\n\n"
                         "Project files:\n"
                         f"{_project_snapshot(root)}\n\n"
                         "Start by reading the files relevant to the task."
@@ -690,7 +708,11 @@ def run_agentic_benchmark(
                             if not passed:
                                 invalid_actions += 1
                                 action_trace[-1] += " INVALID_BEFORE_PASS"
-                                raise ValueError("Model declared DONE before tests passed.")
+                                feedback.append(
+                                    "DONE rejected: tests have not passed. Continue working; "
+                                    "use WRITE and then RUN pytest."
+                                )
+                                continue
                             passed = True
                         else:
                             raise ValueError(f"Unsupported action: {kind}")
@@ -700,8 +722,9 @@ def run_agentic_benchmark(
 
                     if not step_had_test:
                         feedback.append(
-                            "No test was run. Continue by inspecting/editing the project and "
-                            "then run the exact pytest command."
+                            "No test was run. If you have already READ the relevant files, "
+                            "do not reread them. Make the required change with WRITE, then "
+                            "run the exact pytest command."
                         )
                     elif not step_test_passed:
                         feedback.append(
