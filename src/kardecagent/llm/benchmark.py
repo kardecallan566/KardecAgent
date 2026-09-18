@@ -636,7 +636,7 @@ def run_agentic_benchmark(
                         "After a failed test, the next productive action MUST be WRITE; do not run the same failing "
                         "test again until you have changed a file. Use the pytest output as debugging feedback. "
                         "Do not repeat the same WRITE unless you are changing the implementation. "
-                        "Finish with DONE only after the tests pass."
+                        "After a successful test run, you may finish; DONE is accepted only after tests pass."
                     ),
                 },
                 {
@@ -675,10 +675,20 @@ def run_agentic_benchmark(
                     step_test_passed = False
                     feedback: list[str] = []
 
-                    for kind, target, body in actions:
-                        tool_calls += 1
-                        action_trace.append(f"step={step + 1} {kind} {target}".rstrip())
-                        if kind == "READ":
+                    # Execute exactly one protocol action per model turn.
+                    # If the model emits several actions, execute only the first
+                    # and report the rest as invalid so the next turn can continue.
+                    if len(actions) > 1:
+                        invalid_actions += len(actions) - 1
+                        action_trace.append(
+                            f"step={step + 1} EXTRA_ACTIONS_IGNORED={len(actions) - 1}"
+                        )
+
+                    kind, target, body = actions[0]
+                    tool_calls += 1
+                    action_trace.append(f"step={step + 1} {kind} {target}".rstrip())
+
+                    if kind == "READ":
                         relative = _safe_relative_path(target)
                         if relative in read_history:
                             invalid_actions += 1
