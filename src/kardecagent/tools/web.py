@@ -7,8 +7,6 @@ import html
 import re
 import socket
 
-import httpx
-
 
 MAX_PAGE_CHARS = 30_000
 MAX_REDIRECTS = 3
@@ -17,12 +15,23 @@ BLOCKED_HOSTNAMES = {"localhost", "localhost.localdomain", "metadata.google.inte
 PRIVATE_HOST_SUFFIXES = (".local", ".internal", ".localhost")
 BLOCKED_METADATA_IPS = {"169.254.169.254", "100.100.100.200"}
 
+OFFICIAL_DOC_DOMAINS = {
+    "docs.python.org", "docs.djangoproject.com", "docs.expo.dev",
+    "developer.mozilla.org", "react.dev", "reactnative.dev",
+    "docs.npmjs.com", "docs.github.com", "learn.microsoft.com",
+    "docs.aws.amazon.com", "cloud.google.com", "kubernetes.io",
+}
+SOURCE_REPOSITORY_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
+PACKAGE_REGISTRY_HOSTS = {"npmjs.com", "pypi.org", "crates.io", "packagist.org"}
+
 
 @dataclass(frozen=True)
 class WebResult:
     title: str
     url: str
     snippet: str
+    domain: str = ""
+    source_type: str = "general_web"
 
 
 @dataclass(frozen=True)
@@ -33,20 +42,54 @@ class WebPage:
     text: str
     truncated: bool
     untrusted_content: bool = True
+    domain: str = ""
+    source_type: str = "general_web"
 
 
 def _clean(value: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", " ", value)).replace("\xa0", " ").strip()
 
 
-def _validate_url(url: str) -> None:
+def _domain(url: str) -> str:
+    host = urlparse(url).hostname
+    return (host or "").lower().rstrip(".")
+
+
+def classify_source(url: str) -> str:
+    host = _domain(url)
+    if host in OFFICIAL_DOC_DOMAINS or any(host.endswith("." + d) for d in OFFICIAL_DOC_DOMAINS):
+        return "official_documentation"
+    if host in SOURCE_REPOSITORY_HOSTS or any(host.endswith("." + d) for d in SOURCE_REPOSITORY_HOSTS):
+        return "source_repository"
+    if host in PACKAGE_REGISTRY_HOSTS or any(host.endswith("." + d) for d in PACKAGE_REGISTRY_HOSTS):
+        return "package_registry"
+    return "general_web"
+
+
+def _domain_matches(host: str, rule: str) -> bool:
+    rule = rule.removeprefix("*.").rstrip(".").lower()
+    return host == rule or host.endswith("." + rule)
+
+
+def validate_domain_policy(url: str, *, allow_domains: tuple[str, ...] = (), deny_domains: tuple[str, ...] = ()) -> None:
+    host = _domain(url)
+    if any(_domain_matches(host, rule) for rule in deny_domains):
+        raise PermissionError("Web destination is blocked by the configured domain denylist.")
+    if allow_domains and not any(_domain_matches(host, rule) for rule in allow_domains):
+        raise PermissionError("Web destination is not present in the configured domain allowlist.")
+
+
+def _validate_url(url: str, *, allow_domains: tuple[str, ...] = (), deny_domains: tuple[str, ...] = ()) -> None:
     parsed = urlparse(url)
-    if parsed.scheme.lower() in BLOCKED_SCHEMES or parsed.scheme.lower() not in {"http", "https"}:
+    scheme = parsed.scheme.lower()
+    if scheme in BLOCKED_SCHEMES or scheme not in {"http", "https"}:
         raise ValueError("Only HTTP and HTTPS URLs are allowed.")
     if parsed.username is not None or parsed.password is not None:
         raise PermissionError("URLs containing embedded credentials are blocked.")
     if not parsed.hostname:
         raise ValueError("URL has no hostname.")
+    validate_domain_policy(url, allow_domains=allow_domains, deny_domains=deny_domains)
+
     host = parsed.hostname.lower().rstrip(".")
     if host in BLOCKED_HOSTNAMES or host.endswith(PRIVATE_HOST_SUFFIXES):
         raise PermissionError("Private/local web destinations are blocked.")
@@ -65,14 +108,20 @@ def _validate_url(url: str) -> None:
 def _safe_search_url(raw_url: str) -> str:
     parsed = urlparse(raw_url)
     if parsed.hostname and parsed.hostname.endswith("duckduckgo.com"):
-        # DuckDuckGo result links can contain a redirect target in uddg.
         target = parse_qs(parsed.query).get("uddg", [None])[0]
         if target:
             return unquote(target)
     return raw_url
 
 
-def search_web(query: str, *, max_results: int = 5, timeout: float = 15.0) -> list[dict[str, str]]:
+def search_web(
+    query: str,
+    *,
+    max_results: int = 5,
+    timeout: float = 15.0,
+    allow_domains: tuple[str, ...] = (),
+    deny_domains: tuple[str, ...] = (),
+) -> list[dict[str, str]]:
     query = query.strip()
     if not query:
         raise ValueError("query must not be empty")
@@ -96,24 +145,29 @@ def search_web(query: str, *, max_results: int = 5, timeout: float = 15.0) -> li
             continue
         title = _clean(link.group(2))
         result_url = _safe_search_url(html.unescape(link.group(1)))
-        results.append(WebResult(title, result_url, _clean(snippet.group(1)) if snippet else "").__dict__)
+        _validate_url(result_url, allow_domains=allow_domains, deny_domains=deny_domains)
+        result = WebResult(
+            title, result_url, _clean(snippet.group(1)) if snippet else "",
+            _domain(result_url), classify_source(result_url),
+        )
+        results.append(result.__dict__)
         if len(results) >= max_results:
             break
     return results
 
 
-def fetch_web_page(url: str, *, timeout: float = 15.0, max_chars: int = MAX_PAGE_CHARS) -> dict[str, object]:
-    """Fetch text from a public HTTP(S) page without executing page content.
-
-    Security boundary:
-    - blocks non-HTTP schemes and local/private destinations;
-    - validates every redirect destination;
-    - never executes JavaScript or downloads active content;
-    - limits redirects, response size and extracted text.
-    """
+def fetch_web_page(
+    url: str,
+    *,
+    timeout: float = 15.0,
+    max_chars: int = MAX_PAGE_CHARS,
+    allow_domains: tuple[str, ...] = (),
+    deny_domains: tuple[str, ...] = (),
+) -> dict[str, object]:
+    """Fetch bounded public text while treating all web content as untrusted data."""
     if max_chars < 1 or max_chars > MAX_PAGE_CHARS:
         raise ValueError(f"max_chars must be between 1 and {MAX_PAGE_CHARS}")
-    _validate_url(url)
+    _validate_url(url, allow_domains=allow_domains, deny_domains=deny_domains)
 
     current = url
     headers = {
@@ -122,7 +176,7 @@ def fetch_web_page(url: str, *, timeout: float = 15.0, max_chars: int = MAX_PAGE
     }
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
         for _ in range(MAX_REDIRECTS + 1):
-            _validate_url(current)
+            _validate_url(current, allow_domains=allow_domains, deny_domains=deny_domains)
             response = client.get(current)
             if response.status_code in {301, 302, 303, 307, 308}:
                 location = response.headers.get("location")
@@ -150,4 +204,8 @@ def fetch_web_page(url: str, *, timeout: float = 15.0, max_chars: int = MAX_PAGE
     truncated = len(text_content) > max_chars
     text_content = text_content[:max_chars]
 
-    return WebPage(url, current, title, text_content, truncated, True).__dict__
+    page = WebPage(
+        url, current, title, text_content, truncated, True,
+        _domain(current), classify_source(current),
+    )
+    return page.__dict__
