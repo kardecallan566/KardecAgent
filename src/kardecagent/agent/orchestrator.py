@@ -10,6 +10,7 @@ from ..llm import LocalLLMClient
 from ..project import project_snapshot
 from .loop import AgentLoop
 from .plan import ExecutionPlan
+from .recovery import RecoveryManager
 from .state import TaskStatus
 from ..tasks import Subtask, SubtaskManager, TaskBoard, SubtaskStatus
 
@@ -44,6 +45,7 @@ class Orchestrator:
         self.llm = llm
         self.settings = settings
         self.agent_loop = AgentLoop(llm, settings)
+        self.recovery = RecoveryManager()
 
     def should_decompose(self, plan: ExecutionPlan, project_root: Path) -> bool:
         manager = SubtaskManager(project_root)
@@ -190,9 +192,31 @@ class Orchestrator:
                 for event in result_state.events
                 if event.event_type in {"completed", "verification", "plan_step_completed"}
             ]
-            summary = "Subtask completed and verified." if result_state.status.value == "completed" else (
-                f"Subtask stopped with status {result_state.status.value}."
-            )
+            if result_state.status.value != "completed":
+                recovery = self.recovery.recover(
+                    project_root,
+                    result_state,
+                    subtask_id=subtask.id,
+                )
+                result_state.record(
+                    "subtask_recovery",
+                    "Recovery attempted after subtask failure.",
+                    recovered=recovery.recovered,
+                    rolled_back_files=list(recovery.rolled_back_files),
+                    conflict_paths=list(recovery.conflict_paths),
+                )
+                if not recovery.recovered:
+                    summary = (
+                        f"Subtask stopped with status {result_state.status.value}; "
+                        "recovery was blocked by workspace conflicts."
+                    )
+                else:
+                    summary = (
+                        f"Subtask stopped with status {result_state.status.value}; "
+                        "audited changes were rolled back."
+                    )
+            else:
+                summary = "Subtask completed and verified."
             return SubtaskExecutionResult(subtask.id, result_state.status.value, summary, evidence[-10:])
 
         return self.execute_sequentially(board, execute, progress_callback=progress_callback)
