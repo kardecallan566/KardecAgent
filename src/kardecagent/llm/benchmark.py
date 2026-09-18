@@ -709,7 +709,6 @@ def run_agentic_benchmark(
                             content = _read_project_file(root, relative)
                             feedback.append(f"READ {relative}:\n{content}")
                     elif kind == "WRITE":
-                        writes += 1
                         relative = _safe_relative_path(target)
                         previous = last_written_contents.get(relative)
                         if previous is not None and previous == body:
@@ -721,6 +720,7 @@ def run_agentic_benchmark(
                             )
                         else:
                             _write_files(root, {relative: body})
+                            writes += 1
                             changed.add(relative)
                             last_written_contents[relative] = body
                             needs_write_after_failure = False
