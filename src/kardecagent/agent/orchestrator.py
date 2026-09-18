@@ -37,6 +37,7 @@ class SubtaskExecutionResult:
     status: str
     summary: str
     evidence: list[str]
+    resume_step: int = 1
 
 class Orchestrator:
     """Decomposes an approved plan and executes logical subtasks with one loaded LLM."""
@@ -211,6 +212,18 @@ class Orchestrator:
                 project_root=str(project_root.resolve()),
             )
             state.transition(TaskStatus.RUNNING, reason="Subtask execution initialized.")
+            def persist_subtask_progress(current_state, current_plan):
+                if parent_state is not None:
+                    parent_state.record(
+                        "subtask_progress",
+                        "Logical subtask execution cursor persisted.",
+                        subtask_id=subtask.id,
+                        plan_step=current_state.active_plan_step,
+                        status=current_state.status.value,
+                    )
+                    if progress_callback is not None:
+                        progress_callback(board)
+
             result_state = self.agent_loop.execute_approved_plan(
                 project_root,
                 f"{parent_task} :: {subtask.objective}",
@@ -224,6 +237,7 @@ class Orchestrator:
                 allowed_scope=subtask.scope,
                 max_iterations=self.settings.max_iterations,
                 allow_plan_changes=False,
+                persistence_callback=persist_subtask_progress,
             )
             if result_state.status.value != "completed":
                 recovery = self.recovery.recover(
@@ -257,6 +271,7 @@ class Orchestrator:
                         allowed_scope=subtask.scope,
                         max_iterations=self.settings.max_iterations,
                         allow_plan_changes=False,
+                        persistence_callback=persist_subtask_progress,
                         resume_step=recovery.resume_step,
                     )
                     summary = (
@@ -285,6 +300,9 @@ class Orchestrator:
                     "subtask_recovery",
                 }
             ]
-            return SubtaskExecutionResult(subtask.id, result_state.status.value, summary, evidence[-10:])
+            return SubtaskExecutionResult(
+                subtask.id, result_state.status.value, summary, evidence[-10:],
+                resume_step=result_state.active_plan_step,
+            )
 
         return self.execute_sequentially(board, execute, progress_callback=progress_callback, parent_state=parent_state)
