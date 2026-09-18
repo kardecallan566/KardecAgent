@@ -68,3 +68,38 @@ def test_static_html_finish_is_verified(tmp_path: Path):
         and event.data.get("kind") == "static-html"
         for event in state.events
     )
+
+
+def test_plan_must_be_approved_before_execution(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    llm = FakeLLM([
+        '{"summary":"Do task","steps":["Change file"],"validation":["Run tests"],"risks":[]}',
+    ])
+    state = AgentLoop(llm, Settings(max_iterations=1)).run(
+        tmp_path, "do task", approval_callback=lambda plan: False
+    )
+    assert state.status.value == "failed"
+    assert any(event.event_type == "plan_created" for event in state.events)
+    assert any(
+        event.event_type == "plan_approval" and event.data.get("approved") is False
+        for event in state.events
+    )
+    assert not any(event.event_type == "execution_started" for event in state.events)
+
+
+def test_approved_plan_starts_execution(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    llm = FakeLLM([
+        '{"summary":"Do task","steps":["Create test file"],"validation":["Run tests"],"risks":[]}',
+        '{"tool":"finish","arguments":{"reason":"done"}}',
+    ])
+    state = AgentLoop(llm, Settings(max_iterations=1)).run(
+        tmp_path, "do task", approval_callback=lambda plan: True
+    )
+    assert any(event.event_type == "execution_started" for event in state.events)
