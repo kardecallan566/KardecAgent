@@ -9,7 +9,7 @@ from ..project import detect_project, discover_command, project_snapshot, scan_p
 from ..project.dependencies import discover_audit_command, summarize_audit
 from ..tools import (
     ProjectFilesystem, apply_unified_patch, git_diff, git_has_uncommitted_changes,
-    git_is_repo, git_log, git_status, run_command, search_text, search_web,
+    git_is_repo, git_log, git_status, git_changed_paths, run_command, search_text, search_web,
     fetch_web_page,
 )
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
@@ -163,8 +163,19 @@ class AgentExecutor:
             return json.dumps({"ok": True, "changed_files": list(result.changed_files),
                                 "method": "unified_patch"})
         if action.tool == "run_command":
+            before = git_changed_paths(root) if scope and git_is_repo(root) else set()
             result = run_command(root, args["command"], timeout=self.settings.command_timeout_seconds,
                                  max_output_chars=self.settings.max_command_output_chars)
+            if scope and git_is_repo(root):
+                after = git_changed_paths(root)
+                introduced = sorted(after - before)
+                self._check_scope(root, introduced, scope)
+                if introduced:
+                    return json.dumps({
+                        **result.__dict__,
+                        "scope_verified": True,
+                        "changed_paths": introduced,
+                    }, ensure_ascii=False)
             return json.dumps(result.__dict__, ensure_ascii=False)
         if action.tool == "run_checks":
             return json.dumps(self._run_check(root, args["kind"]), ensure_ascii=False)
