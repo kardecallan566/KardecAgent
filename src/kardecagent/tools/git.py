@@ -90,3 +90,21 @@ def create_checkpoint(root: Path, task: str = "task") -> GitResult:
 
 def rollback_to(root: Path, ref: str) -> GitResult:
     return _git(root, ["reset", "--hard", ref])
+
+
+def git_changed_paths(root: Path) -> set[str]:
+    """Return project-relative paths currently changed in the working tree."""
+    result = _git(root, ["status", "--porcelain", "--untracked-files=all"])
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "git status failed")
+    paths: set[str] = set()
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        status_path = line[3:]
+        # Rename/copy entries use "old -> new"; the new path is the one that
+        # matters for scope enforcement.
+        if " -> " in status_path:
+            status_path = status_path.split(" -> ", 1)[1]
+        paths.add(status_path.replace("\\", "/"))
+    return paths
