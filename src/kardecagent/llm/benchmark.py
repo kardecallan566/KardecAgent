@@ -134,6 +134,12 @@ class AgenticResult:
     tool_calls: int = 0
     recovery_attempts: int = 0
     first_attempt_passed: bool = False
+    reads: int = 0
+    writes: int = 0
+    runs: int = 0
+    dones: int = 0
+    invalid_actions: int = 0
+    action_trace: tuple[str, ...] = ()
 
 
 _FILE_RE = re.compile(
@@ -584,6 +590,12 @@ def run_agentic_benchmark(
             attempts = 0
             recovery_attempts = 0
             first_attempt_passed = False
+            reads = 0
+            writes = 0
+            runs = 0
+            dones = 0
+            invalid_actions = 0
+            action_trace: list[str] = []
             changed: set[str] = set()
             output = ""
             error = ""
@@ -626,7 +638,14 @@ def run_agentic_benchmark(
                         weighted_tps += sample_tps
                         tps_samples += 1
 
-                    actions = _parse_agent_actions(response.content)
+                    try:
+                        actions = _parse_agent_actions(response.content)
+                    except ValueError as exc:
+                        invalid_actions += 1
+                        action_trace.append(f"step={step + 1} INVALID {exc}")
+                        messages.append({"role": "assistant", "content": response.content})
+                        messages.append({"role": "user", "content": "Your response contained no recognized tool action. Use exactly READ, WRITE, RUN, or DONE blocks from the protocol. Do not use markdown fences or explanations."})
+                        continue
                     messages.append({"role": "assistant", "content": response.content})
 
                     step_had_test = False
@@ -635,21 +654,26 @@ def run_agentic_benchmark(
 
                     for kind, target, body in actions:
                         tool_calls += 1
+                        action_trace.append(f"step={step + 1} {kind} {target}".rstrip())
                         if kind == "READ":
+                            reads += 1
                             content = _read_project_file(root, target)
                             feedback.append(f"READ {target}:\\n{content}")
                         elif kind == "WRITE":
+                            writes += 1
                             relative = _safe_relative_path(target)
                             _write_files(root, {relative: body})
                             changed.add(relative)
                             feedback.append(f"WRITE {relative}: OK")
                         elif kind == "RUN":
+                            runs += 1
                             if target.strip() != "python -m pytest -q":
                                 raise ValueError(f"Unsupported benchmark command: {target}")
                             attempts += 1
                             step_had_test = True
                             code, output = _run_benchmark_test(root, case)
                             step_test_passed = code == 0 and case.verify(root)
+                            action_trace[-1] += f" {'PASS' if step_test_passed else 'FAIL'}"
                             feedback.append(
                                 f"RUN {target}: {'PASS' if step_test_passed else 'FAIL'}\\n{output}"
                             )
@@ -662,7 +686,10 @@ def run_agentic_benchmark(
                                 # The first failed test run is what triggers recovery.
                                 recovery_attempts += 1
                         elif kind == "DONE":
+                            dones += 1
                             if not passed:
+                                invalid_actions += 1
+                                action_trace[-1] += " INVALID_BEFORE_PASS"
                                 raise ValueError("Model declared DONE before tests passed.")
                             passed = True
                         else:
@@ -703,6 +730,12 @@ def run_agentic_benchmark(
                     tool_calls=tool_calls,
                     recovery_attempts=recovery_attempts,
                     first_attempt_passed=first_attempt_passed,
+                    reads=reads,
+                    writes=writes,
+                    runs=runs,
+                    dones=dones,
+                    invalid_actions=invalid_actions,
+                    action_trace=tuple(action_trace),
                 )
             )
     return results
