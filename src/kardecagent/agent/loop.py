@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ..config import Settings
-from ..project import discover_command, project_snapshot, detect_project, validate_project
+from ..project import discover_command, project_snapshot, detect_project, validate_project, scan_project
 from ..llm import LocalLLMClient
 from ..tools import (
     ProjectFilesystem,
@@ -39,6 +39,10 @@ class AgentLoop:
         self.settings = settings
 
     def _run_check(self, root: Path, kind: str) -> dict:
+        if kind == "security":
+            result = scan_project(root)
+            return {"kind": kind, "available": True, **result.as_dict()}
+
         if kind == "validate":
             profile = detect_project(root)
             if profile.kind != "static-html":
@@ -72,9 +76,11 @@ class AgentLoop:
             "passed": result.returncode == 0 and not result.timed_out,
         }
 
-    def _verify_completion(self, root: Path) -> dict:
+    def _verify_completion(self, root: Path, security_required: bool = False) -> dict:
         """Run all checks the project exposes and require every available check to pass."""
         checks = [self._run_check(root, kind) for kind in CHECK_KINDS]
+        if security_required:
+            checks.append(self._run_check(root, "security"))
         available = [check for check in checks if check["available"]]
         failures = [check for check in available if not check["passed"]]
 
@@ -392,7 +398,7 @@ class AgentLoop:
                     ]
                     continue
 
-                verification = self._verify_completion(project_root)
+                verification = self._verify_completion(project_root, plan.security_level in {"sensitive", "high_risk"})
                 verification["completion_criteria"] = [
                     {"criterion": criterion, "evidence": evidence[index]}
                     for index, criterion in enumerate(plan.completion_criteria)
