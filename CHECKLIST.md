@@ -95,7 +95,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [ ] Test-result parsing
 - [ ] Error summarization
 - [x] Git status/diff
-- [x] Pre-task checkpoint (wired into the agent loop)
+- [x] Pre-task checkpoint (implemented as a post-approval safety checkpoint)
 - [ ] Post-task checkpoint
 - [ ] Rollback (safety/confirmation layer required before exposure)
 - [ ] Task interruption/resume
