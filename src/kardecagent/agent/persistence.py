@@ -43,6 +43,12 @@ class TaskJournal:
         expected = len(existing) + 1
         previous_hash = existing[-1]["checksum"] if existing else ""
         current_status = existing[-1]["status"] if existing else TaskStatus.PENDING.value
+        current_cursor = dict(existing[-1].get("cursor", {})) if existing else {
+            "plan_step": 1, "subtask_id": None, "subtask_step": 1
+        }
+        current_cursor.setdefault("plan_step", 1)
+        current_cursor.setdefault("subtask_id", None)
+        current_cursor.setdefault("subtask_step", 1)
         pending = [event for event in state.events if event.sequence >= expected]
 
         if pending and pending[0].sequence != expected:
@@ -64,10 +70,11 @@ class TaskJournal:
                         current_status = str(event.data.get("to_status", current_status))
                     cursor = journal_cursor_from_event(
                         event,
-                        current_plan_step=state.active_plan_step,
-                        current_subtask_id=state.active_subtask_id,
-                        current_subtask_step=state.active_subtask_step,
+                        current_plan_step=current_cursor["plan_step"],
+                        current_subtask_id=current_cursor["subtask_id"],
+                        current_subtask_step=current_cursor["subtask_step"],
                     )
+                    current_cursor = cursor
                     record = {
                         "version": self.VERSION,
                         "sequence": event.sequence,
