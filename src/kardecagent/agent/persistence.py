@@ -62,6 +62,11 @@ class TaskJournal:
                         )
                     if event.event_type == "status_changed":
                         current_status = str(event.data.get("to_status", current_status))
+                    cursor = journal_cursor_from_event(
+                        event,
+                        current_plan_step=state.active_plan_step,
+                        current_subtask_id=state.active_subtask_id,
+                    )
                     record = {
                         "version": self.VERSION,
                         "sequence": event.sequence,
@@ -70,6 +75,7 @@ class TaskJournal:
                         "event": asdict(event),
                         "status": current_status,
                         "iteration": event.iteration,
+                        "cursor": cursor,
                         "previous_checksum": previous_hash,
                     }
                     record["checksum"] = hashlib.sha256(
@@ -188,6 +194,7 @@ class TaskStore:
             "events": [asdict(event) for event in state.events],
             "journal_sequence": journal_sequence,
             "journal_checksum": journal_checksum,
+            "cursor": {"plan_step": state.active_plan_step, "subtask_id": state.active_subtask_id},
         }
         encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         payload["integrity_sha256"] = hashlib.sha256(encoded).hexdigest()
@@ -243,10 +250,19 @@ class TaskStore:
             latest = records[-1]
             state.status = TaskStatus(latest["status"])
             state.iteration = int(latest["iteration"])
+            cursor = replay_journal_cursor(records)
+            state.active_plan_step = cursor["plan_step"]
+            state.active_subtask_id = cursor["subtask_id"]
         elif snapshot_sequence:
             raise PersistenceError("persisted task references a missing execution journal")
 
         board = _board_from_dict(payload.get("board"))
+        # Journaled board snapshots are authoritative when the journal is ahead
+        # of the atomic snapshot (for example, a crash between the two writes).
+        for record in records:
+            event_data = record.get("event", {}).get("data", {})
+            if isinstance(event_data.get("board"), dict):
+                board = _board_from_dict(event_data["board"])
         if board is not None:
             for subtask in board.subtasks.values():
                 if subtask.status is SubtaskStatus.RUNNING:
@@ -355,3 +371,58 @@ def _board_from_dict(payload: dict | None) -> TaskBoard | None:
             iterations=int(item.get("iterations", 0)),
         ))
     return board
+
+
+def _event_from_journal_record(record: dict) -> AgentEvent:
+    event = record["event"]
+    return AgentEvent(
+        int(event["iteration"]),
+        event["event_type"],
+        event["message"],
+        dict(event.get("data", {})),
+        str(event.get("timestamp", "")),
+        int(event.get("sequence", 0)),
+    )
+
+
+def journal_cursor_from_event(
+    event: AgentEvent,
+    *,
+    current_plan_step: int,
+    current_subtask_id: str | None,
+) -> dict:
+    """Apply one event to the durable execution cursor."""
+    plan_step = current_plan_step
+    subtask_id = current_subtask_id
+    data = event.data
+    if event.event_type == "plan_step_started":
+        step = data.get("step")
+        if isinstance(step, int) and step > 0:
+            plan_step = step
+    elif event.event_type == "plan_step_completed":
+        step = data.get("step")
+        if isinstance(step, int) and step > 0:
+            plan_step = step + 1
+    elif event.event_type in {"recovery_completed", "subtask_resume_retry_started"}:
+        step = data.get("resume_step")
+        if isinstance(step, int) and step > 0:
+            plan_step = step
+    if event.event_type == "subtask_started":
+        value = data.get("subtask_id")
+        subtask_id = value if isinstance(value, str) else None
+    elif event.event_type in {"subtask_completed", "subtask_failed", "subtask_blocked"}:
+        if data.get("subtask_id") == subtask_id:
+            subtask_id = None
+    return {"plan_step": plan_step, "subtask_id": subtask_id}
+
+
+def replay_journal_cursor(records: list[dict]) -> dict:
+    """Reconstruct the latest execution cursor exclusively from journal events."""
+    cursor = {"plan_step": 1, "subtask_id": None}
+    for record in records:
+        cursor = journal_cursor_from_event(
+            _event_from_journal_record(record),
+            current_plan_step=cursor["plan_step"],
+            current_subtask_id=cursor["subtask_id"],
+        )
+    return cursor
