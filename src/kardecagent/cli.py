@@ -6,7 +6,7 @@ import logging
 from .agent import AgentLoop
 from .config import Settings, resolve_project_root
 from .llm import LocalLLMClient, OllamaClient
-from .llm.benchmark import default_models, run_benchmark
+from .llm.benchmark import default_models, run_benchmark, run_agentic_benchmark
 from .project import detect_project
 from .agent.persistence import TaskStore, PersistenceError
 
@@ -32,6 +32,7 @@ def build_parser():
     benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
     benchmark.add_argument("--timeout", type=float, default=300.0)
+    benchmark.add_argument("--level", choices=("basic", "agentic"), default="agentic", help="Benchmark level (default: agentic).")
     return parser
 
 
@@ -126,7 +127,7 @@ def _doctor(settings: Settings, root) -> int:
         return 1
 
 
-def _benchmark(settings: Settings, models_arg: str | None, timeout: float) -> int:
+def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level: str = "agentic") -> int:
     if settings.llm_provider != "ollama":
         print("[FAIL] benchmark requires LLM provider 'ollama'.")
         return 1
@@ -139,6 +140,7 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float) -> in
         return 1
 
     print("KardecAgent Ollama benchmark")
+    print("Level:", level)
     print("Models:", ", ".join(models))
     print()
     overall: list[tuple[str, int, int, float, float]] = []
@@ -148,7 +150,11 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float) -> in
             continue
         model_client = OllamaClient(settings.ollama_base_url, model, timeout)
         try:
-            results = run_benchmark(model_client)
+            results = (
+                run_agentic_benchmark(model_client)
+                if level == "agentic"
+                else run_benchmark(model_client)
+            )
         except Exception as exc:
             print(f"[FAIL] {model} - {exc}")
             continue
@@ -214,7 +220,7 @@ def main() -> int:
         root = resolve_project_root(args.project)
         return _tasks(root)
     if args.command == "benchmark":
-        return _benchmark(settings, args.models, args.timeout)
+        return _benchmark(settings, args.models, args.timeout, args.level)
 
     if args.max_iterations is not None:
         settings = Settings(**{
