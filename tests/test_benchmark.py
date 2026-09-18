@@ -146,3 +146,18 @@ def test_agentic_benchmark_records_invalid_response_and_recovers_protocol():
     assert result.runs == 1
     assert result.action_trace[0].startswith("step=1 INVALID")
     assert result.action_trace[-1].endswith("PASS")
+
+
+def test_normalize_agentic_prompt_removes_legacy_file_protocol():
+    from kardecagent.llm.benchmark import _normalize_agentic_prompt
+
+    prompt = """Implement the feature. Return ONLY complete modified files as FILE blocks.
+Format:
+=== FILE: path ===
+<complete file>
+=== END FILE ===
+Task: add the feature."""
+    normalized = _normalize_agentic_prompt(prompt)
+    assert "Return ONLY complete modified files as FILE blocks" not in normalized
+    assert "=== FILE: path ===" not in normalized
+    assert "READ/WRITE/RUN" in normalized
