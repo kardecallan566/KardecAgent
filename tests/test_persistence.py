@@ -65,3 +65,28 @@ def test_unapproved_task_cannot_resume(tmp_path: Path):
         assert "approved" in str(exc)
     else:
         raise AssertionError("expected PersistenceError")
+
+
+def test_persisted_task_has_integrity_metadata(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("integrity", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    path = store.save(state, plan=make_plan(), approved=True)
+    import json
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["version"] == 2
+    assert len(payload["integrity_sha256"]) == 64
+
+
+def test_corrupt_current_task_recovers_from_backup(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("backup", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    path = store.save(state, plan=make_plan(), approved=True)
+    store.save(state, plan=make_plan(), approved=True)
+    backup = path.with_suffix(path.suffix + ".bak")
+    assert backup.is_file()
+    path.write_text("{corrupt", encoding="utf-8")
+    loaded, _, _ = store.load("backup")
+    assert loaded.task == "backup"
+    assert loaded.status is TaskStatus.RUNNING
