@@ -115,6 +115,7 @@ class Orchestrator:
         board: TaskBoard,
         executor: Callable[[Subtask], SubtaskExecutionResult],
         progress_callback: Callable[[TaskBoard], None] | None = None,
+        parent_state=None,
     ) -> TaskBoard:
         while not board.completed:
             ready = board.ready()
@@ -132,13 +133,49 @@ class Orchestrator:
                 break
             subtask = ready[0]
             board.mark_running(subtask.id)
+            if parent_state is not None:
+                parent_state.record(
+                    "subtask_started",
+                    "Logical subtask execution started.",
+                    subtask_id=subtask.id,
+                    plan_steps=list(subtask.plan_steps),
+                    board=board.as_dict(),
+                )
+                if progress_callback is not None:
+                    progress_callback(board)
             result = executor(subtask)
             subtask.iterations += 1
             if result.status == "completed":
                 board.complete(subtask.id, result=result.summary, evidence=result.evidence)
+                if parent_state is not None:
+                    parent_state.record(
+                        "subtask_completed",
+                        "Logical subtask completed.",
+                        subtask_id=subtask.id,
+                        result=result.summary,
+                        evidence=list(result.evidence),
+                        board=board.as_dict(),
+                    )
             else:
                 board.fail(subtask.id, result=result.summary)
+                if parent_state is not None:
+                    parent_state.record(
+                        "subtask_failed",
+                        "Logical subtask failed.",
+                        subtask_id=subtask.id,
+                        result=result.summary,
+                        board=board.as_dict(),
+                    )
                 self._mark_blocked(board)
+                if parent_state is not None:
+                    for blocked in board.subtasks.values():
+                        if blocked.status is SubtaskStatus.BLOCKED:
+                            parent_state.record(
+                                "subtask_blocked",
+                                "Logical subtask blocked by a failed dependency.",
+                                subtask_id=blocked.id,
+                                board=board.as_dict(),
+                            )
                 if progress_callback is not None:
                     progress_callback(board)
                 break
@@ -159,6 +196,7 @@ class Orchestrator:
         self, project_root: Path, parent_task: str, parent_plan: ExecutionPlan,
         board: TaskBoard,
         progress_callback: Callable[[TaskBoard], None] | None = None,
+        parent_state=None,
     ) -> TaskBoard:
         """Execute subtasks without replanning or asking for approval again."""
         def execute(subtask: Subtask) -> SubtaskExecutionResult:
@@ -249,4 +287,4 @@ class Orchestrator:
             ]
             return SubtaskExecutionResult(subtask.id, result_state.status.value, summary, evidence[-10:])
 
-        return self.execute_sequentially(board, execute, progress_callback=progress_callback)
+        return self.execute_sequentially(board, execute, progress_callback=progress_callback, parent_state=parent_state)
