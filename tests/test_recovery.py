@@ -42,7 +42,6 @@ def test_recovery_rolls_back_only_failed_subtask(tmp_path: Path):
     assert (tmp_path / "first.txt").read_text(encoding="utf-8") == "keep"
     assert not (tmp_path / "failed.txt").exists()
     assert result.rolled_back_files == ("failed.txt",)
-    assert any(e.event_type == "recovery_completed" for e in state.events)
 
 
 def test_recovery_preflight_conflict_changes_nothing(tmp_path: Path):
@@ -108,3 +107,83 @@ def test_recovery_handles_repeated_edits_to_same_file(tmp_path: Path):
 
     assert result.recovered
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_recovery_transaction_resumes_after_crash(tmp_path: Path):
+    state = TaskState("crash-recovery", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.transition(TaskStatus.FAILED)
+
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    _event(state, first, "one", "subtask")
+    _event(state, second, "two", "subtask")
+
+    persisted = []
+    manager = RecoveryManager()
+
+    calls = {"count": 0}
+    def persist(current: TaskState):
+        calls["count"] += 1
+        persisted.append(current.events[-1].event_type)
+        if current.events[-1].event_type == "recovery_file_rolled_back" and calls["count"] == 5:
+            raise RuntimeError("simulated process crash")
+
+    try:
+        manager.recover(tmp_path, state, subtask_id="subtask", persistence_callback=persist)
+    except RuntimeError:
+        pass
+
+    # Simulate restart from the durable event stream. The transaction has
+    # already rolled back the first unit but has no completion event.
+    assert state.status is TaskStatus.RECOVERING
+    assert not first.exists()
+    assert second.exists()
+
+    result = manager.resume_pending_recovery(tmp_path, state)
+    assert result.recovered
+    assert not second.exists()
+    assert state.status is TaskStatus.RESUMING
+
+
+def test_recovery_transaction_detects_external_change_after_crash(tmp_path: Path):
+    state = TaskState("crash-conflict", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.transition(TaskStatus.FAILED)
+
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    _event(state, first, "one", "subtask")
+    _event(state, second, "two", "subtask")
+
+    manager = RecoveryManager()
+    manager.recover(tmp_path, state, subtask_id="subtask")
+
+    # Recreate an interrupted transaction from the audited event history.
+    state.status = TaskStatus.RECOVERING
+    for event in list(state.events):
+        if event.event_type == "recovery_completed":
+            state.events.remove(event)
+    second.write_text("external", encoding="utf-8")
+
+    result = manager.resume_pending_recovery(tmp_path, state)
+    assert not result.recovered
+    assert result.conflict_paths == ()
+    assert "conflict" in (result.error or "")
+
+
+def test_recovery_transaction_persists_phase_events(tmp_path: Path):
+    state = TaskState("phases", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.transition(TaskStatus.FAILED)
+    _event(state, tmp_path / "a.txt", "a", "subtask")
+
+    result = RecoveryManager().recover(tmp_path, state)
+    assert result.recovered
+    kinds = [event.event_type for event in state.events]
+    assert "recovery_started" in kinds
+    assert "recovery_preflight_completed" in kinds
+    assert "recovery_rollback_started" in kinds
+    assert "recovery_file_rolled_back" in kinds
+    assert "recovery_rollback_completed" in kinds
+    assert "recovery_completed" in kinds
