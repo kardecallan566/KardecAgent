@@ -7,14 +7,14 @@ def test_settings_default_to_ollama():
     settings = Settings()
     assert settings.llm_provider == "ollama"
     assert settings.ollama_base_url == "http://127.0.0.1:11434"
-    assert settings.llm_model == "qwen3-coder:30b"
+    assert settings.llm_model == "qwen2.5-coder:3b"
 
 
 def test_build_llm_uses_ollama():
     client = _build_llm(Settings())
     assert isinstance(client, OllamaClient)
     assert client.base_url == "http://127.0.0.1:11434"
-    assert client.model == "qwen3-coder:30b"
+    assert client.model == "qwen2.5-coder:3b"
 
 
 def test_ollama_client_chat_uses_native_api(monkeypatch):
@@ -47,7 +47,7 @@ def test_ollama_client_chat_uses_native_api(monkeypatch):
 
     assert response.content == "KARDECAGENT_OK"
     assert calls["url"] == "http://127.0.0.1:11434/api/chat"
-    assert calls["kwargs"]["json"]["model"] == "qwen3-coder:30b"
+    assert calls["kwargs"]["json"]["model"] == "qwen2.5-coder:3b"
     assert calls["kwargs"]["json"]["stream"] is False
     assert calls["kwargs"]["json"]["options"]["temperature"] == 0.0
 
