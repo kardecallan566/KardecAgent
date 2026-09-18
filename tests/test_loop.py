@@ -50,3 +50,21 @@ def test_failed_verification_returns_to_model(tmp_path: Path):
 
     assert state.status.value == "max_iterations"
     assert any(event.event_type == "verification_failed" for event in state.events)
+
+
+
+def test_static_html_finish_is_verified(tmp_path: Path):
+    (tmp_path / "index.html").write_text(
+        "<!doctype html><html lang='pt-BR'><head>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Site</title></head><body><main>OK</main></body></html>",
+        encoding="utf-8",
+    )
+    llm = FakeLLM(['{"tool":"finish","arguments":{"reason":"site implemented"}}'])
+    state = AgentLoop(llm, Settings(max_iterations=1)).run(tmp_path, "create site")
+    assert state.status.value == "completed"
+    assert any(
+        event.event_type == "project_detected"
+        and event.data.get("kind") == "static-html"
+        for event in state.events
+    )
