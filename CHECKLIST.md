@@ -239,4 +239,4 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Detect newly introduced changed paths after commands.
 - [x] Fingerprint pre-existing dirty files so in-place changes are detected.
 - [x] Reject command execution results that introduce changes outside the subtask scope.
-- [ ] Automatic safe remediation/rollback for out-of-scope command side effects.
+- [x] Automatic safe remediation/rollback for out-of-scope command side effects.
