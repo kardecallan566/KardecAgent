@@ -21,6 +21,7 @@ from ..tools import (
 from .state import TaskState, TaskStatus
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan, plan_instructions
 from .security import assess_security, security_requirements_for
+from .security_review import SecurityReviewError, parse_security_review, security_review_instructions
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
 
 
@@ -102,6 +103,34 @@ class AgentLoop:
             }
 
         return verification
+
+    def _run_security_review(self, root: Path, task: str, plan: ExecutionPlan) -> dict:
+        diff = git_diff(root).stdout if git_is_repo(root) else ""
+        review_messages = [
+            {"role": "system", "content": security_review_instructions()},
+            {"role": "user", "content": json.dumps({
+                "task": task,
+                "security_level": plan.security_level,
+                "security_requirements": plan.security_requirements,
+                "changed_files_diff": diff,
+                "instruction": "Review the current implementation and its diff. Return only the structured security review JSON.",
+            }, ensure_ascii=False)},
+        ]
+        for _ in range(3):
+            response = self.llm.chat(review_messages)
+            try:
+                review = parse_security_review(response.content)
+                return review.as_dict()
+            except SecurityReviewError as exc:
+                review_messages += [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": "Invalid review: " + str(exc) + ". Return valid JSON only."},
+                ]
+        return {"status": "findings", "summary": "Security reviewer failed to produce a valid review.", "findings": [{
+            "severity": "high", "category": "review_integrity",
+            "message": "The independent security review could not be validated.",
+            "recommendation": "Repeat the security review before completion.",
+        }]}
 
     def _execute(self, root: Path, action) -> str:
         fs = ProjectFilesystem(root)
@@ -427,6 +456,12 @@ class AgentLoop:
                     continue
 
                 verification = self._verify_completion(project_root, plan.security_level in {"sensitive", "high_risk"})
+                if verification["verified"] and plan.security_level in {"sensitive", "high_risk"}:
+                    security_review = self._run_security_review(project_root, task, plan)
+                    verification["security_review"] = security_review
+                    state.record("security_review", "Independent security review executed.", review=security_review)
+                    if security_review["status"] != "pass" or security_review["findings"]:
+                        verification["verified"] = False
                 verification["completion_criteria"] = [
                     {"criterion": criterion, "evidence": evidence[index]}
                     for index, criterion in enumerate(plan.completion_criteria)
