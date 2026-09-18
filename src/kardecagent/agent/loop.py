@@ -381,6 +381,18 @@ class AgentLoop:
                              "Replacement plan approved." if changed else "Replacement plan rejected.",
                              approved=changed)
 
+                if changed and proposed_plan.security_level == "high_risk":
+                    if high_risk_approval_callback is None:
+                        state.status = TaskStatus.FAILED
+                        state.record("high_risk_approval_required", "Elevated replacement plan requires a second explicit approval.")
+                        return state
+                    changed = bool(high_risk_approval_callback(proposed_plan))
+                    state.record(
+                        "high_risk_plan_change_approval",
+                        "High-risk replacement plan approved." if changed else "High-risk replacement plan rejected.",
+                        approved=changed,
+                    )
+
                 if not changed:
                     messages += [
                         {"role": "assistant", "content": response.content},
