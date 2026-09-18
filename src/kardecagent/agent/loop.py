@@ -28,11 +28,60 @@ SYSTEM_PROMPT = (
     "verification. Prefer run_checks after changes."
 )
 
+CHECK_KINDS = ("test", "typecheck", "lint", "build")
+
 
 class AgentLoop:
     def __init__(self, llm: LocalLLMClient, settings: Settings) -> None:
         self.llm = llm
         self.settings = settings
+
+    def _run_check(self, root: Path, kind: str) -> dict:
+        command = discover_command(root, kind)
+        if not command:
+            return {"kind": kind, "available": False}
+
+        result = run_command(
+            root,
+            command,
+            timeout=self.settings.command_timeout_seconds,
+            max_output_chars=self.settings.max_command_output_chars,
+        )
+        return {
+            "kind": kind,
+            "available": True,
+            "command": command,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timed_out": result.timed_out,
+            "passed": result.returncode == 0 and not result.timed_out,
+        }
+
+    def _verify_completion(self, root: Path) -> dict:
+        """Run all checks the project exposes and require every available check to pass."""
+        checks = [self._run_check(root, kind) for kind in CHECK_KINDS]
+        available = [check for check in checks if check["available"]]
+        failures = [check for check in available if not check["passed"]]
+
+        verification = {
+            "verified": bool(available) and not failures,
+            "checks": checks,
+            "git": None,
+        }
+
+        if git_is_repo(root):
+            status = git_status(root)
+            diff = git_diff(root)
+            verification["git"] = {
+                "status_returncode": status.returncode,
+                "status": status.stdout,
+                "diff_returncode": diff.returncode,
+                "diff": diff.stdout,
+                "uncommitted_changes": git_has_uncommitted_changes(root),
+            }
+
+        return verification
 
     def _execute(self, root: Path, action) -> str:
         fs = ProjectFilesystem(root)
@@ -68,22 +117,8 @@ class AgentLoop:
                 ensure_ascii=False,
             )
         if action.tool == "run_checks":
-            kind = args["kind"]
-            command = discover_command(root, kind)
-            if not command:
-                return json.dumps(
-                    {"ok": False, "error": "No command discovered", "kind": kind}
-                )
-            result = run_command(
-                root,
-                command,
-                timeout=self.settings.command_timeout_seconds,
-                max_output_chars=self.settings.max_command_output_chars,
-            )
-            return json.dumps(
-                {"kind": kind, "command": command, **result.__dict__},
-                ensure_ascii=False,
-            )
+            result = self._run_check(root, args["kind"])
+            return json.dumps(result, ensure_ascii=False)
         raise ToolCallError("unsupported tool: " + action.tool)
 
     def run(self, project_root: Path, task: str) -> TaskState:
@@ -96,7 +131,7 @@ class AgentLoop:
                 state.record(
                     "checkpoint_created",
                     "Created pre-task Git checkpoint.",
-                    branch=checkpoint.stderr.strip() or checkpoint.command,
+                    branch=checkpoint.command,
                     dirty=git_has_uncommitted_changes(project_root),
                     current_branch=git_current_branch(project_root).stdout.strip(),
                 )
@@ -147,9 +182,40 @@ class AgentLoop:
                 continue
 
             if action.tool == "finish":
-                state.status = TaskStatus.COMPLETED
-                state.record("completed", action.arguments["reason"])
-                return state
+                verification = self._verify_completion(project_root)
+                state.record(
+                    "verification",
+                    "Completion verification executed.",
+                    verified=verification["verified"],
+                    checks=verification["checks"],
+                )
+                if verification["verified"]:
+                    state.status = TaskStatus.COMPLETED
+                    state.record("completed", action.arguments["reason"])
+                    return state
+
+                state.record(
+                    "verification_failed",
+                    "Completion was rejected because verification did not pass.",
+                )
+                messages += [
+                    {"role": "assistant", "content": response.content},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "verification": verification,
+                                "instruction": (
+                                    "Do not finish yet. Diagnose the failed checks, "
+                                    "make the necessary changes, and run the relevant "
+                                    "checks again."
+                                ),
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ]
+                continue
 
             try:
                 result = self._execute(project_root, action)
