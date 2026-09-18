@@ -117,6 +117,8 @@ class Orchestrator:
         executor: Callable[[Subtask], SubtaskExecutionResult],
         progress_callback: Callable[[TaskBoard], None] | None = None,
         parent_state=None,
+        resume_subtask_id: str | None = None,
+        resume_step: int = 1,
     ) -> TaskBoard:
         while not board.completed:
             ready = board.ready()
@@ -132,7 +134,10 @@ class Orchestrator:
                         ", ".join(unfinished)
                     )
                 break
-            subtask = ready[0]
+            subtask = next(
+                (item for item in ready if item.id == resume_subtask_id),
+                ready[0],
+            )
             board.mark_running(subtask.id)
             if parent_state is not None:
                 parent_state.record(
@@ -144,7 +149,9 @@ class Orchestrator:
                 )
                 if progress_callback is not None:
                     progress_callback(board)
-            result = executor(subtask)
+            result = executor(subtask, resume_step if subtask.id == resume_subtask_id else 1)
+            resume_subtask_id = None
+            resume_step = 1
             subtask.iterations += 1
             if result.status == "completed":
                 board.complete(subtask.id, result=result.summary, evidence=result.evidence)
@@ -200,9 +207,11 @@ class Orchestrator:
         board: TaskBoard,
         progress_callback: Callable[[TaskBoard], None] | None = None,
         parent_state=None,
+        resume_subtask_id: str | None = None,
+        resume_step: int = 1,
     ) -> TaskBoard:
         """Execute subtasks without replanning or asking for approval again."""
-        def execute(subtask: Subtask) -> SubtaskExecutionResult:
+        def execute(subtask: Subtask, requested_resume_step: int = 1) -> SubtaskExecutionResult:
             if not subtask.scope:
                 return SubtaskExecutionResult(
                     subtask.id, "failed", "Implementation subtasks require an explicit scope.", []
@@ -240,6 +249,7 @@ class Orchestrator:
                 max_iterations=self.settings.max_iterations,
                 allow_plan_changes=False,
                 persistence_callback=persist_subtask_progress,
+                resume_step=max(1, requested_resume_step),
             )
             if result_state.status.value != "completed":
                 recovery = self.recovery.recover(
@@ -317,4 +327,11 @@ class Orchestrator:
                 resume_step=result_state.active_plan_step,
             )
 
-        return self.execute_sequentially(board, execute, progress_callback=progress_callback, parent_state=parent_state)
+        return self.execute_sequentially(
+            board,
+            execute,
+            progress_callback=progress_callback,
+            parent_state=parent_state,
+            resume_subtask_id=resume_subtask_id,
+            resume_step=max(1, resume_step),
+        )
