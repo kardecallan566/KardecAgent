@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import subprocess
@@ -152,3 +153,40 @@ def git_has_rename_or_copy(root: Path) -> bool:
         (len(line) >= 2 and line[0] in {"R", "C"})
         for line in result.stdout.decode("utf-8", errors="replace").splitlines()
     )
+
+
+def rollback_file_change(root: Path, change: dict) -> None:
+    """Safely reverse one audited file change, only if its current hash matches the recorded after-state."""
+    raw = str(change["path"])
+    target = _safe_remediation_path(root.resolve(), raw)
+    expected_after = change.get("sha256_after")
+    before_exists = bool(change.get("exists_before"))
+    before_b64 = change.get("before_data_b64")
+
+    if target.is_symlink():
+        raise RuntimeError(f"refusing rollback through symlink: {raw}")
+    if target.exists() and not target.is_file():
+        raise RuntimeError(f"refusing rollback of non-regular path: {raw}")
+
+    current_digest = None
+    if target.is_file():
+        current_digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    if current_digest != expected_after:
+        raise RuntimeError(
+            f"rollback conflict for {raw}: current SHA-256 does not match audited after-state"
+        )
+
+    if not before_exists:
+        if target.exists():
+            target.unlink()
+        return
+
+    if not isinstance(before_b64, str):
+        raise RuntimeError(f"missing audited before-state for {raw}")
+    data = base64.b64decode(before_b64.encode("ascii"), validate=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".kardecagent-rollback")
+    if temporary.exists() or temporary.is_symlink():
+        raise RuntimeError(f"unsafe rollback target exists: {temporary}")
+    temporary.write_bytes(data)
+    os.replace(temporary, target)
