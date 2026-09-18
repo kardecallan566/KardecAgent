@@ -235,7 +235,13 @@ kardec-agent benchmark --level basic
 Também é possível comparar modelos específicos:
 
 ```powershell
-kardec-agent benchmark --models "qwen2.5-coder:1.5b,qwen2.5-coder:3b,qwen2.5-coder:7b"
+kardec-agent benchmark --models "qwen2.5-coder:1.5b,qwen2.5-coder:3b,qwen2.5-coder:7b,Qwen3-Coder-Next-GGUF"
+```
+
+O `Qwen3-Coder-Next-GGUF` também faz parte da lista padrão do benchmark. O benchmark não baixa modelos automaticamente: o nome precisa aparecer exatamente na lista do Ollama. Se a importação do GGUF usar outro nome/tag, passe esse nome com `--models`, por exemplo:
+
+```powershell
+kardec-agent benchmark --models "Qwen3-Coder-Next-GGUF"
 ```
 
 Cada tarefa do benchmark agentic é executada em uma pasta temporária isolada; o resultado não altera o projeto do usuário.
