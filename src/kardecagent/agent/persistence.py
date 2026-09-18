@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -43,7 +44,7 @@ class TaskStore:
     ) -> Path:
         self.directory.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": 1,
+            "version": 2,
             "task": state.task,
             "project_root": state.project_root,
             "status": state.status.value,
@@ -54,6 +55,9 @@ class TaskStore:
             "events": [asdict(event) for event in state.events],
         }
         target = self.path_for(state.task)
+        backup = target.with_suffix(target.suffix + ".bak")
+        encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        payload["integrity_sha256"] = hashlib.sha256(encoded).hexdigest()
         fd, temp_name = tempfile.mkstemp(
             prefix=target.name + ".", suffix=".tmp", dir=self.directory
         )
@@ -62,7 +66,14 @@ class TaskStore:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if target.is_file():
+                os.replace(target, backup)
             os.replace(temp_name, target)
+            directory_fd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         finally:
             if os.path.exists(temp_name):
                 os.unlink(temp_name)
@@ -74,8 +85,15 @@ class TaskStore:
             raise PersistenceError(f"no persisted task found: {task}")
         try:
             payload = json.loads(target.read_text(encoding="utf-8"))
-            if payload.get("version") != 1 or payload.get("approved") is not True:
+            if payload.get("version") not in {1, 2} or payload.get("approved") is not True:
                 raise PersistenceError("persisted task is not an approved resumable task")
+            if payload.get("version") == 2:
+                supplied = payload.get("integrity_sha256")
+                unsigned = dict(payload)
+                unsigned.pop("integrity_sha256", None)
+                encoded = json.dumps(unsigned, ensure_ascii=False, indent=2).encode("utf-8")
+                if supplied != hashlib.sha256(encoded).hexdigest():
+                    raise PersistenceError("persisted task integrity check failed")
             if Path(payload["project_root"]).resolve() != self.project_root:
                 raise PersistenceError("persisted project root does not match current project")
             plan = parse_plan(json.dumps(payload["plan"], ensure_ascii=False))
