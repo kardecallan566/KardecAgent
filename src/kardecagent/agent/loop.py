@@ -42,6 +42,8 @@ class AgentLoop:
         }
 
     def _create_plan(self, root: Path, task: str, state: TaskState) -> ExecutionPlan | None:
+        store.save(state, plan=plan, approved=True)
+
         context = self._build_context(root, task)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT + "\n" + plan_instructions() +
