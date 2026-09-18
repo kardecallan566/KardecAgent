@@ -46,6 +46,18 @@ class PlanTracker:
     completed_steps: list[int] = field(default_factory=list)
     started_steps: list[int] = field(default_factory=list)
 
+    @classmethod
+    def resume_from(cls, plan: ExecutionPlan, next_step: int) -> "PlanTracker":
+        if not 1 <= next_step <= len(plan.steps) + 1:
+            raise PlanError("resume step is outside the approved plan")
+        completed = list(range(1, next_step))
+        return cls(
+            plan=plan,
+            current_step=next_step,
+            completed_steps=completed,
+            started_steps=completed.copy(),
+        )
+
     @property
     def total_steps(self) -> int:
         return len(self.plan.steps)
