@@ -83,7 +83,7 @@ class AgentLoop:
     ) -> TaskState:
         root = project_root.resolve()
         state = TaskState(task, str(root))
-        state.status = TaskStatus.RUNNING
+        state.transition(TaskStatus.RUNNING, reason="Task execution initialized.")
         profile = detect_project(root)
         state.record("project_detected", f"Detected project kind: {profile.kind}.",
                      kind=profile.kind, language=profile.language, framework=profile.framework,
@@ -91,25 +91,25 @@ class AgentLoop:
 
         plan = self._create_plan(root, task, state)
         if plan is None:
-            state.status = TaskStatus.FAILED
+            state.transition(TaskStatus.FAILED, reason="Could not produce a valid execution plan.")
             state.record("plan_failed", "Could not produce a valid execution plan.")
             return state
         state.record("plan_created", "Execution plan created.", plan=plan.as_dict())
 
         if approval_callback is None:
-            state.status = TaskStatus.FAILED
+            state.transition(TaskStatus.FAILED, reason="Execution stopped: explicit plan approval is required.")
             state.record("approval_required", "Execution stopped: explicit plan approval is required.")
             return state
         approved = bool(approval_callback(plan))
         state.record("plan_approval", "Execution plan approved." if approved else "Execution plan rejected.",
                      approved=approved)
         if not approved:
-            state.status = TaskStatus.FAILED
+            state.transition(TaskStatus.FAILED, reason="Execution plan was rejected.")
             return state
 
         if plan.security_level == "high_risk":
             if high_risk_approval_callback is None or not high_risk_approval_callback(plan):
-                state.status = TaskStatus.FAILED
+                state.transition(TaskStatus.FAILED, reason="High-risk execution rejected.")
                 state.record("high_risk_approval", "High-risk execution rejected.", approved=False)
                 return state
             state.record("high_risk_approval", "High-risk execution approved.", approved=True)
@@ -146,7 +146,7 @@ class AgentLoop:
                 state.record("subtask_execution_finished", "Logical subtask execution finished.",
                              board=board.as_dict())
                 if not board.completed:
-                    state.status = TaskStatus.FAILED
+                    state.transition(TaskStatus.FAILED, reason="At least one required subtask did not complete.")
                     state.record("subtask_execution_failed", "At least one required subtask did not complete.")
                     return state
                 verification = self.executor.verify(
@@ -154,10 +154,12 @@ class AgentLoop:
                 )
                 state.record("verification", "Parent task verification executed.", verification=verification)
                 if not verification["verified"]:
-                    state.status = TaskStatus.FAILED
+                    state.transition(TaskStatus.FAILED, reason="Parent verification failed after subtask integration.")
                     state.record("verification_failed", "Parent verification failed after subtask integration.")
                     return state
-                state.status = TaskStatus.COMPLETED
+                state.transition(TaskStatus.VERIFYING, reason="Parent verification after subtask execution started.")
+                state.transition(TaskStatus.VERIFIED, reason="Parent verification after subtask execution passed.")
+                state.transition(TaskStatus.COMPLETED, reason="Task completed through logical subtasks and verified.")
                 state.record("completed", "Task completed through logical subtasks and verified.",
                              subtask_board=board.as_dict(), verification=verification)
                 return state
@@ -177,7 +179,14 @@ class AgentLoop:
         state, plan, board = store.load(task)
         if state.status is TaskStatus.COMPLETED:
             return state
-        state.status = TaskStatus.RUNNING
+        if state.status is not TaskStatus.RUNNING:
+            if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
+                state.transition(TaskStatus.RECOVERING, reason="Persisted task resume requested.")
+                state.transition(TaskStatus.RESUMING, reason="Persisted task is eligible for resume.")
+            elif state.status is TaskStatus.PENDING:
+                state.transition(TaskStatus.RUNNING, reason="Persisted task had not started.")
+            else:
+                raise PersistenceError(f"cannot resume task from status {state.status.value}")
         state.record("resume_started", "Resuming previously approved persisted task.")
         if board is not None:
             from .orchestrator import Orchestrator
@@ -194,9 +203,14 @@ class AgentLoop:
                 )
                 state.record("verification", "Parent task verification executed after resume.",
                              verification=verification)
-                state.status = TaskStatus.COMPLETED if verification["verified"] else TaskStatus.FAILED
+                state.transition(TaskStatus.VERIFYING, reason="Parent verification after resume started.")
+                if verification["verified"]:
+                    state.transition(TaskStatus.VERIFIED, reason="Parent verification after resume passed.")
+                    state.transition(TaskStatus.COMPLETED, reason="Persisted task resume completed.")
+                else:
+                    state.transition(TaskStatus.FAILED, reason="Parent verification after resume failed.")
             else:
-                state.status = TaskStatus.FAILED
+                state.transition(TaskStatus.FAILED, reason="Persisted logical subtask resume did not complete.")
         else:
             state = self.execute_approved_plan(
                 root, task, plan, state,
