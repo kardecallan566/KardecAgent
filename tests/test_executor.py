@@ -126,3 +126,34 @@ def test_mutation_records_integrity_fingerprints(tmp_path: Path):
     assert record["plan_step"] == 1
     assert record["subtask"] is True
     assert changes[0].timestamp
+
+
+def test_audited_operation_can_be_rolled_back(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings())
+    plan = ExecutionPlan("Audit", ["Implement"], ["checks"], [], ["done"])
+    state = make_state(tmp_path)
+    from kardecagent.agent.tools_schema import parse_tool_call
+    action = parse_tool_call(
+        '{"tool":"write_file","arguments":{"path":"inside.txt","content":"after"},"plan_step":1}'
+    )
+    loop.executor._execute_tool(tmp_path, action, ("inside.txt",), state)
+    loop.executor.rollback_operation(tmp_path, state, 0)
+    assert not (tmp_path / "inside.txt").exists()
+    assert any(e.event_type == "integrity_rollback" for e in state.events)
+
+
+def test_audited_rollback_refuses_concurrent_modification(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings())
+    state = make_state(tmp_path)
+    from kardecagent.agent.tools_schema import parse_tool_call
+    action = parse_tool_call(
+        '{"tool":"write_file","arguments":{"path":"inside.txt","content":"after"},"plan_step":1}'
+    )
+    loop.executor._execute_tool(tmp_path, action, ("inside.txt",), state)
+    (tmp_path / "inside.txt").write_text("changed-after-audit", encoding="utf-8")
+    try:
+        loop.executor.rollback_operation(tmp_path, state, 0)
+    except RuntimeError as exc:
+        assert "rollback conflict" in str(exc)
+    else:
+        raise AssertionError("expected rollback conflict")
