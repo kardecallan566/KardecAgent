@@ -9,6 +9,7 @@ from ..project.dependencies import discover_audit_command, summarize_audit
 from ..llm import LocalLLMClient
 from ..tools import (
     ProjectFilesystem,
+    apply_unified_patch,
     create_checkpoint,
     git_current_branch,
     git_diff,
@@ -162,16 +163,19 @@ class AgentLoop:
             return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5), allow_domains=self.settings.web_allow_domains, deny_domains=self.settings.web_deny_domains), ensure_ascii=False)
         if action.tool == "fetch_web_page":
             return json.dumps(fetch_web_page(args["url"], max_chars=args.get("max_chars", 30000), allow_domains=self.settings.web_allow_domains, deny_domains=self.settings.web_deny_domains), ensure_ascii=False)
-        if action.tool == "search_web":
-            return json.dumps(search_web(args["query"], max_results=args.get("max_results", 5)), ensure_ascii=False)
-        if action.tool == "search_files":
+            if action.tool == "search_files":
             return json.dumps(
                 search_text(root, args["query"], args.get("max_results", 50)),
                 ensure_ascii=False,
             )
         if action.tool == "write_file":
             fs.write_file(args["path"], args["content"])
-            return json.dumps({"ok": True, "path": args["path"]})
+            return json.dumps({"ok": True, "path": args["path"], "method": "full_file"})
+        if action.tool == "apply_patch":
+            result = apply_unified_patch(root, args["patch"])
+            if not result.applied:
+                raise ValueError(result.error or "Patch was not applied.")
+            return json.dumps({"ok": True, "changed_files": list(result.changed_files), "method": "unified_patch"})
         if action.tool == "run_command":
             result = run_command(
                 root,
