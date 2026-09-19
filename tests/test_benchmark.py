@@ -113,7 +113,6 @@ def test_agentic_benchmark_recovers_after_failed_test():
 def clamp(value, minimum, maximum):
     return value
 === END WRITE ===""",
-        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
         """=== WRITE: src/math_utils.py ===
 def clamp(value, minimum, maximum):
     if minimum > maximum:
