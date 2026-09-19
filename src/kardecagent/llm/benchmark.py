@@ -810,9 +810,9 @@ def run_agentic_benchmark(
                     else:
                         stalled_steps = 0
 
-                    if stalled_steps >= 2:
+                    if stalled_steps >= 3:
                         feedback.append(
-                            "No project progress was made in two consecutive turns. "
+                            "No project progress was made in three consecutive turns. "
                             "Stop repeating the same READ/WRITE actions and make a substantive corrective change."
                         )
                         messages.append({"role": "user", "content": "\n\n".join(feedback)})
