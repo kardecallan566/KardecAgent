@@ -362,3 +362,54 @@ def test_agentic_benchmark_stops_repeated_no_progress_after_three_turns():
     assert result.error == "Agent stalled without making project progress."
     assert len(result.action_trace) == 3
     assert result.invalid_actions == 0
+
+
+def test_agentic_benchmark_rejects_writes_outside_expected_files():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        """=== WRITE: tests/unexpected.py ===
+def test_unexpected():
+    assert True
+=== END WRITE ===
+=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===
+""",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=1)[0]
+
+    assert result.passed is True
+    assert result.invalid_actions == 1
+    assert result.writes == 1
+    assert result.files_changed == ("src/math_utils.py",)
+    assert any("REJECTED_UNEXPECTED_FILE" in item for item in result.action_trace)
+
+
+def test_agentic_benchmark_captures_recovery_feedback_separately_from_protocol_metrics():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    return value
+=== END WRITE ===""",
+        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===""",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=3)[0]
+
+    assert result.passed is True
+    assert result.recovery_attempts == 1
+    assert result.invalid_actions == 0
+    assert len(result.recovery_feedback) == 1
+    assert "pytest failure" in result.recovery_feedback[0]
+    assert "CURRENT src/math_utils.py" in result.recovery_feedback[0]
