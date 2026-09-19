@@ -83,16 +83,15 @@ def clamp(value, minimum, maximum):
         raise ValueError("invalid range")
     return max(minimum, min(value, maximum))
 === END WRITE ===""",
-        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
     ])
     case = _fixture_cases()[0]
-    result = run_agentic_benchmark(client, cases=(case,), max_steps=3)[0]
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=2)[0]
     assert result.passed is True
     assert result.attempts == 1
-    assert result.tool_calls == 3
+    assert result.tool_calls == 2
     assert result.first_attempt_passed is True
     assert result.recovery_attempts == 0
-    assert result.eval_tokens == 30
+    assert result.eval_tokens == 20
     assert result.reads == 1
     assert result.writes == 1
     assert result.runs == 1
@@ -101,7 +100,7 @@ def clamp(value, minimum, maximum):
     assert result.action_trace == (
         "step=1 READ src/math_utils.py",
         "step=2 WRITE src/math_utils.py",
-        "step=3 RUN python -m pytest -q PASS",
+        "step=2 AUTO_RUN python -m pytest -q PASS",
     )
 
 
