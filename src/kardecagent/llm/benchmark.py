@@ -140,6 +140,7 @@ class AgenticResult:
     dones: int = 0
     invalid_actions: int = 0
     action_trace: tuple[str, ...] = ()
+    recovery_feedback: tuple[str, ...] = ()
 
 
 _FILE_RE = re.compile(
@@ -254,7 +255,7 @@ Task: accept only integer retries >= 0; invalid values raise ValueError. Preserv
         ),
         AgenticCase(
             "create_tests",
-            """Create useful pytest tests. Use READ/WRITE/RUN actions to create the test file and verify the result.
+            """Create useful pytest tests. Create exactly tests/test_parser.py. Use READ/WRITE/RUN actions to create that test file and verify the result.
 
 src/parser.py:
 def parse_port(value):
@@ -613,7 +614,9 @@ def run_agentic_benchmark(
             dones = 0
             invalid_actions = 0
             action_trace: list[str] = []
+            recovery_feedback: list[str] = []
             changed: set[str] = set()
+            allowed_files = set(case.expected_files)
             read_history: set[str] = set()
             needs_write_after_failure = False
             last_written_contents: dict[str, str] = {}
@@ -700,6 +703,14 @@ def run_agentic_benchmark(
                                 feedback.append(f"READ {relative}:\n{content}")
                         elif kind == "WRITE":
                             relative = _safe_relative_path(target)
+                            if relative not in allowed_files:
+                                invalid_actions += 1
+                                action_trace[-1] += " REJECTED_UNEXPECTED_FILE"
+                                feedback.append(
+                                    f"WRITE {relative} rejected: this benchmark case only allows writes to "
+                                    f"{', '.join(sorted(allowed_files))}. Do not modify files outside the expected task scope."
+                                )
+                                continue
                             previous = last_written_contents.get(relative)
                             if previous is not None and previous == body:
                                 action_trace[-1] += " NOOP"
@@ -742,6 +753,9 @@ def run_agentic_benchmark(
                                     break
                                 recovery_attempts += 1
                                 needs_write_after_failure = True
+                                recovery_feedback.append(
+                                    f"step={step + 1} pytest failure:\n{output}"
+                                )
                                 current_files = []
                                 for relative in sorted(changed):
                                     try:
@@ -751,6 +765,8 @@ def run_agentic_benchmark(
                                     except (FileNotFoundError, ValueError):
                                         pass
                                 feedback.extend(current_files)
+                                if current_files:
+                                    recovery_feedback[-1] += "\n" + "\n".join(current_files)
                                 # A failed RUN requires fresh model feedback before any subsequent action.
                                 break
                         elif kind == "DONE":
@@ -791,6 +807,9 @@ def run_agentic_benchmark(
                         else:
                             recovery_attempts += 1
                             needs_write_after_failure = True
+                            recovery_feedback.append(
+                                f"step={step + 1} pytest failure:\n{output}"
+                            )
                             current_files = []
                             for relative in sorted(changed):
                                 try:
@@ -800,6 +819,8 @@ def run_agentic_benchmark(
                                 except (FileNotFoundError, ValueError):
                                     pass
                             feedback.extend(current_files)
+                            if current_files:
+                                recovery_feedback[-1] += "\n" + "\n".join(current_files)
 
                     if passed:
                         break
@@ -867,6 +888,7 @@ def run_agentic_benchmark(
                     dones=dones,
                     invalid_actions=invalid_actions,
                     action_trace=tuple(action_trace),
+                    recovery_feedback=tuple(recovery_feedback),
                 )
             )
     return results
