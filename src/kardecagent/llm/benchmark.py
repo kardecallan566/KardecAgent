@@ -765,6 +765,40 @@ def run_agentic_benchmark(
                         else:
                             raise ValueError(f"Unsupported action: {kind}")
 
+                    # A coding agent may finish with DONE immediately after editing without
+                    # explicitly requesting a test run. The benchmark must measure the resulting code,
+                    # not punish the model for omitting a redundant RUN action. Validate the sandbox
+                    # automatically after any accepted WRITE when no RUN happened in this response.
+                    if not passed and writes > 0 and not step_had_test:
+                        runs += 1
+                        attempts += 1
+                        step_had_test = True
+                        code, output = _run_benchmark_test(root, case)
+                        step_test_passed = code == 0 and case.verify(root)
+                        action_trace.append(
+                            f"step={step + 1} AUTO_RUN python -m pytest -q "
+                            f"{'PASS' if step_test_passed else 'FAIL'}"
+                        )
+                        feedback.append(
+                            f"AUTO_RUN python -m pytest -q: {'PASS' if step_test_passed else 'FAIL'}\\n{output}"
+                        )
+                        if step_test_passed:
+                            if attempts == 1:
+                                first_attempt_passed = True
+                            passed = True
+                        else:
+                            recovery_attempts += 1
+                            needs_write_after_failure = True
+                            current_files = []
+                            for relative in sorted(changed):
+                                try:
+                                    current_files.append(
+                                        f"CURRENT {relative}:\\n{_read_project_file(root, relative)}"
+                                    )
+                                except (FileNotFoundError, ValueError):
+                                    pass
+                            feedback.extend(current_files)
+
                     if passed:
                         break
 
