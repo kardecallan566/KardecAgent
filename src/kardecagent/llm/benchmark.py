@@ -673,6 +673,7 @@ def run_agentic_benchmark(
                     messages.append({"role": "assistant", "content": response.content})
 
                     step_had_test = False
+                    step_had_write = False
                     step_test_passed = False
                     feedback: list[str] = []
 
@@ -709,6 +710,7 @@ def run_agentic_benchmark(
                             else:
                                 _write_files(root, {relative: body})
                                 writes += 1
+                                step_had_write = True
                                 changed.add(relative)
                                 last_written_contents[relative] = body
                                 needs_write_after_failure = False
@@ -769,7 +771,7 @@ def run_agentic_benchmark(
                     # explicitly requesting a test run. The benchmark must measure the resulting code,
                     # not punish the model for omitting a redundant RUN action. Validate the sandbox
                     # automatically after any accepted WRITE when no RUN happened in this response.
-                    if not passed and writes > 0 and not step_had_test:
+                    if not passed and step_had_write and not step_had_test:
                         runs += 1
                         attempts += 1
                         step_had_test = True
