@@ -841,7 +841,7 @@ def run_agentic_benchmark(
                     if len(messages) > 8:
                         messages = [messages[0], messages[1], *messages[-6:]]
 
-                if not passed:
+                if not passed and not error:
                     error = f"Agent did not reach a passing test state within {max_steps} steps."
             except Exception as exc:
                 error = str(exc)
