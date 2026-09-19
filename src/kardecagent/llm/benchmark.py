@@ -695,7 +695,7 @@ def run_agentic_benchmark(
                                 reads += 1
                                 read_history.add(relative)
                                 content = _read_project_file(root, relative)
-                                feedback.append(f"READ {relative}:\\n{content}")
+                                feedback.append(f"READ {relative}:\n{content}")
                         elif kind == "WRITE":
                             relative = _safe_relative_path(target)
                             previous = last_written_contents.get(relative)
@@ -731,7 +731,7 @@ def run_agentic_benchmark(
                                 step_test_passed = code == 0 and case.verify(root)
                                 action_trace[-1] += f" {'PASS' if step_test_passed else 'FAIL'}"
                                 feedback.append(
-                                    f"RUN {target}: {'PASS' if step_test_passed else 'FAIL'}\\n{output}"
+                                    f"RUN {target}: {'PASS' if step_test_passed else 'FAIL'}\n{output}"
                                 )
                                 if step_test_passed:
                                     if attempts == 1:
@@ -744,7 +744,7 @@ def run_agentic_benchmark(
                                 for relative in sorted(changed):
                                     try:
                                         current_files.append(
-                                            f"CURRENT {relative}:\\n{_read_project_file(root, relative)}"
+                                            f"CURRENT {relative}:\n{_read_project_file(root, relative)}"
                                         )
                                     except (FileNotFoundError, ValueError):
                                         pass
