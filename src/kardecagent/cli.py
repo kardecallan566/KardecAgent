@@ -191,6 +191,10 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
                 print("  trace:")
                 for action in result.action_trace:
                     print(f"    {action}")
+            if level == "agentic" and getattr(result, "recovery_feedback", ()):
+                print("  recovery feedback:")
+                for feedback in result.recovery_feedback:
+                    print(f"    {feedback.replace(chr(10), chr(10) + '    ')}")
 
     if not overall:
         print("No installed benchmark models were found.")
