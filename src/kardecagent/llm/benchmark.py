@@ -651,6 +651,7 @@ def run_agentic_benchmark(
                 },
             ]
             try:
+                stalled_steps = 0
                 for step in range(max_steps):
                     response = client.chat(messages, temperature=0.0)
                     raw = response.raw
@@ -687,10 +688,10 @@ def run_agentic_benchmark(
                         if kind == "READ":
                             relative = _safe_relative_path(target)
                             if relative in read_history:
-                                invalid_actions += 1
                                 action_trace[-1] += " DUPLICATE"
+                                content = _read_project_file(root, relative)
                                 feedback.append(
-                                    f"READ {relative}: already read. Do not read it again; move to WRITE or RUN."
+                                    f"READ {relative}: duplicate read; current contents are authoritative.\n{content}"
                                 )
                             else:
                                 reads += 1
@@ -701,11 +702,10 @@ def run_agentic_benchmark(
                             relative = _safe_relative_path(target)
                             previous = last_written_contents.get(relative)
                             if previous is not None and previous == body:
-                                invalid_actions += 1
                                 action_trace[-1] += " NOOP"
                                 feedback.append(
                                     f"WRITE {relative}: no change from the previous WRITE. "
-                                    "Change the implementation before running again."
+                                    "This did not modify the project; make a different corrective change."
                                 )
                             else:
                                 _write_files(root, {relative: body})
@@ -802,6 +802,21 @@ def run_agentic_benchmark(
                             feedback.extend(current_files)
 
                     if passed:
+                        break
+
+                    progress_this_step = step_had_write or step_had_test
+                    if not progress_this_step:
+                        stalled_steps += 1
+                    else:
+                        stalled_steps = 0
+
+                    if stalled_steps >= 2:
+                        feedback.append(
+                            "No project progress was made in two consecutive turns. "
+                            "Stop repeating the same READ/WRITE actions and make a substantive corrective change."
+                        )
+                        messages.append({"role": "user", "content": "\n\n".join(feedback)})
+                        error = "Agent stalled without making project progress."
                         break
 
                     if not step_had_test:
