@@ -227,6 +227,31 @@ def clamp(value, minimum, maximum):
     )
 
 
+
+def test_agentic_benchmark_auto_validates_after_write_without_run():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        """=== READ: src/math_utils.py ===
+=== END READ ===
+=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===
+=== DONE: success ===""",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=1)[0]
+
+    assert result.passed is True
+    assert result.attempts == 1
+    assert result.runs == 1
+    assert result.writes == 1
+    assert result.dones == 1
+    assert any("AUTO_RUN python -m pytest -q PASS" in item for item in result.action_trace)
+
+
 def test_agentic_benchmark_stops_batched_actions_after_failed_run():
     from kardecagent.llm.benchmark import _fixture_cases
 
