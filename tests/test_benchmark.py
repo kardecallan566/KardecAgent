@@ -197,12 +197,46 @@ def total(items):
     assert any("BLOCKED_AFTER_FAIL" in item for item in result.action_trace)
 
 
-def test_agentic_benchmark_executes_only_one_action_per_turn():
+def test_agentic_benchmark_executes_batched_actions_in_order():
     from kardecagent.llm.benchmark import _fixture_cases
 
     client = FakeAgenticClient([
         """=== READ: src/math_utils.py ===
 === END READ ===
+=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=1)[0]
+
+    assert result.passed is True
+    assert result.tool_calls == 3
+    assert result.reads == 1
+    assert result.writes == 1
+    assert result.runs == 1
+    assert result.invalid_actions == 0
+    assert result.action_trace == (
+        "step=1 READ src/math_utils.py",
+        "step=1 WRITE src/math_utils.py",
+        "step=1 RUN python -m pytest -q PASS",
+    )
+
+
+def test_agentic_benchmark_stops_batched_actions_after_failed_run():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        """=== WRITE: src/math_utils.py ===
+def clamp(value, minimum, maximum):
+    return value
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===
 === WRITE: src/math_utils.py ===
 def clamp(value, minimum, maximum):
     if minimum > maximum:
@@ -214,17 +248,20 @@ def clamp(value, minimum, maximum):
     if minimum > maximum:
         raise ValueError("invalid range")
     return max(minimum, min(value, maximum))
-=== END WRITE ===""",
-        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
+=== END WRITE ===
+=== RUN: python -m pytest -q ===
+=== END RUN ===""",
     ])
-    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=3)[0]
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=2)[0]
 
     assert result.passed is True
-    assert result.tool_calls == 3
-    assert result.reads == 1
-    assert result.writes == 1
-    assert result.runs == 1
-    assert result.invalid_actions >= 1
+    assert result.attempts == 2
+    assert result.recovery_attempts == 1
+    assert result.writes == 2
+    assert result.runs == 2
+    assert result.action_trace[1].endswith("RUN python -m pytest -q FAIL")
+    assert result.action_trace[2] == "step=2 WRITE src/math_utils.py"
+
 
 def test_agentic_benchmark_rejects_duplicate_read_without_executing_it():
     from kardecagent.llm.benchmark import _fixture_cases
