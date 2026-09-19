@@ -308,7 +308,7 @@ def clamp(value, minimum, maximum):
     assert result.reads == 1
     assert result.writes == 1
     assert result.runs == 1
-    assert result.invalid_actions == 1
+    assert result.invalid_actions == 0
     assert any(item.endswith("READ src/math_utils.py DUPLICATE") for item in result.action_trace)
 
 
@@ -347,3 +347,18 @@ def clamp(value, minimum, maximum):
     ])
     result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=4)[0]
     assert result.passed is True
+
+def test_agentic_benchmark_stops_repeated_no_progress_without_exhausting_steps():
+    from kardecagent.llm.benchmark import _fixture_cases
+
+    client = FakeAgenticClient([
+        "=== READ: src/cart.py ===\n=== END READ ===",
+        "=== READ: src/cart.py ===\n=== END READ ===",
+        "=== READ: src/cart.py ===\n=== END READ ===",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[1],), max_steps=8)[0]
+
+    assert result.passed is False
+    assert result.error == "Agent stalled without making project progress."
+    assert len(result.action_trace) == 2
+    assert result.invalid_actions == 0
