@@ -11,7 +11,7 @@ class ProjectFilesystem:
         if not path.is_file():raise FileNotFoundError(relative_path)
         return path.read_text(encoding="utf-8")
     def write_file(self,relative_path:str,content:str)->None:
-        path=self.safe_path(relative_path);path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content,encoding="utf-8")
+        path=self.safe_path(relative_path);path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content,encoding="utf-8",newline="")
     def list_files(self,limit:int=500)->list[str]:
         from ..project.context import project_snapshot
         return project_snapshot(self.root,limit)

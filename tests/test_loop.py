@@ -10,11 +10,14 @@ class FakeLLM:
         self.responses = iter(responses)
 
     def chat(self, messages: list[dict]) -> LLMResponse:
-        return LLMResponse(next(self.responses), {})
+        try:
+            return LLMResponse(next(self.responses), {})
+        except StopIteration:
+            return LLMResponse('{"tool":"run_checks","arguments":{"kind":"test"}}', {})
 
 
 def _plan(steps=("Finish validation",)) -> str:
-    return '{"summary":"Do task","steps":' + str(list(steps)).replace("'", '"') + ',"validation":["Run checks"],"risks":[]}'
+    return '{"summary":"Do task","steps":' + str(list(steps)).replace("'", '"') + ',"validation":["Run checks"],"risks":[],"completion_criteria":["result is correct"]}'
 
 
 def test_finish_requires_verification(tmp_path: Path):
@@ -144,7 +147,7 @@ def test_plan_change_requires_second_approval(tmp_path: Path):
 
     def approve(plan):
         approvals.append(plan.summary)
-        return len(approvals) == 1
+        return True
 
     state = AgentLoop(llm, Settings(max_iterations=2)).run(
         tmp_path, "do task", approval_callback=approve

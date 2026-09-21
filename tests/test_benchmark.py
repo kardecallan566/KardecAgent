@@ -396,7 +396,6 @@ def test_agentic_benchmark_captures_recovery_feedback_separately_from_protocol_m
 def clamp(value, minimum, maximum):
     return value
 === END WRITE ===""",
-        "=== RUN: python -m pytest -q ===\n=== END RUN ===",
         """=== WRITE: src/math_utils.py ===
 def clamp(value, minimum, maximum):
     if minimum > maximum:
@@ -412,3 +411,40 @@ def clamp(value, minimum, maximum):
     assert len(result.recovery_feedback) == 1
     assert "pytest failure" in result.recovery_feedback[0]
     assert "CURRENT src/math_utils.py" in result.recovery_feedback[0]
+
+
+def test_agentic_benchmark_cleans_code_fences_in_write_blocks():
+    from kardecagent.llm.benchmark import _fixture_cases, run_agentic_benchmark
+
+    client = FakeAgenticClient([
+        """=== WRITE: src/math_utils.py ===
+```python
+def clamp(value, minimum, maximum):
+    if minimum > maximum:
+        raise ValueError("invalid range")
+    return max(minimum, min(value, maximum))
+```
+=== END WRITE ===""",
+    ])
+    result = run_agentic_benchmark(client, cases=(_fixture_cases()[0],), max_steps=1)[0]
+    assert result.passed is True
+    assert result.writes == 1
+    assert result.action_trace[-1].endswith("PASS")
+
+
+def test_agentic_benchmark_normalizes_test_path():
+    from kardecagent.llm.benchmark import _fixture_cases, run_agentic_benchmark
+
+    client = FakeAgenticClient([
+        """=== WRITE: test/test_parser.py ===
+from parser import parse_port
+def test_valid():
+    assert parse_port('8080') == 8080
+def test_boundaries():
+    assert parse_port(65536) == 65536
+=== END WRITE ===""",
+    ])
+    case = [c for c in _fixture_cases() if c.name == "create_tests"][0]
+    result = run_agentic_benchmark(client, cases=(case,), max_steps=1)[0]
+    assert result.writes == 1
+    assert "tests/test_parser.py" in result.files_changed

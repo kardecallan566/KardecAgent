@@ -18,7 +18,7 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:11434",
-        model: str = "qwen3-coder:30b",
+        model: str = "qwen2.5-coder:3b",
         timeout: float = 120.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -37,7 +37,7 @@ class OllamaClient:
                 "model": self.model,
                 "messages": messages,
                 "stream": False,
-                "options": {"temperature": temperature},
+                "options": {"temperature": temperature, "num_predict": 2048},
             },
             timeout=self.timeout,
         )
@@ -45,8 +45,8 @@ class OllamaClient:
         data = response.json()
         message = data.get("message") or {}
         content = message.get("content", "")
-        if not isinstance(content, str) or not content:
-            raise RuntimeError("Ollama returned no text content.")
+        if not isinstance(content, str):
+            raise RuntimeError("Ollama returned non-text content.")
         return OllamaResponse(content=content, raw=data)
 
     def list_models(self) -> list[dict[str, Any]]:

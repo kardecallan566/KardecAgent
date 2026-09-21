@@ -1,4 +1,13 @@
-from kardecagent.tools.web import _validate_url, search_web
+import httpx
+import pytest
+from kardecagent.tools.web import (
+    MAX_PAGE_CHARS,
+    _validate_url,
+    classify_source,
+    fetch_web_page,
+    search_web,
+    validate_domain_policy,
+)
 
 
 def test_search_web_rejects_empty_query():

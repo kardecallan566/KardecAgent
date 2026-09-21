@@ -20,18 +20,24 @@ def build_parser():
     run = subs.add_parser("run", help="Create a plan, request approval, then execute it.")
     run.add_argument("--project", required=True)
     run.add_argument("--task", required=True)
+    run.add_argument("--model", default=None, help="LLM model name (e.g. qwen2.5-coder:7b).")
+    run.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider (default: ollama).")
     run.add_argument("--max-iterations", type=int, default=None)
     resume = subs.add_parser("resume", help="Resume a previously approved interrupted task.")
     resume.add_argument("--project", required=True)
     resume.add_argument("--task", required=True)
+    resume.add_argument("--model", default=None, help="LLM model name.")
+    resume.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider.")
     resume.add_argument("--max-iterations", type=int, default=None)
     doctor = subs.add_parser("doctor", help="Check local project and LLM configuration without changing files.")
     doctor.add_argument("--project", required=True)
+    doctor.add_argument("--model", default=None, help="LLM model name to check.")
+    doctor.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider to check.")
     tasks = subs.add_parser("tasks", help="List persisted tasks for a project.")
     tasks.add_argument("--project", required=True)
     benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
-    benchmark.add_argument("--timeout", type=float, default=300.0)
+    benchmark.add_argument("--timeout", type=float, default=120.0)
     benchmark.add_argument("--level", choices=("basic", "agentic"), default="agentic", help="Benchmark level (default: agentic).")
     return parser
 
@@ -128,27 +134,119 @@ def _doctor(settings: Settings, root) -> int:
 
 
 def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level: str = "agentic") -> int:
+    overall: list[tuple[str, int, int, float, float]] = []
+
+    if settings.llm_provider in {"openai-compatible", "local"}:
+        models = tuple(x.strip() for x in models_arg.split(",") if x.strip()) if models_arg else (settings.llm_model,)
+        print(f"KardecAgent OpenAI-Compatible benchmark ({settings.llm_base_url})")
+        print("Level:", level)
+        print("Models:", ", ".join(models))
+        print()
+        for model in models:
+            model_client = LocalLLMClient(settings.llm_base_url, model, settings.llm_api_key, timeout)
+            try:
+                results = (
+                    run_agentic_benchmark(model_client)
+                    if level == "agentic"
+                    else run_benchmark(model_client)
+                )
+            except Exception as exc:
+                print(f"[FAIL] {model} - {exc}")
+                continue
+            passed = sum(r.passed for r in results)
+            total = len(results)
+            elapsed = sum(r.elapsed_seconds for r in results)
+            tps = sum(r.tokens_per_second for r in results if r.tokens_per_second) / max(
+                1, sum(1 for r in results if r.tokens_per_second)
+            )
+            overall.append((model, passed, total, elapsed, tps))
+            for result in results:
+                status = "PASS" if result.passed else "FAIL"
+                details = ""
+                if level == "agentic":
+                    details = (
+                        f" | attempts={result.attempts}"
+                        f" | tool_calls={result.tool_calls}"
+                        f" | recovery={result.recovery_attempts}"
+                        f" | first_pass={'yes' if result.first_attempt_passed else 'no'}"
+                        f" | reads={result.reads}"
+                        f" | writes={result.writes}"
+                        f" | runs={result.runs}"
+                        f" | dones={result.dones}"
+                        f" | invalid={result.invalid_actions}"
+                    )
+                print(
+                    f"[{status}] {model} / {result.case} | "
+                    f"{result.elapsed_seconds:.2f}s | {result.tokens_per_second:.2f} tok/s"
+                    f"{details}"
+                )
+                if not result.passed and getattr(result, "error", ""):
+                    print(f"  error: {result.error}")
+                if level == "agentic" and getattr(result, "action_trace", ()):
+                    print("  trace:")
+                    for action in result.action_trace:
+                        print(f"    {action}")
+                if level == "agentic" and getattr(result, "recovery_feedback", ()):
+                    print("  recovery feedback:")
+                    for feedback in result.recovery_feedback:
+                        print(f"    {feedback.replace(chr(10), chr(10) + '    ')}")
+        if not overall:
+            print("Benchmark completed with no successful model runs.")
+            return 1
+        print("\nSummary")
+        for model, passed, total, elapsed, tps in overall:
+            print(f"- {model}: {passed}/{total} passed | {elapsed:.2f}s total | {tps:.2f} tok/s avg")
+        return 0
+
     if settings.llm_provider != "ollama":
-        print("[FAIL] benchmark requires LLM provider 'ollama'.")
+        print(f"[FAIL] Unsupported LLM provider for benchmark: {settings.llm_provider}")
         return 1
-    models = tuple(x.strip() for x in models_arg.split(",") if x.strip()) if models_arg else default_models()
-    client = OllamaClient(settings.ollama_base_url, models[0], timeout)
+
+    candidate_models = tuple(x.strip() for x in models_arg.split(",") if x.strip()) if models_arg else default_models()
+    probe_model = candidate_models[0] if candidate_models else "qwen2.5-coder:3b"
+    client = OllamaClient(settings.ollama_base_url, probe_model, timeout)
     try:
-        installed = {item.get("name") for item in client.list_models() if isinstance(item, dict)}
+        installed = {str(item.get("name")) for item in client.list_models() if isinstance(item, dict) and item.get("name")}
     except Exception as exc:
         print(f"[FAIL] Ollama: {exc}")
         return 1
 
+    # Match models with or without tags
+    models_to_run: list[str] = []
+    for model in candidate_models:
+        if model in installed:
+            models_to_run.append(model)
+        elif f"{model}:latest" in installed:
+            models_to_run.append(f"{model}:latest")
+        elif any(inst.startswith(f"{model}:") for inst in installed):
+            matched = next(inst for inst in sorted(installed) if inst.startswith(f"{model}:"))
+            models_to_run.append(matched)
+
+    if not models_to_run and not models_arg and installed:
+        # Fallback to installed coding/general models
+        models_to_run = sorted(list(installed))
+
     print("KardecAgent Ollama benchmark")
     print("Level:", level)
-    print("Models:", ", ".join(models))
+    print("Models to test:", ", ".join(models_to_run) if models_to_run else "None")
     print()
-    overall: list[tuple[str, int, int, float, float]] = []
-    for model in models:
-        if model not in installed:
+
+    for model in candidate_models:
+        resolved = None
+        if model in installed:
+            resolved = model
+        elif f"{model}:latest" in installed:
+            resolved = f"{model}:latest"
+        elif any(inst.startswith(f"{model}:") for inst in installed):
+            resolved = next(inst for inst in sorted(installed) if inst.startswith(f"{model}:"))
+
+        if not resolved and models_arg:
             print(f"[SKIP] {model} - not installed")
             continue
-        model_client = OllamaClient(settings.ollama_base_url, model, timeout)
+        elif not resolved:
+            continue
+
+        model_client = OllamaClient(settings.ollama_base_url, resolved, timeout)
         try:
             results = (
                 run_agentic_benchmark(model_client)
@@ -156,7 +254,7 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
                 else run_benchmark(model_client)
             )
         except Exception as exc:
-            print(f"[FAIL] {model} - {exc}")
+            print(f"[FAIL] {resolved} - {exc}")
             continue
         passed = sum(r.passed for r in results)
         total = len(results)
@@ -164,7 +262,7 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
         tps = sum(r.tokens_per_second for r in results if r.tokens_per_second) / max(
             1, sum(1 for r in results if r.tokens_per_second)
         )
-        overall.append((model, passed, total, elapsed, tps))
+        overall.append((resolved, passed, total, elapsed, tps))
         for result in results:
             status = "PASS" if result.passed else "FAIL"
             details = ""
@@ -238,6 +336,16 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     args = build_parser().parse_args()
     settings = Settings.from_env()
+
+    model_override = getattr(args, "model", None)
+    provider_override = getattr(args, "provider", None)
+    updates = {}
+    if model_override:
+        updates["llm_model"] = model_override
+    if provider_override:
+        updates["llm_provider"] = provider_override
+    if updates:
+        settings = Settings(**{**settings.__dict__, **updates})
 
     if args.command == "doctor":
         root = resolve_project_root(args.project)

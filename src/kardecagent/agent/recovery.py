@@ -20,6 +20,23 @@ class RecoveryResult:
     resume_step: int = 1
 
 
+def _extract_plan_step(event) -> int | None:
+    if "plan_step" in event.data and event.data["plan_step"] is not None:
+        try:
+            return int(event.data["plan_step"])
+        except (ValueError, TypeError):
+            pass
+    changes = event.data.get("changes")
+    if isinstance(changes, list):
+        for change in changes:
+            if isinstance(change, dict) and change.get("plan_step") is not None:
+                try:
+                    return int(change["plan_step"])
+                except (ValueError, TypeError):
+                    pass
+    return None
+
+
 class RecoveryManager:
     """Controller-owned, durable recovery transaction manager.
 
@@ -70,11 +87,14 @@ class RecoveryManager:
             if event.event_type == "plan_step_completed"
             and isinstance(event.data.get("step"), int)
         ]
-        last_completed_step = max(completed_steps, default=0)
-        candidates = [
-            item for item in candidates
-            if int(item[1].data.get("plan_step", 0)) > last_completed_step
-        ]
+        if completed_steps:
+            last_completed_step = max(completed_steps)
+            candidates = [
+                item for item in candidates
+                if (_extract_plan_step(item[1]) is None or _extract_plan_step(item[1]) > last_completed_step)
+            ]
+        else:
+            last_completed_step = 0
         if not candidates:
             resume_step = last_completed_step + 1
             state.record(

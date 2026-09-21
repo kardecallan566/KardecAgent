@@ -79,6 +79,7 @@ def test_task_board_rejects_invalid_state_transition(tmp_path: Path):
     board = manager.parse_decomposition({
         "subtasks": [
             {"id": "1", "title": "A", "objective": "A"},
+            {"id": "2", "title": "B", "objective": "B"},
         ]
     })
     with pytest.raises(TaskBoardError):

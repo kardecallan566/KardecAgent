@@ -116,8 +116,8 @@ def test_recovery_transaction_resumes_after_crash(tmp_path: Path):
 
     first = tmp_path / "first.txt"
     second = tmp_path / "second.txt"
-    _event(state, first, "one", "subtask")
     _event(state, second, "two", "subtask")
+    _event(state, first, "one", "subtask")
 
     persisted = []
     manager = RecoveryManager()

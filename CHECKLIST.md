@@ -89,15 +89,15 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Structured tool schema
 - [x] Tool-call validation
 - [x] Patch-based editing
-- [ ] File-change verification
+- [x] File-change verification
 - [x] Automatic test command discovery
 - [x] Typecheck/lint/build detection
-- [ ] Test-result parsing
-- [ ] Error summarization
+- [x] Test-result parsing
+- [x] Error summarization
 - [x] Git status/diff
 - [x] Pre-task checkpoint (implemented as a post-approval safety checkpoint)
 - [ ] Post-task checkpoint
-- [ ] Rollback (safety/confirmation layer required before exposure)
+- [x] Rollback (safety/confirmation layer with conflict guard)
 - [x] Task interruption/resume
 - [x] Persistent task logs
 
@@ -149,11 +149,11 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [ ] Model routing
 - [ ] Context compression
 - [ ] Failure classification
-- [ ] Recovery strategies
-- [ ] Evaluation benchmarks
-- [ ] Long-running task recovery
+- [x] Recovery strategies
+- [x] Evaluation benchmarks
+- [x] Long-running task recovery
 - [ ] Safe parallel tasks
-- [ ] Human approval gates
+- [x] Human approval gates
 
 ## Early-version non-goals
 - [ ] Never give the model unrestricted OS access
@@ -216,7 +216,7 @@ Legend: [ ] Not started | [~] In progress | [x] Completed | [!] Blocked
 - [x] Approved-plan step references on subtasks.
 - [x] Orchestrator decomposition prompt with JSON validation.
 - [x] Orchestrator rejects subtasks outside the approved plan.
-- [ ] Adapter to execute subtasks through a reusable approved-plan AgentExecutor.
+- [x] Adapter to execute subtasks through a reusable approved-plan AgentExecutor.
 - [ ] Parallel execution of independent subtasks.
 
 

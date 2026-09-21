@@ -126,7 +126,7 @@ def test_patch_rejects_overlapping_hunks(tmp_path: Path):
 def test_patch_preserves_no_newline_at_eof(tmp_path: Path):
     path = tmp_path / "app.txt"
     path.write_bytes(b"old")
-    patch = """--- a/app.txt
+    patch = r"""--- a/app.txt
 +++ b/app.txt
 @@ -1 +1 @@
 -old

@@ -66,9 +66,10 @@ def _parse_hunk(lines: list[str], start: int) -> tuple[_Hunk, int]:
         if line == "\\ No newline at end of file":
             if not hunk_lines:
                 raise ValueError("No-newline marker cannot start a hunk.")
-            if no_newline_after is not None:
-                raise ValueError("Duplicate no-newline marker in hunk.")
-            no_newline_after = len(hunk_lines) - 1
+            if hunk_lines[-1][0] in " +":
+                if no_newline_after is not None:
+                    raise ValueError("Duplicate no-newline marker in hunk.")
+                no_newline_after = len(hunk_lines) - 1
             i += 1
             continue
         if not line or line[0] not in " +-":
@@ -79,6 +80,13 @@ def _parse_hunk(lines: list[str], start: int) -> tuple[_Hunk, int]:
             old_seen += 1
         if kind in " +":
             new_seen += 1
+        i += 1
+
+    if i < len(lines) and lines[i] == "\\ No newline at end of file":
+        if hunk_lines and hunk_lines[-1][0] in " +":
+            if no_newline_after is not None:
+                raise ValueError("Duplicate no-newline marker in hunk.")
+            no_newline_after = len(hunk_lines) - 1
         i += 1
 
     if old_seen != old_count or new_seen != new_count:

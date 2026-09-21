@@ -7,6 +7,7 @@ from typing import Callable
 
 from ..config import Settings
 from ..llm import LocalLLMClient
+from ..llm.cleaner import extract_json_payload
 from ..project import project_snapshot
 from .loop import AgentLoop
 from .plan import ExecutionPlan
@@ -67,11 +68,13 @@ class Orchestrator:
         for _ in range(3):
             response = self.llm.chat(messages)
             try:
-                data = json.loads(response.content.strip())
+                data = extract_json_payload(response.content)
+                if not isinstance(data, dict):
+                    raise OrchestrationError("decomposition must be a JSON object")
                 board = manager.parse_decomposition(data)
                 self._validate_plan_steps(data, plan)
                 return board
-            except (json.JSONDecodeError, OrchestrationError, ValueError) as exc:
+            except (OrchestrationError, ValueError) as exc:
                 last_error = str(exc)
                 messages += [
                     {"role": "assistant", "content": response.content},

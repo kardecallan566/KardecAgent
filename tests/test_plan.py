@@ -6,7 +6,8 @@ from kardecagent.agent.plan import ExecutionPlan, PlanError, PlanTracker, parse_
 def test_parse_plan():
     plan = parse_plan(
         '{"summary":"Create a site","steps":["Create HTML","Create CSS"],'
-        '"validation":["Validate HTML"],"risks":["No browser automation yet"]}'
+        '"validation":["Validate HTML"],"risks":["No browser automation yet"],'
+        '"completion_criteria":["result is correct"]}'
     )
     assert plan.summary == "Create a site"
     assert plan.steps == ["Create HTML", "Create CSS"]

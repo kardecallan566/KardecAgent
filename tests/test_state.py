@@ -7,7 +7,7 @@ def test_event():
     state = TaskState("test", ".")
     state.transition(TaskStatus.RUNNING, reason="start")
     state.record("test", "hello", value=1)
-    assert state.events[0].data["value"] == 1
+    assert state.events[-1].data["value"] == 1
 
 
 def test_valid_execution_recovery_transition_path():

@@ -70,7 +70,10 @@ def test_project_snapshot_detects_non_git_changes(tmp_path: Path):
 def test_symlink_is_not_auto_remediated(tmp_path: Path):
     (tmp_path / "outside.txt").write_text("safe", encoding="utf-8")
     init_git(tmp_path)
-    (tmp_path / "link.txt").symlink_to(tmp_path / "outside.txt")
+    try:
+        (tmp_path / "link.txt").symlink_to(tmp_path / "outside.txt")
+    except OSError:
+        pytest.skip("Symlink creation not permitted in this Windows environment")
     snapshot = WorkspaceSnapshot.for_git_repo(tmp_path)
 
     with pytest.raises(RuntimeError, match="symlink"):

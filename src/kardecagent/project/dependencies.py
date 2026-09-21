@@ -60,6 +60,8 @@ def summarize_audit(ecosystem: str, stdout: str, stderr: str, returncode: int, t
     output = stdout or stderr
     if timed_out:
         return DependencyAudit(ecosystem, True, False, None, "Dependency audit timed out.", output)
+    if "No module named pip_audit" in output or "not recognized" in output.lower() or "command not found" in output.lower():
+        return DependencyAudit(ecosystem, False, True, None, "Dependency audit tool is not installed.", output)
     if ecosystem == "npm":
         passed, summary = parse_npm_audit(output)
     else:

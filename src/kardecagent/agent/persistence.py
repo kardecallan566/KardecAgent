@@ -150,8 +150,9 @@ class TaskJournal:
         valid_bytes = b"".join(lines[:len(records)])
         temp = self.path.with_suffix(self.path.suffix + ".repair.tmp")
         try:
-            temp.write_bytes(valid_bytes)
-            with temp.open("rb") as handle:
+            with temp.open("wb") as handle:
+                handle.write(valid_bytes)
+                handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp, self.path)
         except OSError as exc:
@@ -283,7 +284,7 @@ class TaskStore:
             payload = json.loads(target.read_text(encoding="utf-8"))
             self._validate_payload(payload, target)
             return payload
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, PersistenceError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             backup = target.with_suffix(target.suffix + ".bak")
             if not backup.is_file():
                 raise PersistenceError(f"invalid persisted task: {target.name}")
@@ -356,11 +357,16 @@ class TaskStore:
         )
 
     def _fsync_directory(self) -> None:
-        directory_fd = os.open(self.directory, os.O_RDONLY)
+        if os.name == "nt":
+            return
         try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+            directory_fd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
 
 
 def _board_from_dict(payload: dict | None) -> TaskBoard | None:

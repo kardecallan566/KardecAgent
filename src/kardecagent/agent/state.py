@@ -27,8 +27,8 @@ _ALLOWED_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
     }),
     TaskStatus.VERIFIED: frozenset({TaskStatus.COMPLETED, TaskStatus.FAILED}),
     TaskStatus.COMPLETED: frozenset(),
-    TaskStatus.FAILED: frozenset({TaskStatus.RECOVERING}),
-    TaskStatus.MAX_ITERATIONS: frozenset({TaskStatus.RECOVERING}),
+    TaskStatus.FAILED: frozenset({TaskStatus.RECOVERING, TaskStatus.RESUMING}),
+    TaskStatus.MAX_ITERATIONS: frozenset({TaskStatus.RECOVERING, TaskStatus.RESUMING}),
     TaskStatus.RECOVERING: frozenset({TaskStatus.RESUMING, TaskStatus.FAILED}),
     TaskStatus.RESUMING: frozenset({TaskStatus.RUNNING, TaskStatus.FAILED}),
 }

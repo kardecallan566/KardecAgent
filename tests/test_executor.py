@@ -71,7 +71,11 @@ def test_run_command_detects_new_file_outside_scope(tmp_path: Path):
     plan = ExecutionPlan("Scoped", ["Command"], ["checks"], [], ["done"])
     state = make_state(tmp_path)
     action = parse_tool_call(
-        '{"tool":"run_command","arguments":{"command":"python -c \\"open(\\\'outside.txt\\\', \\'w\\\').write(\\\'x\\\')\\"},"plan_step":1}'
+        json.dumps({
+            "tool": "run_command",
+            "arguments": {"command": "python -c \"open('outside.txt', 'w').write('x')\""},
+            "plan_step": 1,
+        })
     )
     try:
         loop.executor._execute_tool(tmp_path, action, ("inside",))
@@ -79,12 +83,13 @@ def test_run_command_detects_new_file_outside_scope(tmp_path: Path):
         assert "scope violation" in str(exc)
     else:
         raise AssertionError("expected scope violation")
-    assert (tmp_path / "outside.txt").read_text(encoding="utf-8") == "already dirty"
-    assert (tmp_path / "outside.txt").exists()
+    assert not (tmp_path / "outside.txt").exists()
 
 
 def test_run_command_detects_change_to_preexisting_dirty_file(tmp_path: Path):
+    import json
     import subprocess
+    from kardecagent.agent.tools_schema import parse_tool_call
     (tmp_path / "inside").mkdir()
     (tmp_path / "outside.txt").write_text("before", encoding="utf-8")
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
@@ -93,8 +98,12 @@ def test_run_command_detects_change_to_preexisting_dirty_file(tmp_path: Path):
                     "commit", "-m", "fixture"], cwd=tmp_path, check=True, capture_output=True)
     (tmp_path / "outside.txt").write_text("already dirty", encoding="utf-8")
     loop = AgentLoop(FakeLLM([]), Settings())
-    action = __import__("kardecagent.agent.tools_schema", fromlist=["parse_tool_call"]).parse_tool_call(
-        '{"tool":"run_command","arguments":{"command":"python -c \\"open(\\\'outside.txt\\\', \\'w\\\').write(\\\'changed\\\')\\"},"plan_step":1}'
+    action = parse_tool_call(
+        json.dumps({
+            "tool": "run_command",
+            "arguments": {"command": "python -c \"open('outside.txt', 'w').write('changed')\""},
+            "plan_step": 1,
+        })
     )
     try:
         loop.executor._execute_tool(tmp_path, action, ("inside",))
@@ -102,6 +111,7 @@ def test_run_command_detects_change_to_preexisting_dirty_file(tmp_path: Path):
         assert "scope violation" in str(exc)
     else:
         raise AssertionError("expected scope violation")
+    assert (tmp_path / "outside.txt").read_text(encoding="utf-8") == "already dirty"
 
 
 def test_mutation_records_integrity_fingerprints(tmp_path: Path):

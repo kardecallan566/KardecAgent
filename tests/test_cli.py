@@ -6,7 +6,10 @@ from kardecagent.config import Settings
 
 def test_cli_exposes_first_version_commands():
     parser = build_parser()
-    assert parser.parse_args(["run", "--project", ".", "--task", "x"]).command == "run"
+    args_run = parser.parse_args(["run", "--project", ".", "--task", "x", "--model", "qwen2.5-coder:7b", "--provider", "ollama"])
+    assert args_run.command == "run"
+    assert args_run.model == "qwen2.5-coder:7b"
+    assert args_run.provider == "ollama"
     assert parser.parse_args(["resume", "--project", ".", "--task", "x"]).command == "resume"
     assert parser.parse_args(["doctor", "--project", "."]).command == "doctor"
     assert parser.parse_args(["tasks", "--project", "."]).command == "tasks"

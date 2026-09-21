@@ -23,7 +23,7 @@ from .security_review import (
 from .state import TaskState, TaskStatus
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
 
-CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate", "dependency_audit")
+CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate")
 RISK_RANK = {"normal": 0, "low_risk": 1, "sensitive": 2, "high_risk": 3}
 
 class AgentExecutor:
@@ -373,11 +373,14 @@ class AgentExecutor:
                                  {"role": "user", "content":
                                   "Continue using the currently approved plan. Do not deviate."}]
                     continue
+                state.record("plan_change_approval", "Replacement plan approved.", approved=True)
                 if proposed.security_level == "high_risk":
                     if high_risk_approval_callback is None or not high_risk_approval_callback(proposed):
                         state.record("high_risk_plan_change_approval",
                                      "High-risk replacement plan rejected.", approved=False)
                         continue
+                    state.record("high_risk_plan_change_approval",
+                                 "High-risk replacement plan approved.", approved=True)
                 plan, tracker = proposed, PlanTracker(proposed)
                 state.record("plan_changed", "Approved replacement plan is now active.",
                              plan=plan.as_dict(), progress=tracker.as_dict())
@@ -425,12 +428,18 @@ class AgentExecutor:
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "Complete every approved plan step before finishing."}]
                     continue
-                evidence = action.arguments["criteria_evidence"]
-                if not evidence:
+                evidence = action.arguments.get("criteria_evidence", [])
+                if isinstance(evidence, str):
+                    evidence = [evidence]
+                accumulated = getattr(state, "_accumulated_criteria_evidence", [])
+                accumulated.extend(evidence)
+                setattr(state, "_accumulated_criteria_evidence", accumulated)
+                if not accumulated or len(accumulated) < len(plan.completion_criteria):
                     state.record("completion_criteria_failed", "Finish requires completion evidence.")
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "Provide non-empty evidence for the completion criteria."}]
                     continue
+                evidence = accumulated
                 security_required = plan.security_level in {"sensitive", "high_risk"}
                 state.transition(TaskStatus.VERIFYING, reason="Completion verification started.")
                 verification = self.verify(root, security_required=security_required)

@@ -35,19 +35,21 @@ TOOL_SCHEMAS = {
     "finish": {"required": ["reason", "criteria_evidence"], "types": {"reason": str, "criteria_evidence": list}, "optional": {}},
 }
 
-STEP_REQUIRED_TOOLS = {"write_file", "apply_patch", "run_command", "run_checks", "complete_step"}
+from ..llm.cleaner import extract_json_payload
+
+STEP_REQUIRED_TOOLS = {"write_file", "apply_patch", "run_command", "complete_step"}
 
 def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     schema = TOOL_SCHEMAS[tool]
     if not isinstance(arguments, dict): raise ToolCallError("arguments must be an object")
+    allowed = set(schema["required"]) | set(schema["types"]) | set(schema["optional"])
+    unknown = set(arguments) - allowed
+    if unknown: raise ToolCallError("unknown argument(s): " + ", ".join(sorted(unknown)))
     missing = [k for k in schema["required"] if k not in arguments]
     if missing: raise ToolCallError("missing required argument(s): " + ", ".join(missing))
     for key, expected in {**schema["types"], **schema["optional"]}.items():
         if key in arguments and (isinstance(arguments[key], bool) or not isinstance(arguments[key], expected)):
             raise ToolCallError(f"argument '{key}' must be {expected.__name__}")
-    allowed = set(schema["required"]) | set(schema["types"]) | set(schema["optional"])
-    unknown = set(arguments) - allowed
-    if unknown: raise ToolCallError("unknown argument(s): " + ", ".join(sorted(unknown)))
     if tool == "finish" and (not arguments.get("criteria_evidence") or not all(isinstance(x, str) and x.strip() for x in arguments["criteria_evidence"])):
         raise ToolCallError("criteria_evidence must be a non-empty list of textual evidence")
     if tool == "run_checks" and arguments.get("kind") not in {"test", "lint", "typecheck", "build", "validate", "security", "dependency_audit"}:
@@ -57,10 +59,10 @@ def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     return arguments
 
 def parse_tool_call(content: str) -> ToolCall:
-    text = content.strip()
-    if text.startswith("```"): raise ToolCallError("markdown code fences are not allowed")
-    try: payload = json.loads(text)
-    except json.JSONDecodeError as exc: raise ToolCallError("invalid JSON: " + exc.msg) from exc
+    try:
+        payload = extract_json_payload(content)
+    except Exception as exc:
+        raise ToolCallError("invalid JSON: " + str(exc)) from exc
     if not isinstance(payload, dict): raise ToolCallError("tool call must be a JSON object")
     tool = payload.get("tool")
     if not isinstance(tool, str) or not tool: raise ToolCallError("missing string field 'tool'")

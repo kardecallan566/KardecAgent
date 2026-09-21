@@ -29,14 +29,14 @@ class SecurityReview:
     def as_dict(self) -> dict[str, Any]:
         return {'status': self.status, 'summary': self.summary, 'findings': [f.__dict__ for f in self.findings]}
 
+from ..llm.cleaner import extract_json_payload
+
+
 def parse_security_review(content: str) -> SecurityReview:
-    text = content.strip()
-    if text.startswith('```'):
-        raise SecurityReviewError('markdown code fences are not allowed')
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise SecurityReviewError('invalid security review JSON: ' + exc.msg) from exc
+        payload = extract_json_payload(content)
+    except Exception as exc:
+        raise SecurityReviewError('invalid security review JSON: ' + str(exc)) from exc
     if not isinstance(payload, dict):
         raise SecurityReviewError('security review must be a JSON object')
     status, summary, raw = payload.get('status'), payload.get('summary'), payload.get('findings', [])

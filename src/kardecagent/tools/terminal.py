@@ -114,11 +114,17 @@ def _strip_outer_quotes(value: str) -> str:
     return value
 
 
+BLOCKED_COMMANDS = {
+    "format", "rmdir", "del", "rd", "erase", "shutdown", "reboot",
+    "diskpart", "mkfs", "dd", "rm", "kill", "pkill",
+}
+
+
 def is_command_blocked(command: str) -> bool:
     parsed = parse_command(command)
     if parsed is None:
         return True
-    return parsed.executable in SHELL_EXECUTABLES
+    return parsed.executable in (SHELL_EXECUTABLES | BLOCKED_COMMANDS)
 
 
 def is_command_allowed(command: str, allowed_commands: set[str] | None = None) -> bool:

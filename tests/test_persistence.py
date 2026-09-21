@@ -115,8 +115,9 @@ def test_execution_journal_recovers_truncated_tail(tmp_path: Path):
     state.transition(TaskStatus.RUNNING)
     store.save(state, plan=make_plan(), approved=True)
     journal_path = store.journal_path_for("truncated")
-    journal_path.open("ab").write(b'{"interrupted":')
-    
+    with journal_path.open("ab") as handle:
+        handle.write(b'{"interrupted":')
+
     loaded, _, _ = store.load("truncated")
     assert loaded.status is TaskStatus.RUNNING
     assert len(loaded.events) == len(state.events)
@@ -131,7 +132,7 @@ def test_execution_journal_rejects_tampered_middle_record(tmp_path: Path):
     store.save(state, plan=make_plan(), approved=True)
     journal_path = store.journal_path_for("tampered")
     lines = journal_path.read_text(encoding="utf-8").splitlines()
-    lines[1] = lines[1].replace('"message": "second"', '"message": "tampered"')
+    lines[1] = lines[1].replace('"message": "first"', '"message": "tampered"')
     journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     try:

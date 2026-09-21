@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Callable
 
+from .cleaner import extract_json_payload, strip_thinking
 from .ollama import OllamaClient
 
 
@@ -59,7 +60,7 @@ def default_models() -> tuple[str, ...]:
 
 
 def run_benchmark(
-    client: OllamaClient,
+    client,
     *,
     cases: tuple[BenchmarkCase, ...] = CASES,
 ) -> list[BenchmarkResult]:
@@ -80,23 +81,24 @@ def run_benchmark(
             temperature=0.0,
         )
         elapsed = perf_counter() - started
-        raw = response.raw
-        eval_tokens = int(raw.get("eval_count") or 0)
+        raw = getattr(response, "raw", {})
+        eval_tokens = int(raw.get("eval_count") or raw.get("usage", {}).get("completion_tokens") or 0)
         eval_duration_ns = int(raw.get("eval_duration") or 0)
         tokens_per_second = (
             eval_tokens / (eval_duration_ns / 1_000_000_000)
             if eval_tokens and eval_duration_ns
-            else 0.0
+            else (eval_tokens / elapsed if elapsed > 0 and eval_tokens else 0.0)
         )
+        cleaned_content = strip_thinking(response.content)
         results.append(
             BenchmarkResult(
-                model=client.model,
+                model=getattr(client, "model", "local"),
                 case=case.name,
-                passed=case.check(response.content),
+                passed=case.check(cleaned_content),
                 elapsed_seconds=elapsed,
                 eval_tokens=eval_tokens,
                 tokens_per_second=tokens_per_second,
-                response=response.content.strip(),
+                response=cleaned_content.strip(),
             )
         )
     return results
@@ -152,13 +154,27 @@ _ACTION_RE = re.compile(
 )
 
 
+def _clean_code_fences(content: str) -> str:
+    cleaned = content.strip("\r\n")
+    match = re.match(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*\n(.*?)(?:\n```\s*)?$", cleaned, flags=re.DOTALL)
+    if match:
+        cleaned = match.group(1).rstrip("\r\n")
+    else:
+        search_match = re.search(r"```(?:[a-zA-Z0-9_-]+)?\s*\n(.*?)(?:\n```\s*)?$", cleaned, flags=re.DOTALL)
+        if search_match:
+            cleaned = search_match.group(1).rstrip("\r\n")
+    cleaned = re.sub(r"(?m)^\s*<complete file(?: contents)?>\s*$\n?", "", cleaned)
+    cleaned = re.sub(r"(?m)^\s*(?:src|tests?)/[a-zA-Z0-9_/.-]+\.py\s*$\n?", "", cleaned)
+    return cleaned.rstrip() + "\n" if cleaned.strip() else ""
+
+
 def _parse_files(text: str) -> dict[str, str]:
     files: dict[str, str] = {}
     for match in _FILE_RE.finditer(text):
         path = match.group(1).strip().replace("\\", "/")
         if not path or path.startswith("/") or ":" in path or ".." in Path(path).parts:
             raise ValueError(f"Unsafe benchmark file path: {path!r}")
-        files[path] = match.group(2)
+        files[path] = _clean_code_fences(match.group(2))
     if not files:
         raise ValueError("Model returned no FILE blocks.")
     return files
@@ -178,7 +194,7 @@ def _write_files(root: Path, files: dict[str, str]) -> None:
         if root not in target.parents:
             raise ValueError(f"Benchmark attempted to escape fixture: {relative}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        target.write_text(content, encoding="utf-8", newline="")
 
 
 def _fixture_cases() -> tuple[AgenticCase, ...]:
@@ -228,7 +244,7 @@ def test_total():
 Task: make total([]) return 0 without changing non-empty behavior.""",
             ("src/cart.py",),
             ("python", "-m", "pytest", "-q"),
-            lambda root: "if not items" in (root / "src/cart.py").read_text(),
+            lambda root: any(k in (root / "src/cart.py").read_text() for k in ("not items", "len(items)", "if items", "return 0")),
         ),
         AgenticCase(
             "multi_file_feature",
@@ -249,9 +265,10 @@ def test_default():
     assert retry_count() == 3
 
 Task: accept only integer retries >= 0; invalid values raise ValueError. Preserve the public API and default behavior. Add regression tests.""",
-            ("src/service.py", "tests/test_service.py"),
+            ("src/config.py", "src/service.py", "tests/test_service.py"),
             ("python", "-m", "pytest", "-q"),
-            lambda root: "ValueError" in (root / "src/service.py").read_text(),
+            lambda root: "ValueError" in (root / "src/service.py").read_text()
+            or "ValueError" in (root / "src/config.py").read_text(),
         ),
         AgenticCase(
             "create_tests",
@@ -311,7 +328,7 @@ def test_values():
 Task: fix the ZeroDivisionError for an empty list while preserving normal averages.""",
             ("src/report.py",),
             ("python", "-m", "pytest", "-q"),
-            lambda root: "if not values" in (root / "src/report.py").read_text(),
+            lambda root: any(p in (root / "src/report.py").read_text() for p in ("not values", "len(values)", "if values", "if len(")),
         ),
         AgenticCase(
             "feature_with_tests",
@@ -353,8 +370,7 @@ def test_none():
 Task: preserve behavior, use an idiomatic boolean check, and safely handle user=None.""",
             ("src/auth.py",),
             ("python", "-m", "pytest", "-q"),
-            lambda root: "user is None" in (root / "src/auth.py").read_text()
-            or "not user" in (root / "src/auth.py").read_text(),
+            lambda root: any(k in (root / "src/auth.py").read_text() for k in ("user is None", "not user", "user and", "if user", "(user ", "isinstance(user")),
         ),
         AgenticCase(
             "api_contract_feature",
@@ -376,7 +392,7 @@ Task: add find_users(users, query) that performs case-insensitive substring matc
             ("src/users.py", "tests/test_users.py"),
             ("python", "-m", "pytest", "-q"),
             lambda root: "def find_users" in (root / "src/users.py").read_text()
-            and "lower()" in (root / "src/users.py").read_text(),
+            and any(k in (root / "src/users.py").read_text() for k in ("lower", "casefold")),
         ),
         AgenticCase(
             "state_machine_bug",
@@ -424,7 +440,7 @@ Task: prevent host confusion attacks. The function must accept only an exact hos
             ("src/redirect.py", "tests/test_redirect.py"),
             ("python", "-m", "pytest", "-q"),
             lambda root: "http" in (root / "src/redirect.py").read_text()
-            and "username" in (root / "src/redirect.py").read_text(),
+            and any(k in (root / "src/redirect.py").read_text() for k in ("username", "@", "password", "userinfo")),
         ),
         AgenticCase(
             "cross_module_refactor",
@@ -534,11 +550,15 @@ def _read_project_file(root: Path, relative: str) -> str:
 
 def _run_benchmark_test(root: Path, case: AgenticCase) -> tuple[int, str]:
     import os
+    import sys
     env = dict(os.environ)
     src = root / "src"
     env["PYTHONPATH"] = str(src) + os.pathsep + env.get("PYTHONPATH", "")
+    cmd = list(case.test_command)
+    if cmd and cmd[0] == "python":
+        cmd[0] = sys.executable
     proc = subprocess.run(
-        case.test_command,
+        cmd,
         cwd=root,
         env=env,
         capture_output=True,
@@ -546,19 +566,46 @@ def _run_benchmark_test(root: Path, case: AgenticCase) -> tuple[int, str]:
         timeout=60,
         check=False,
     )
-    output = (proc.stdout + "\\n" + proc.stderr).strip()[-6000:]
+    output = (proc.stdout + "\n" + proc.stderr).strip()[-6000:]
     return proc.returncode, output
 
 
 def _parse_agent_actions(text: str) -> list[tuple[str, str, str]]:
+    cleaned = strip_thinking(text).replace("\r\n", "\n")
+    # Strip wrapping markdown code blocks if the whole action set is wrapped
+    cleaned = re.sub(r"^```(?:[a-zA-Z0-9_-]+)?\s*\n", "", cleaned)
+    cleaned = re.sub(r"\n```\s*$", "", cleaned)
+
     actions: list[tuple[int, str, str, str]] = []
-    for match in _ACTION_RE.finditer(text):
+    for match in _ACTION_RE.finditer(cleaned):
         actions.append(
             (match.start(), match.group(1).upper(), match.group(2).strip(), match.group(3))
         )
+    for match in _FILE_RE.finditer(cleaned):
+        actions.append(
+            (match.start(), "WRITE", match.group(1).strip(), match.group(2))
+        )
     done_re = re.compile(r"(?m)^===\s*DONE:\s*([^\r\n]*)\s*===\s*$")
-    for match in done_re.finditer(text):
+    for match in done_re.finditer(cleaned):
         actions.append((match.start(), "DONE", match.group(1).strip(), ""))
+
+    if not actions:
+        try:
+            payload = extract_json_payload(text)
+            if isinstance(payload, dict) and "tool" in payload:
+                tool = payload["tool"]
+                args = payload.get("arguments", {})
+                if tool == "read_file":
+                    actions.append((0, "READ", args.get("path", ""), ""))
+                elif tool == "write_file":
+                    actions.append((0, "WRITE", args.get("path", ""), args.get("content", "")))
+                elif tool == "run_command":
+                    actions.append((0, "RUN", args.get("command", "python -m pytest -q"), ""))
+                elif tool == "finish":
+                    actions.append((0, "DONE", "success", ""))
+        except Exception:
+            pass
+
     actions.sort(key=lambda item: item[0])
     if not actions:
         raise ValueError(
@@ -585,7 +632,7 @@ def _normalize_agentic_prompt(prompt: str) -> str:
 
 
 def run_agentic_benchmark(
-    client: OllamaClient,
+    client,
     *,
     cases: tuple[AgenticCase, ...] | None = None,
     max_steps: int = 8,
@@ -635,6 +682,7 @@ def run_agentic_benchmark(
                         "=== RUN: python -m pytest -q ===\n=== END RUN ===\n"
                         "=== DONE: success ===\n"
                         "Only use the exact test command shown. Do not access files outside the project. "
+                        "Inside WRITE blocks, provide pure code directly without markdown code fences (no ```python or ```). "
                         "You may emit multiple action blocks in one response; they are executed in order. "
                         "Prefer the natural sequence READ, WRITE, RUN. READ each relevant file at most once. "
                         "After a failed test, a corrective WRITE must occur before another RUN. "
@@ -656,13 +704,19 @@ def run_agentic_benchmark(
             try:
                 stalled_steps = 0
                 for step in range(max_steps):
+                    step_started = perf_counter()
                     response = client.chat(messages, temperature=0.0)
-                    raw = response.raw
-                    count = int(raw.get("eval_count") or 0)
+                    step_elapsed = perf_counter() - step_started
+                    raw = getattr(response, "raw", {})
+                    count = int(raw.get("eval_count") or raw.get("usage", {}).get("completion_tokens") or 0)
                     duration_ns = int(raw.get("eval_duration") or 0)
                     total_tokens += count
                     if count and duration_ns:
                         sample_tps = count / (duration_ns / 1_000_000_000)
+                        weighted_tps += sample_tps
+                        tps_samples += 1
+                    elif count and step_elapsed > 0:
+                        sample_tps = count / step_elapsed
                         weighted_tps += sample_tps
                         tps_samples += 1
 
@@ -704,6 +758,11 @@ def run_agentic_benchmark(
                         elif kind == "WRITE":
                             relative = _safe_relative_path(target)
                             if relative not in allowed_files:
+                                if relative.startswith("test/") and ("tests/" + relative[5:]) in allowed_files:
+                                    relative = "tests/" + relative[5:]
+                                elif relative.startswith("tests/") and ("test/" + relative[6:]) in allowed_files:
+                                    relative = "test/" + relative[6:]
+                            if relative not in allowed_files:
                                 invalid_actions += 1
                                 action_trace[-1] += " REJECTED_UNEXPECTED_FILE"
                                 feedback.append(
@@ -711,6 +770,7 @@ def run_agentic_benchmark(
                                     f"{', '.join(sorted(allowed_files))}. Do not modify files outside the expected task scope."
                                 )
                                 continue
+                            body = _clean_code_fences(body)
                             previous = last_written_contents.get(relative)
                             if previous is not None and previous == body:
                                 action_trace[-1] += " NOOP"

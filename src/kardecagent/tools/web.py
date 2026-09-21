@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from ipaddress import ip_address
 from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 import html
+import httpx
 import re
 import socket
 

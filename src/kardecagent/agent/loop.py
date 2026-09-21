@@ -285,16 +285,17 @@ class AgentLoop:
             )
             if persistence_callback is not None:
                 persistence_callback(result, plan)
-            if recovery.recovered:
+            if recovery.recovered and (bool(recovery.rolled_back_events) or recovery.resume_step > 1):
                 result.record(
                     "resume_retry_started",
                     "Retrying the approved plan from the last consistent plan step.",
                     resume_step=recovery.resume_step,
                 )
                 retry_start_index = len(result.events)
+                retry_limit = max(max_iterations or self.settings.max_iterations, 4)
                 result = self.executor.execute(
                     project_root, task, plan, result, context=context,
-                    allowed_scope=allowed_scope, max_iterations=max_iterations,
+                    allowed_scope=allowed_scope, max_iterations=retry_limit,
                     allow_plan_changes=allow_plan_changes,
                     approval_callback=approval_callback,
                     high_risk_approval_callback=high_risk_approval_callback,
