@@ -83,3 +83,31 @@ def test_parse_plan_recovers_from_missing_commas():
     assert len(plan.steps) == 3
     assert len(plan.validation) == 2
     assert len(plan.completion_criteria) == 2
+
+
+def test_parse_plan_handles_dict_elements():
+    raw = """{
+      "summary": "Create game page",
+      "steps": [
+        {"step": "Step 1", "description": "Set up files"},
+        {"step": "Step 2", "description": "Add CSS styles"}
+      ],
+      "validation": [
+        {"method": "Browser check", "description": "Open in Chrome"}
+      ],
+      "risks": [
+        {"risk": "Compatibility", "mitigation": "Use standard CSS"}
+      ],
+      "completion_criteria": [
+        {"criteria": "HTML page renders correctly", "method": "Visual inspection"}
+      ]
+    }"""
+    plan = parse_plan(raw)
+    assert plan.summary == "Create game page"
+    assert len(plan.steps) == 2
+    assert "Step 1: Set up files" in plan.steps[0]
+    assert "Step 2: Add CSS styles" in plan.steps[1]
+    assert "Browser check: Open in Chrome" in plan.validation[0]
+    assert "Compatibility: Use standard CSS" in plan.risks[0]
+    assert "HTML page renders correctly: Visual inspection" in plan.completion_criteria[0]
+

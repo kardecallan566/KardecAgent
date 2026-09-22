@@ -22,7 +22,7 @@ class Settings:
     llm_model: str = "qwen2.5-coder:3b"
     llm_api_key: str = "local"
     ollama_base_url: str = "http://127.0.0.1:11434"
-    llm_timeout_seconds: float = 120.0
+    llm_timeout_seconds: float = 180.0
     max_iterations: int = 20
     command_timeout_seconds: float = 120.0
     max_command_output_chars: int = 20_000

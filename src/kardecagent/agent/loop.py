@@ -14,6 +14,7 @@ from .state import TaskState, TaskStatus
 from .persistence import TaskStore, PersistenceError
 from .recovery import RecoveryManager
 from .tools_schema import ToolCallError
+from ..llm.cleaner import extract_json_payload
 
 SYSTEM_PROMPT = (
     "You are KardecAgent, a local software engineering agent. "
@@ -43,34 +44,49 @@ class AgentLoop:
 
     def _create_plan(self, root: Path, task: str, state: TaskState) -> ExecutionPlan | None:
         context = self._build_context(root, task)
-        messages = [
+        base_messages = [
             {"role": "system", "content": SYSTEM_PROMPT + "\n" + plan_instructions() +
              " You are in the planning phase. Do not call implementation tools."},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
+        messages = list(base_messages)
         for _ in range(min(5, self.settings.max_iterations)):
             response = self.llm.chat(messages)
             state.record("plan_response", response.content)
+            plan = None
             try:
                 plan = parse_plan(response.content)
-                assessment = assess_security(task)
-                state.record("security_assessment", "Task security sensitivity assessed.",
-                             level=assessment.level, matched_signals=list(assessment.matched_signals))
-                if assessment.sensitive:
-                    plan = ExecutionPlan(
-                        plan.summary, plan.steps, plan.validation, plan.risks,
-                        plan.completion_criteria, assessment.level,
-                        security_requirements_for(assessment.level),
-                    )
-                    state.record("security_mode_enabled", "Security-sensitive execution controls enabled.",
-                                 level=assessment.level, requirements=plan.security_requirements)
-                return plan
             except PlanError as exc:
-                state.record("plan_error", str(exc))
-                messages += [
-                    {"role": "assistant", "content": response.content},
-                    {"role": "user", "content": "Invalid plan: " + str(exc) + ". " + plan_instructions()},
-                ]
+                if "completion_criteria" in str(exc):
+                    try:
+                        raw_payload = extract_json_payload(response.content)
+                        if isinstance(raw_payload, dict) and raw_payload.get("summary") and raw_payload.get("steps"):
+                            synth_criteria = raw_payload.get("validation") or [raw_payload["summary"]]
+                            if isinstance(synth_criteria, list) and synth_criteria:
+                                raw_payload["completion_criteria"] = synth_criteria
+                                plan = parse_plan(json.dumps(raw_payload, ensure_ascii=False))
+                    except Exception:
+                        pass
+                if plan is None:
+                    state.record("plan_error", str(exc))
+                    messages = base_messages + [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": "Invalid plan: " + str(exc) + ". " + plan_instructions()},
+                    ]
+                    continue
+
+            assessment = assess_security(task)
+            state.record("security_assessment", "Task security sensitivity assessed.",
+                         level=assessment.level, matched_signals=list(assessment.matched_signals))
+            if assessment.sensitive:
+                plan = ExecutionPlan(
+                    plan.summary, plan.steps, plan.validation, plan.risks,
+                    plan.completion_criteria, assessment.level,
+                    security_requirements_for(assessment.level),
+                )
+                state.record("security_mode_enabled", "Security-sensitive execution controls enabled.",
+                             level=assessment.level, requirements=plan.security_requirements)
+            return plan
         return None
 
     def run(

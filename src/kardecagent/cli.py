@@ -22,12 +22,14 @@ def build_parser():
     run.add_argument("--task", required=True)
     run.add_argument("--model", default=None, help="LLM model name (e.g. qwen2.5-coder:7b).")
     run.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider (default: ollama).")
+    run.add_argument("--timeout", type=float, default=None, help="Timeout in seconds for LLM calls (default: 180.0).")
     run.add_argument("--max-iterations", type=int, default=None)
     resume = subs.add_parser("resume", help="Resume a previously approved interrupted task.")
     resume.add_argument("--project", required=True)
     resume.add_argument("--task", required=True)
     resume.add_argument("--model", default=None, help="LLM model name.")
     resume.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider.")
+    resume.add_argument("--timeout", type=float, default=None, help="Timeout in seconds for LLM calls (default: 180.0).")
     resume.add_argument("--max-iterations", type=int, default=None)
     doctor = subs.add_parser("doctor", help="Check local project and LLM configuration without changing files.")
     doctor.add_argument("--project", required=True)
@@ -37,7 +39,7 @@ def build_parser():
     tasks.add_argument("--project", required=True)
     benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
-    benchmark.add_argument("--timeout", type=float, default=120.0)
+    benchmark.add_argument("--timeout", type=float, default=180.0)
     benchmark.add_argument("--level", choices=("basic", "agentic"), default="agentic", help="Benchmark level (default: agentic).")
     return parser
 
@@ -339,11 +341,14 @@ def main() -> int:
 
     model_override = getattr(args, "model", None)
     provider_override = getattr(args, "provider", None)
+    timeout_override = getattr(args, "timeout", None)
     updates = {}
     if model_override:
         updates["llm_model"] = model_override
     if provider_override:
         updates["llm_provider"] = provider_override
+    if timeout_override is not None:
+        updates["llm_timeout_seconds"] = timeout_override
     if updates:
         settings = Settings(**{**settings.__dict__, **updates})
 
