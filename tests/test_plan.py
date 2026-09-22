@@ -54,3 +54,32 @@ def test_plan_tracker_rejects_invalid_resume_step():
     plan = ExecutionPlan("x", ["one"], ["validate"])
     with pytest.raises(PlanError, match="resume step"):
         PlanTracker.resume_from(plan, 3)
+
+
+def test_parse_plan_recovers_from_missing_commas():
+    malformed = """```json
+{
+  "summary": "Build game page",
+  "steps": [
+    "1. Define layout"
+    "2. Choose CSS framework"
+    "3. Create HTML"
+  ],
+  "validation": [
+    "Visual check"
+    "Browser test"
+  ],
+  "risks": [
+    "CSS conflict"
+  ],
+  "completion_criteria": [
+    "HTML exists"
+    "Page looks good"
+  ]
+}
+```"""
+    plan = parse_plan(malformed)
+    assert plan.summary == "Build game page"
+    assert len(plan.steps) == 3
+    assert len(plan.validation) == 2
+    assert len(plan.completion_criteria) == 2
