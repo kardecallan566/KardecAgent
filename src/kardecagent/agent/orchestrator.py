@@ -276,6 +276,20 @@ class Orchestrator:
                     conflict_paths=list(recovery.conflict_paths),
                 )
                 if recovery.recovered:
+                    # A successful recovery must leave the state resumable before
+                    # the retry. Keep this invariant here as a guard for recovery
+                    # implementations or persisted states that return success
+                    # without recording the RESUMING transition.
+                    if result_state.status in {
+                        TaskStatus.FAILED,
+                        TaskStatus.MAX_ITERATIONS,
+                        TaskStatus.RECOVERING,
+                    }:
+                        result_state.transition(
+                            TaskStatus.RESUMING,
+                            reason="Preparing the recovered subtask for retry.",
+                            resume_step=recovery.resume_step,
+                        )
                     result_state.record(
                         "subtask_resume_retry_started",
                         "Retrying the approved subtask plan from the last consistent step.",

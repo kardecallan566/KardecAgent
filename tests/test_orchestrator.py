@@ -3,9 +3,11 @@ from pathlib import Path
 import pytest
 
 from kardecagent.agent.orchestrator import Orchestrator, OrchestrationError, SubtaskExecutionResult
+from kardecagent.agent.recovery import RecoveryResult
+from kardecagent.agent.state import TaskStatus
 from kardecagent.config import Settings
 from kardecagent.agent.plan import ExecutionPlan
-from kardecagent.tasks import SubtaskStatus
+from kardecagent.tasks import Subtask, SubtaskStatus, TaskBoard
 
 
 class FakeLLM:
@@ -91,3 +93,41 @@ def test_sequential_resume_prioritizes_active_subtask_and_step(tmp_path: Path):
     )
     assert result.completed
     assert calls[0] == ("2", 2)
+
+
+def test_subtask_retry_normalizes_max_iterations_state(tmp_path: Path, monkeypatch):
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings(max_iterations=1))
+    parent_plan = ExecutionPlan("Large task", ["Implement"], ["tests"], [], ["done"])
+    board = TaskBoard()
+    board.add(Subtask("1", "Implementation", "Implement", scope=("src",), plan_steps=(1,)))
+    statuses = []
+
+    def execute(*args, **kwargs):
+        state = args[3]
+        statuses.append(state.status)
+        if len(statuses) == 1:
+            state.transition(TaskStatus.MAX_ITERATIONS, reason="Test limit reached.")
+            return state
+        assert state.status is TaskStatus.RESUMING
+        state.transition(TaskStatus.RUNNING, reason="Retry started.")
+        state.transition(TaskStatus.VERIFYING, reason="Retry verification started.")
+        state.transition(TaskStatus.VERIFIED, reason="Retry verification passed.")
+        state.transition(TaskStatus.COMPLETED, reason="Retry completed.")
+        return state
+
+    monkeypatch.setattr(orchestrator.agent_loop, "execute_approved_plan", execute)
+    monkeypatch.setattr(
+        orchestrator.recovery,
+        "recover",
+        lambda *args, **kwargs: RecoveryResult(True, resume_step=1),
+    )
+
+    result = orchestrator.execute_approved_plan(
+        tmp_path,
+        "parent",
+        parent_plan,
+        board,
+    )
+
+    assert statuses == [TaskStatus.RUNNING, TaskStatus.RESUMING]
+    assert result.completed
