@@ -256,6 +256,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 del seen_command_ids[next(iter(seen_command_ids))]
 
             execution_id = None
+            command_accepted = False
             identifier = requested_task_id
             try:
                 persisted = next(
@@ -275,6 +276,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     "accepted": True,
                     "task_id": identifier,
                 })
+                command_accepted = True
                 _write({
                     "type": "task.created",
                     "schema_version": 1,
@@ -323,6 +325,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             except (BrokenPipeError, EOFError):
                 return 0
             except Exception as exc:
+                if not command_accepted:
+                    _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": str(exc)})
                 if execution_id is not None:
                     _write({
                         "type": "task.failed",
