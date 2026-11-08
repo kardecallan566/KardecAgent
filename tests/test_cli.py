@@ -12,7 +12,7 @@ def test_cli_exposes_first_version_commands():
     assert args_run.provider == "ollama"
     assert parser.parse_args(["resume", "--project", ".", "--task", "x"]).command == "resume"
     assert parser.parse_args(["doctor", "--project", "."]).command == "doctor"
-    assert parser.parse_args(["tasks", "--project", "."]).command == "tasks"\n    assert parser.parse_args(["models"]).command == "models"\n    assert parser.parse_args(["models", "--installed-only"]).installed_only
+    assert parser.parse_args(["tasks", "--project", "."]).command == "tasks"\n    assert parser.parse_args(["models"]).command == "models"\n    assert parser.parse_args(["models", "--installed-only"]).installed_only\n    assert parser.parse_args(["models", "--inspect", "qwen3.5:4b"]).inspect == "qwen3.5:4b"
 
 
 def test_tasks_command_handles_empty_store(tmp_path: Path, capsys):
