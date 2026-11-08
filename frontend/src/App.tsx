@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -45,6 +46,40 @@ function App() {
   const [selectedAgent, setSelectedAgent] = useState("agent-frontend");
   const [expandedProcesses, setExpandedProcesses] = useState<string[]>(["implement"]);
   const [instructionDraft, setInstructionDraft] = useState("");
+  const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
+  const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const unlisten = listen<Record<string, any>>("runtime-message", event => {
+      if (!active) return;
+      const message = event.payload;
+      if (message.type === "runtime.ready") {
+        setRuntimeStatus("online");
+        setRuntimeError(null);
+      } else if (message.type === "approval.requested") {
+        setPendingApproval({ approvalId: message.payload.approval_id, kind: message.payload.kind, summary: message.payload.summary, risk: message.payload.risk });
+        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: "Plano aguardando sua aprovação." }].slice(-100));
+      } else if (message.type === "core.event") {
+        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.payload.event_type, message: message.payload.message }].slice(-100));
+      } else if (message.type === "task.created") {
+        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
+      } else if (message.type === "task.completed" || message.type === "task.failed") {
+        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
+        setPendingApproval(null);
+      } else if (message.type === "runtime.error" || message.type === "command.rejected") {
+        setRuntimeError(message.message || message.reason || "Falha de comunicação com o runtime.");
+      }
+    });
+    const streamClosed = listen("runtime-stream-closed", () => { if (active) setRuntimeStatus("offline"); });
+    return () => {
+      active = false;
+      unlisten.then(stop => stop());
+      streamClosed.then(stop => stop());
+    };
+  }, []);
 
   async function openEntry(entry: ProjectEntry) {
     if (entry.is_dir) {
@@ -64,7 +99,37 @@ function App() {
       setProjectRoot(selected);
       setProjectEntries(entries);
       setProjectError(null);
-    } catch (error) { setProjectError(String(error)); }
+      setRuntimeStatus("connecting");
+      setRuntimeError(null);
+      await invoke("start_runtime", { projectPath: selected });
+    } catch (error) {
+      setProjectError(String(error));
+      setRuntimeStatus("offline");
+      setRuntimeError(String(error));
+    }
+  }
+
+  async function submitInstruction() {
+    if (!projectRoot || !instructionDraft.trim() || runtimeStatus !== "online") return;
+    try {
+      await invoke("send_runtime_command", { message: {
+        type: "task.submit", schema_version: 1, command_id: crypto.randomUUID(),
+        payload: { instruction: instructionDraft.trim(), project_root: projectRoot }
+      }});
+      setInstructionDraft("");
+      setRuntimeError(null);
+    } catch (error) { setRuntimeError(String(error)); }
+  }
+
+  async function respondToApproval(decision: "approve" | "reject") {
+    if (!pendingApproval) return;
+    try {
+      await invoke("send_runtime_command", { message: {
+        type: "approval.respond", schema_version: 1, command_id: crypto.randomUUID(),
+        payload: { approval_id: pendingApproval.approvalId, decision }
+      }});
+      setPendingApproval(null);
+    } catch (error) { setRuntimeError(String(error)); }
   }
 
   return (
@@ -72,7 +137,7 @@ function App() {
       <header className="titlebar">
         <div className="brand"><div className="brand-mark"><Zap size={15} /></div><span>KARDEC<span className="brand-light">AGENT</span></span>
         <span className="workspace-label">Studio <span className="muted">/</span> Workspace</span>
-        <div className="titlebar-right"><span className="connection"><span /> {projectRoot ? "Projeto aberto · Core offline" : "Core desconectado"}</span><span className="avatar">KA</span></div>
+        <div className="titlebar-right"><span className="connection"><span /> {runtimeStatus === "online" ? "Core conectado" : runtimeStatus === "connecting" ? "Conectando ao core..." : "Core desconectado"}</span><span className="avatar">KA</span></div>
       </header>
 
       <div className="work-area">
@@ -121,6 +186,11 @@ function App() {
                 <div><span>03</span><strong>Distribuir</strong><small>As tarefas são atribuídas aos agentes conforme dependências e recursos.</small></div>
                 <div><span>04</span><strong>Entregar</strong><small>Resultados, alterações e bloqueios ficam visíveis nesta área.</small></div>
               </div>
+              {runtimeError && <div className="manager-runtime-error" role="alert">{runtimeError}</div>}
+              <section className="manager-event-list">
+                <div className="process-section-title"><strong>Atividade do gestor</strong><span>{runtimeEvents.length} eventos recentes · fluxo em tempo real</span></div>
+                {runtimeEvents.length === 0 ? <p className="manager-no-events">As instruções recebidas e as atualizações do core aparecerão aqui.</p> : runtimeEvents.slice().reverse().map(item => <div className="manager-event" key={item.id}><span>{item.type}</span><p>{item.message}</p></div>)}
+              </section>
               <div className="manager-inbox-note"><ShieldCheck size={15}/> Nenhuma instrução será executada sem passar pelas regras de aprovação do core.</div>
             </div>
           ) : activeNav === "tasks" ? (
@@ -194,11 +264,16 @@ function App() {
             </div>
           ) : <>
             <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">● Offline</span></div>
-            <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>
+            {pendingApproval ? <div className="approval-prompt">
+              <div className="approval-prompt-head"><ShieldCheck size={18}/><strong>{pendingApproval.kind === "high_risk" ? "Aprovação adicional de alto risco" : "Aprovar plano de execução"}</strong></div>
+              <span className="approval-risk">RISCO: {pendingApproval.risk.toUpperCase()}</span>
+              <pre>{pendingApproval.summary}</pre>
+              <div className="approval-actions"><button onClick={() => respondToApproval("reject")} className="approval-reject">Rejeitar</button><button onClick={() => respondToApproval("approve")} className="approval-accept">Aprovar execução</button></div>
+            </div> : <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>}
             <div className="agent-composer">
               <label htmlFor="manager-instruction">Instrução para o gestor</label>
               <textarea id="manager-instruction" value={instructionDraft} onChange={event => setInstructionDraft(event.target.value.slice(0, 8000))} placeholder="Ex.: Analise o projeto, proponha um plano e implemente a autenticação..." rows={4} maxLength={8000}/>
-              <div className="composer-footer"><span>{instructionDraft.length}/8000 · Envio disponível quando o core conectar</span><button disabled={!projectRoot || !instructionDraft.trim()} title="Runtime Python ainda não conectado"><Plus size={15}/></button></div>
+              <div className="composer-footer"><span>{instructionDraft.length}/8000 · {runtimeStatus === "online" ? "Pronto para enviar" : "Aguardando conexão"}</span><button onClick={submitInstruction} disabled={!projectRoot || !instructionDraft.trim() || runtimeStatus !== "online"} title={runtimeStatus === "online" ? "Enviar instrução ao gestor" : "Runtime Python ainda não conectado"}><Plus size={15}/></button></div>
               <small className="composer-hint">A instrução será enviada ao gestor central, não diretamente a um agente individual.</small>
             </div>
             <div className="agent-foot"><ShieldCheck size={13}/> Aprovações e ações sensíveis sob seu controle</div>
@@ -206,7 +281,7 @@ function App() {
         </aside>
       </div>
 
-      <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> UI Preview <span>·</span> Runtime não conectado</div></footer>
+      <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> UI Preview <span>·</span> {runtimeStatus === "online" ? "Runtime conectado" : runtimeStatus === "connecting" ? "Conectando runtime" : "Runtime offline"}</div></footer>
     </main>
   );
 }
