@@ -58,7 +58,7 @@ A response is accepted only for the currently pending approval ID. While approva
 - `runtime.ready`: process initialized, workspace fixed and resource limits announced (`max_concurrent_tasks`, `max_concurrent_subtasks`, `max_subtasks`, LLM iteration and output caps).
 - `command.accepted` / `command.rejected`: command acknowledgement.
 - `task.created`: task accepted by the manager.
-- `core.event`: bounded lifecycle envelope from `TaskState.record`, including event type, sequence, iteration, message and event data. Events carry both the persisted task ID and a per-execution ID so repeated runs of the same task remain distinct.
+- `core.event`: bounded lifecycle envelope from `TaskState.record`, including event type, sequence, iteration, message and event data. The UI uses `plan_created`, `plan_step_started`, `plan_step_completed` and subtask board snapshots to build the live task map. Events carry both the persisted task ID and a per-execution ID so repeated runs of the same task remain distinct.
 - `task.created`, `approval.requested`, `core.event`, `task.completed` and `task.failed` include the execution ID.
 - `approval.requested`: plan or additional high-risk approval; contains the exact approval ID and formatted plan.
 - `task.completed` / `task.failed`: terminal task result.
@@ -71,6 +71,6 @@ Event IDs are unique per runtime execution; task IDs remain the Python persisten
 - One submitted task executes at a time per runtime process. The process reads the next task only after the current task reaches a terminal state.
 - Approval waits are synchronous in this first bridge; the Python core remains the authority for plan and high-risk approval gates.
 - The existing Python orchestrator still executes logical subtasks sequentially. The Studio renders the actual subtask dependency board and one real Python executor; it does not fabricate parallel agents.
-- Default resource envelope: one active task per runtime, one active subtask, up to six planned subtasks, configured `max_iterations`, bounded command output, 500-file project snapshots, configured LLM/command timeouts, 8,000-character instructions and 256 KiB event messages.
+- Default resource envelope: one active task per runtime, one active subtask, up to six planned subtasks, configured `max_iterations`, bounded command output, 500-file project snapshots, configured LLM/command timeouts, 500-file project snapshots, 8,000-character instructions and 256 KiB event messages.
 - Cancellation, pause/resume commands, task snapshots, durable approval inbox recovery and concurrent submissions are not yet exposed through this protocol.
 - Do not add concurrency until resource budgets, workspace write-conflict checks, cancellation and recovery semantics are implemented in the Python scheduler.
