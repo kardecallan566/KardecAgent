@@ -29,6 +29,7 @@ function App() {
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string }>>([]);
   const [runtimeSubtasks, setRuntimeSubtasks] = useState<RuntimeSubtask[]>([]);
   const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
+  const [activeRuntimeStep, setActiveRuntimeStep] = useState<number | null>(null);
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
   const seenEventIds = useRef(new Set<string>());
@@ -62,12 +63,23 @@ function App() {
           setRuntimeSubtasks(board.subtasks);
           const running = board.subtasks.find((item: RuntimeSubtask) => item.status === "running");
           setActiveRuntimeSubtask(running?.id || null);
+          setActiveRuntimeStep(running?.plan_steps?.[0] || null);
         }
         if (coreType === "status_changed" && eventData.to_status) {
           setRuntimeTasks(items => items.map(task => (message.execution_id ? task.executionId === message.execution_id : task.id === message.task_id) ? { ...task, status: String(eventData.to_status) } : task));
         }
-        if (coreType === "subtask_started") setActiveRuntimeSubtask(eventData.subtask_id || null);
-        if (["subtask_completed", "subtask_failed", "subtask_blocked"].includes(coreType)) setActiveRuntimeSubtask(null);
+        if (coreType === "subtask_started") {
+          setActiveRuntimeSubtask(eventData.subtask_id || null);
+          setActiveRuntimeStep(eventData.plan_steps?.[0] || null);
+        }
+        if (coreType === "subtask_progress") {
+          setActiveRuntimeSubtask(eventData.subtask_id || null);
+          setActiveRuntimeStep(eventData.plan_step || null);
+        }
+        if (["subtask_completed", "subtask_failed", "subtask_blocked"].includes(coreType)) {
+          setActiveRuntimeSubtask(null);
+          setActiveRuntimeStep(null);
+        }
         setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
       } else if (message.type === "task.created") {
         setRuntimeBusy(true);
@@ -77,6 +89,7 @@ function App() {
         setRuntimeBusy(false);
         setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : "Falhou" } : task));
         setActiveRuntimeSubtask(null);
+        setActiveRuntimeStep(null);
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
         setPendingApproval(null);
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
@@ -90,6 +103,7 @@ function App() {
         setRuntimeBusy(false);
         setRuntimeSubtasks([]);
         setActiveRuntimeSubtask(null);
+        setActiveRuntimeStep(null);
         setRuntimeError(current => current || "O processo Python encerrou a conexão.");
       }
     });
@@ -138,6 +152,7 @@ function App() {
       setRuntimeTasks([]);
       setRuntimeSubtasks([]);
       setActiveRuntimeSubtask(null);
+      setActiveRuntimeStep(null);
       setRuntimeLimits(null);
       setRuntimeBusy(false);
       setPendingApproval(null);
@@ -250,7 +265,7 @@ function App() {
                   {runtimeSubtasks.map(subtask => <article className={`runtime-subtask-card status-${subtask.status}`} key={subtask.id}>
                     <div className="runtime-subtask-head"><span className="runtime-subtask-id">{subtask.id}</span><span className={`runtime-subtask-status status-${subtask.status}`}>{subtask.status === "running" ? "EM EXECUÇÃO" : subtask.status === "completed" ? "CONCLUÍDA" : subtask.status === "failed" ? "FALHOU" : subtask.status === "blocked" ? "BLOQUEADA" : "PENDENTE"}</span></div>
                     <strong>{subtask.title}</strong><p>{subtask.objective}</p>
-                    <div className="runtime-subtask-meta"><span>Dependências: {subtask.dependencies.length ? subtask.dependencies.join(", ") : "Nenhuma"}</span><span>Etapas aprovadas: {subtask.plan_steps.join(", ") || "—"}</span></div>
+                    <div className="runtime-subtask-meta"><span>Dependências: {subtask.dependencies.length ? subtask.dependencies.join(", ") : "Nenhuma"}</span><span>Etapas aprovadas: {subtask.plan_steps.join(", ") || "—"} · tentativas: {subtask.iterations}</span></div>
                     {subtask.scope.length > 0 && <div className="runtime-subtask-scope">{subtask.scope.slice(0, 3).join(" · ")}{subtask.scope.length > 3 ? ` · +${subtask.scope.length - 3}` : ""}</div>}
                     {subtask.result && <small className="runtime-subtask-result">{subtask.result}</small>}
                   </article>)}
@@ -259,7 +274,7 @@ function App() {
               <section className="agent-team">
                 <div className="process-section-title"><strong>Executor do runtime</strong><span>Estado real · sem agentes simulados</span></div>
                 <div className="runtime-executor-card">
-                  <span className={`runtime-executor-indicator ${runtimeBusy ? "busy" : "idle"}`}/><div><strong>Core Python · AgentLoop / Orchestrator</strong><small>{runtimeBusy ? activeRuntimeSubtask ? `Executando subtarefa ${activeRuntimeSubtask}` : "Planejando, aguardando aprovação ou executando tarefa" : "Ocioso · aguardando instrução"}</small></div>
+                  <span className={`runtime-executor-indicator ${runtimeBusy ? "busy" : "idle"}`}/><div><strong>Core Python · AgentLoop / Orchestrator</strong><small>{runtimeBusy ? activeRuntimeSubtask ? "Executando subtarefa " + activeRuntimeSubtask + (activeRuntimeStep ? " · etapa " + activeRuntimeStep : "") : "Planejando, aguardando aprovação ou executando tarefa" : "Ocioso · aguardando instrução"}</small></div>
                   <span className="runtime-executor-mode">{runtimeLimits?.execution_mode || "—"}</span>
                 </div>
               </section>
