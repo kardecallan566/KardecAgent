@@ -34,6 +34,7 @@ function App() {
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
   const seenEventIds = useRef(new Set<string>());
+  const approvalCommandId = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -103,8 +104,15 @@ function App() {
         setActiveRuntimeStep(null);
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
         setPendingApproval(null);
+      } else if (message.type === "command.accepted" && message.command_id === approvalCommandId.current) {
+        approvalCommandId.current = null;
+        setPendingApproval(null);
+        setRuntimeTasks(items => items.map(task => task.status === "Aguardando aprovação" ? { ...task, status: "Decisão enviada" } : task));
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
-        if (message.type === "command.rejected") setRuntimeBusy(false);
+        if (message.type === "command.rejected") {
+          if (message.command_id === approvalCommandId.current) approvalCommandId.current = null;
+          else setRuntimeBusy(false);
+        }
         setRuntimeError(message.message || message.reason || "Falha de comunicação com o runtime.");
       }
     });
@@ -170,6 +178,7 @@ function App() {
       setRuntimeBusy(false);
       setPendingApproval(null);
       seenEventIds.current.clear();
+      approvalCommandId.current = null;
       setRuntimeStatus("connecting");
       setRuntimeError(null);
       await invoke("stop_runtime").catch(() => undefined);
@@ -197,12 +206,16 @@ function App() {
   async function respondToApproval(decision: "approve" | "reject") {
     if (!pendingApproval) return;
     try {
+      const commandId = crypto.randomUUID();
+      approvalCommandId.current = commandId;
       await invoke("send_runtime_command", { message: {
-        type: "approval.respond", schema_version: 1, command_id: crypto.randomUUID(),
+        type: "approval.respond", schema_version: 1, command_id: commandId,
         payload: { approval_id: pendingApproval.approvalId, decision }
       }});
-      setPendingApproval(null);
-    } catch (error) { setRuntimeError(String(error)); }
+    } catch (error) {
+      approvalCommandId.current = null;
+      setRuntimeError(String(error));
+    }
   }
 
   return (
