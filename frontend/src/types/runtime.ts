@@ -72,3 +72,28 @@ export interface RuntimeSnapshot {
  * out-of-order delivery by comparing timestamp plus event_id.
  * Unknown event types/versions must be ignored safely by the UI.
  */
+
+export interface RuntimeSubtask {
+  id: string;
+  title: string;
+  objective: string;
+  status: "pending" | "running" | "completed" | "failed" | "blocked";
+  dependencies: string[];
+  scope: string[];
+  plan_steps: number[];
+  result?: string | null;
+  iterations: number;
+}
+
+export interface RuntimeLimits {
+  max_concurrent_tasks: number;
+  max_subtasks: number;
+  max_instruction_chars: number;
+  max_event_bytes: number;
+  execution_mode: "sequential" | "bounded_parallel";
+}
+
+export interface RuntimeBoardSnapshot {
+  subtasks: RuntimeSubtask[];
+  completed: boolean;
+}
