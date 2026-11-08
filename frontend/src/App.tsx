@@ -7,7 +7,7 @@ import {
   Activity, Bot, CheckCircle2, ChevronDown, CircleDot,
   Clock3, FileCode2, Files, Folder, GitBranch,
   ListTodo, Plus, Search, ShieldCheck, Workflow,
-  Zap, GitFork, Check, Circle, AlertCircle
+  Zap, GitFork, Circle, AlertCircle
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
