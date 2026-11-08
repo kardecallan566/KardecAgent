@@ -19,7 +19,7 @@ The bridge is JSON Lines over stdin/stdout:
 
 ## Commands
 
-Every command has `schema_version: 1` and a unique `command_id`.
+Every command has `schema_version: 1` and a unique `command_id`. The runtime keeps a bounded recent-command ledger and rejects repeated task submission IDs to avoid replaying a request.
 
 Submit an instruction to the central manager:
 
