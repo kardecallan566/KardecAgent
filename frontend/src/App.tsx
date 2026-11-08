@@ -4,10 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RuntimeLimits, RuntimeSubtask } from "./types/runtime";
 import {
-  Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
-  Clock3, FileCode2, Files, Folder, GitBranch, LayoutDashboard,
-  ListTodo, Plus, Search, ShieldCheck, TerminalSquare, Workflow,
-  Zap, Play, Pause, GitFork, Check, Circle, AlertCircle
+  Activity, Bot, CheckCircle2, ChevronDown, CircleDot,
+  Clock3, FileCode2, Files, Folder, GitBranch,
+  ListTodo, Plus, Search, ShieldCheck, Workflow,
+  Zap, GitFork, Check, Circle, AlertCircle
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
@@ -295,7 +295,7 @@ function App() {
                 <div className="inspector-section-head"><strong>Runtime Python</strong></div>
                 <div className="selected-agent-card"><div className={"agent-avatar-small " + (runtimeBusy ? "running" : "done")}><Bot size={15}/></div><div><strong>AgentLoop / Orchestrator</strong><small>{runtimeBusy ? "Ativo" : "Ocioso"} · {runtimeLimits?.execution_mode || "modo não informado"}</small></div></div>
                 <div className="inspector-note"><AlertCircle size={14}/><span>O núcleo atual utiliza um executor Python sequencial. Agentes concorrentes só serão exibidos quando existirem workers reais no runtime.</span></div>
-              </div>v>
+              </div>
             </div>
           ) : <>
             <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">{runtimeStatus === "online" ? "● Online" : runtimeStatus === "connecting" ? "● Conectando" : "● Offline"}</span></div>
