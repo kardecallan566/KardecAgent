@@ -255,6 +255,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
                 del seen_command_ids[next(iter(seen_command_ids))]
 
+            execution_id = None
+            identifier = requested_task_id
             try:
                 persisted = next(
                     (item for item in TaskStore(root).list_recent(limit=100) if item[0] == requested_task_id),
@@ -265,7 +267,6 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 _, persisted_state, _, _ = persisted
                 if persisted_state.status.value == "completed":
                     raise PersistenceError("Completed tasks cannot be resumed.")
-                identifier = requested_task_id
                 execution_id = str(uuid.uuid4())
                 _write({
                     "type": "command.accepted",
@@ -322,14 +323,16 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             except (BrokenPipeError, EOFError):
                 return 0
             except Exception as exc:
-                _write({
-                    "type": "task.failed",
-                    "schema_version": 1,
-                    "event_id": f"{requested_task_id}:{uuid.uuid4()}:resume-error",
-                    "task_id": requested_task_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "payload": {"message": str(exc), "recoverable": True, "resumed": True},
-                })
+                if execution_id is not None:
+                    _write({
+                        "type": "task.failed",
+                        "schema_version": 1,
+                        "event_id": f"{identifier}:{execution_id}:resume-error",
+                        "execution_id": execution_id,
+                        "task_id": identifier,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "payload": {"message": str(exc), "recoverable": True, "resumed": True},
+                    })
                 _write({"type": "runtime.error", "schema_version": 1, "task_id": requested_task_id, "message": str(exc)})
             continue
 
