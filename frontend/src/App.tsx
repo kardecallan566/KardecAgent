@@ -51,7 +51,7 @@ function App() {
         setRuntimeLimits(message.limits || null);
         setRuntimeError(null);
       } else if (message.type === "approval.requested") {
-        setRuntimeTasks(items => items.map(task => task.id === message.task_id ? { ...task, status: "Aguardando aprovação" } : task));
+        setRuntimeTasks(items => items.map(task => (message.execution_id ? task.executionId === message.execution_id : task.id === message.task_id) ? { ...task, status: "Aguardando aprovação" } : task));
         setPendingApproval({ approvalId: message.payload.approval_id, kind: message.payload.kind, summary: message.payload.summary, risk: message.payload.risk });
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: "Plano aguardando sua aprovação." }].slice(-100));
       } else if (message.type === "core.event") {
@@ -64,7 +64,7 @@ function App() {
           setActiveRuntimeSubtask(running?.id || null);
         }
         if (coreType === "status_changed" && eventData.to_status) {
-          setRuntimeTasks(items => items.map(task => task.id === message.task_id ? { ...task, status: String(eventData.to_status) } : task));
+          setRuntimeTasks(items => items.map(task => (message.execution_id ? task.executionId === message.execution_id : task.id === message.task_id) ? { ...task, status: String(eventData.to_status) } : task));
         }
         if (coreType === "subtask_started") setActiveRuntimeSubtask(eventData.subtask_id || null);
         if (["subtask_completed", "subtask_failed", "subtask_blocked"].includes(coreType)) setActiveRuntimeSubtask(null);
