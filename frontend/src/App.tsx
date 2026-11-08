@@ -93,11 +93,11 @@ function App() {
 
   async function openEntry(entry: ProjectEntry) {
     if (entry.is_dir) {
-      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectPath: entry.path })); setProjectError(null); }
+      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: projectRoot!, projectPath: entry.path })); setProjectError(null); }
       catch (error) { setProjectError(String(error)); }
       return;
     }
-    try { setFileContent(await invoke<string>("read_project_file", { filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }
+    try { setFileContent(await invoke<string>("read_project_file", { projectRoot: projectRoot!, filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }
     catch (error) { setProjectError(String(error)); }
   }
 
@@ -105,7 +105,7 @@ function App() {
     const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
     if (typeof selected !== "string") return;
     try {
-      const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectPath: selected });
+      const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
       setProjectRoot(selected);
       setProjectEntries(entries);
       setProjectError(null);
