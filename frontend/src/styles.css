@@ -199,3 +199,5 @@
 .runtime-plan-step.status-completed > small { color: #8bc5a7; }
 
 .task-mini svg.failed{color:#dc8290}
+
+.task-mini-content{min-width:0;flex:1}.task-mini-content>strong{overflow-wrap:anywhere}.task-resume-button{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:5px 7px;border:1px solid #51466f;border-radius:5px;background:#272333;color:#c9baff;font-size:10px}.task-resume-button:hover:not(:disabled){background:#342d46}.task-resume-button:disabled{opacity:.45;cursor:not-allowed}
