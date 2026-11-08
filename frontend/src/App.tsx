@@ -78,6 +78,7 @@ function App() {
       active = false;
       unlisten.then(stop => stop());
       streamClosed.then(stop => stop());
+      void invoke("stop_runtime").catch(() => undefined);
     };
   }, []);
 
@@ -101,6 +102,7 @@ function App() {
       setProjectError(null);
       setRuntimeStatus("connecting");
       setRuntimeError(null);
+      await invoke("stop_runtime").catch(() => undefined);
       await invoke("start_runtime", { projectPath: selected });
     } catch (error) {
       setProjectError(String(error));
