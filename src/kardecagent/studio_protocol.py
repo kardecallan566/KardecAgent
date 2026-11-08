@@ -141,6 +141,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             continue
 
         identifier = task_id(instruction, root)
+        execution_id = str(uuid.uuid4())
         _write({
             "type": "command.accepted",
             "schema_version": 1,
@@ -161,7 +162,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({
                 "type": "core.event",
                 "schema_version": 1,
-                "event_id": f"{identifier}:{event.sequence}",
+                "event_id": f"{identifier}:{execution_id}:{event.sequence}",
                 "task_id": identifier,
                 "timestamp": event.timestamp,
                 "payload": {
@@ -184,7 +185,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({
                 "type": "task.completed" if state.status.value == "completed" else "task.failed",
                 "schema_version": 1,
-                "event_id": f"{identifier}:terminal",
+                "event_id": f"{identifier}:{execution_id}:terminal",
                 "task_id": identifier,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {
