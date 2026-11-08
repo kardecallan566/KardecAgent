@@ -152,6 +152,8 @@ fn start_runtime(
         .args(["-m", "kardecagent.cli", "studio", "--project"])
         .arg(&root)
         .current_dir(&root)
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
