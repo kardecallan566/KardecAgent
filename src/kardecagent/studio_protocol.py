@@ -92,9 +92,13 @@ def _approval(
             _write({
                 "type": "command.rejected",
                 "schema_version": 1,
-                "command_id": message.get("command_id"),
+                "command_id": command_identifier,
                 "reason": "Only the matching approval response is accepted while approval is pending.",
             })
+            continue
+        command_identifier = message.get("command_id")
+        if not isinstance(command_identifier, str) or not command_identifier.strip():
+            _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
             continue
         payload = message.get("payload")
         payload = payload if isinstance(payload, dict) else {}
