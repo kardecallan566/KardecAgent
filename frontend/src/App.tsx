@@ -12,25 +12,12 @@ import {
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 type AgentRun = { id: string; name: string; role: string; task: string; status: "running" | "done" | "queued"; progress: number; output: string };
-type ProcessEvent = { id: string; time: string; kind: "info" | "success" | "warning"; agent: string; message: string };
 
 const agentRuns: AgentRun[] = [
   { id: "agent-orchestrator", name: "Orquestrador", role: "Coordenação", task: "Distribuir etapas e dependências", status: "done", progress: 100, output: "Plano de execução definido e dividido em três frentes." },
   { id: "agent-frontend", name: "Frontend", role: "Interface", task: "Construir componentes do Studio", status: "running", progress: 68, output: "Estrutura visual e painel de processos em implementação." },
   { id: "agent-runtime", name: "Runtime", role: "Integração Python", task: "Preparar eventos do runtime", status: "running", progress: 42, output: "Contrato de eventos em preparação; execução real ainda desconectada." },
   { id: "agent-review", name: "Revisor", role: "Qualidade", task: "Revisar alterações", status: "queued", progress: 0, output: "Aguardando a conclusão das frentes de implementação." }
-];
-
-const processEvents: ProcessEvent[] = [
-  { id: "evt-05", time: "12:43:49", kind: "info", agent: "Frontend", message: "Atualizando o inspetor de processos." },
-  { id: "evt-04", time: "12:43:22", kind: "success", agent: "Orquestrador", message: "Dependências das tarefas foram definidas." },
-  { id: "evt-03", time: "12:42:58", kind: "info", agent: "Runtime", message: "Contrato de eventos preparado para integração." }
-];
-
-const tasks = [
-  { id: "T-024", title: "Mapear arquitetura do projeto", status: "Concluído", tone: "done" },
-  { id: "T-025", title: "Criar shell desktop", status: "Em execução", tone: "active" },
-  { id: "T-026", title: "Conectar runtime Python", status: "Na fila", tone: "queued" }
 ];
 
 function App() {
@@ -50,6 +37,7 @@ function App() {
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
+  const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; title: string; status: string }>>([]);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
 
   useEffect(() => {
@@ -67,9 +55,11 @@ function App() {
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.payload.event_type, message: message.payload.message }].slice(-100));
       } else if (message.type === "task.created") {
         setRuntimeBusy(true);
+        setRuntimeTasks(items => [...items, { id: message.task_id, title: message.payload.title, status: "Em execução" }].slice(-50));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
       } else if (message.type === "task.completed" || message.type === "task.failed") {
         setRuntimeBusy(false);
+        setRuntimeTasks(items => items.map(task => task.id === message.task_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : "Falhou" } : task));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
         setPendingApproval(null);
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
@@ -184,7 +174,7 @@ function App() {
               <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
             </>
           ) : activeNav === "tasks" ? (
-            <div className="task-sidebar">{tasks.map(task => <div className="task-mini" key={task.id}><CircleDot className={task.tone}/><div><strong>{task.title}</strong><small>{task.id} · {task.status}</small></div></div>)}</div>
+            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.id}><CircleDot className={task.status === "Em execução" ? "active" : task.status === "Concluída" ? "done" : "queued"}/><div><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small></div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
           ) : activeNav === "approvals" ? (pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação pendente</strong><small>Solicitações do gestor aparecerão aqui.</small></div>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>
@@ -243,8 +233,8 @@ function App() {
                 <button className={`process-step ${selectedProcess === "review" ? "selected" : ""}`} onClick={() => setSelectedProcess("review")}><span className="step-state wait"><Clock3 size={12}/></span><div><strong>Revisão de alterações</strong><small>Dependência: Implementar UI</small></div><span className="step-duration">—</span></button>
               </div>
               <section className="process-events">
-                <div className="process-section-title"><strong>Eventos recentes</strong><span>Eventos ilustrativos · runtime real no painel do gestor</span></div>
-                {processEvents.map(event => <div className="process-event" key={event.id}><span className={"event-marker " + event.kind}/><time>{event.time}</time><strong>{event.agent}</strong><span>{event.message}</span></div>)}
+                <div className="process-section-title"><strong>Eventos recentes</strong><span>Eventos reais recebidos do core</span></div>
+                {runtimeEvents.length ? runtimeEvents.slice().reverse().slice(0, 12).map(event => <div className="process-event" key={event.id}><span className="event-marker info"/><time>Studio</time><strong>{event.type}</strong><span>{event.message}</span></div>) : <p className="manager-no-events">Nenhum evento recebido. Inicie uma tarefa pela área Agent.</p>}
               </section>
             </div>
           ) : (
