@@ -12,6 +12,22 @@ import {
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
+
+function taskStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "Pendente",
+    running: "Em execução",
+    verifying: "Validando",
+    verified: "Verificada",
+    completed: "Concluída",
+    failed: "Falhou",
+    max_iterations: "Limite de iterações",
+    recovering: "Recuperando",
+    resuming: "Retomando",
+  };
+  return labels[status] || status;
+}
+
 function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("explorer");
   const [selectedFile, setSelectedFile] = useState("App.tsx");
@@ -79,7 +95,7 @@ function App() {
           setActiveRuntimeStep(running?.plan_steps?.[0] || null);
         }
         if (coreType === "status_changed" && eventData.to_status) {
-          setRuntimeTasks(items => items.map(task => (message.execution_id ? task.executionId === message.execution_id : task.id === message.task_id) ? { ...task, status: String(eventData.to_status) } : task));
+          setRuntimeTasks(items => items.map(task => (message.execution_id ? task.executionId === message.execution_id : task.id === message.task_id) ? { ...task, status: taskStatusLabel(String(eventData.to_status)) } : task));
         }
         if (coreType === "subtask_started") {
           setActiveRuntimeSubtask(eventData.subtask_id || null);
@@ -270,7 +286,7 @@ function App() {
               <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
             </>
           ) : activeNav === "tasks" ? (
-            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" ? "active" : task.status === "Concluída" ? "done" : "queued"}/><div><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small></div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
+            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" ? "failed" : "queued"}/><div><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small></div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
           ) : activeNav === "approvals" ? (pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação pendente</strong><small>Solicitações do gestor aparecerão aqui.</small></div>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>
