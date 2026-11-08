@@ -12,15 +12,6 @@ import {
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
-type AgentRun = { id: string; name: string; role: string; task: string; status: "running" | "done" | "queued"; progress: number; output: string };
-
-const agentRuns: AgentRun[] = [
-  { id: "agent-orchestrator", name: "Orquestrador", role: "Coordenação", task: "Distribuir etapas e dependências", status: "done", progress: 100, output: "Plano de execução definido e dividido em três frentes." },
-  { id: "agent-frontend", name: "Frontend", role: "Interface", task: "Construir componentes do Studio", status: "running", progress: 68, output: "Estrutura visual e painel de processos em implementação." },
-  { id: "agent-runtime", name: "Runtime", role: "Integração Python", task: "Preparar eventos do runtime", status: "running", progress: 42, output: "Contrato de eventos em preparação; execução real ainda desconectada." },
-  { id: "agent-review", name: "Revisor", role: "Qualidade", task: "Revisar alterações", status: "queued", progress: 0, output: "Aguardando a conclusão das frentes de implementação." }
-];
-
 function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("explorer");
   const [selectedFile, setSelectedFile] = useState("App.tsx");
@@ -30,9 +21,6 @@ function App() {
   const [projectError, setProjectError] = useState<string | null>(null);
   const [openedPath, setOpenedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
-  const [selectedProcess, setSelectedProcess] = useState("implement");
-  const [selectedAgent, setSelectedAgent] = useState("agent-frontend");
-  const [expandedProcesses, setExpandedProcesses] = useState<string[]>(["implement"]);
   const [instructionDraft, setInstructionDraft] = useState("");
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
@@ -291,22 +279,23 @@ function App() {
             <div className="process-inspector">
               <div className="agent-header"><div><GitFork size={16}/><strong>Detalhes do processo</strong></div><span className="live-dot">INSPECTOR</span></div>
               <div className="inspector-content">
-                <span className="eyebrow">T-025 / ETAPA</span>
-                <h3>{({plan:"Planejamento",implement:"Implementar UI",structure:"Estrutura base",review:"Revisão de alterações",finish:"Finalização"} as Record<string,string>)[selectedProcess]}</h3>
-                <span className={`inspector-status status-${selectedProcess === "implement" ? "active" : selectedProcess === "plan" || selectedProcess === "structure" ? "done" : "wait"}`}>{selectedProcess === "implement" ? "EM EXECUÇÃO" : selectedProcess === "plan" || selectedProcess === "structure" ? "CONCLUÍDO" : "AGUARDANDO"}</span>
-                <div className="inspector-metrics"><div><small>AGENTE</small><strong>{selectedProcess === "plan" ? "Coordenador" : selectedProcess === "structure" ? "Frontend" : "Agente principal"}</strong></div><div><small>DURAÇÃO</small><strong>{selectedProcess === "plan" ? "18s" : selectedProcess === "structure" ? "34s" : selectedProcess === "implement" ? "02m 41s" : "—"}</strong></div></div>
+                <span className="eyebrow">RUNTIME / SUBTAREFAS</span>
+                {runtimeSubtasks.length ? <>
+                  <h3>{runtimeSubtasks.find(item => item.id === activeRuntimeSubtask)?.title || "Quadro de execução"}</h3>
+                  <span className="inspector-status status-active">{runtimeSubtasks.find(item => item.id === activeRuntimeSubtask)?.status || "planejado"}</span>
+                  <div className="inspector-divider"/>
+                  <div className="inspector-section-head"><strong>Dependências e escopo</strong></div>
+                  {runtimeSubtasks.map(item => <div className="runtime-inspector-item" key={item.id}>
+                    <strong>{item.id} · {item.title}</strong>
+                    <small>Estado: {item.status} · depende de: {item.dependencies.length ? item.dependencies.join(", ") : "nenhuma"}</small>
+                    <small>Escopo: {item.scope.length ? item.scope.join(", ") : "não informado"}</small>
+                  </div>)}
+                </> : <div className="runtime-graph-empty"><Workflow size={20}/><strong>Nenhum quadro de subtarefas recebido</strong><p>O inspetor será preenchido quando o gestor publicar a decomposição do plano aprovado.</p></div>}
                 <div className="inspector-divider"/>
-                <div className="inspector-section-head"><strong>Subprocessos</strong><button onClick={() => setExpandedProcesses(current => current.includes(selectedProcess) ? current.filter(id => id !== selectedProcess) : [...current, selectedProcess])}>{expandedProcesses.includes(selectedProcess) ? "Recolher" : "Expandir"} <ChevronDown size={12}/></button></div>
-                {expandedProcesses.includes(selectedProcess) ? <div className="subprocess-list"><div><span className="subprocess-dot complete"/><section><strong>{selectedProcess === "plan" ? "Analisar contexto" : "Preparar contexto"}</strong><small>Concluído · etapa interna</small></section><Check size={13}/></div><div><span className={`subprocess-dot ${selectedProcess === "implement" ? "running" : "queued"}`}/><section><strong>{selectedProcess === "implement" ? "Construir componentes" : "Validar dependências"}</strong><small>{selectedProcess === "implement" ? "Executando · agente frontend" : "Na fila"}</small></section>{selectedProcess === "implement" ? <span className="node-spinner"/> : <Clock3 size={13}/>}</div><div><span className="subprocess-dot queued"/><section><strong>Registrar resultados</strong><small>Dependente da etapa anterior</small></section><Clock3 size={13}/></div></div> : <p className="inspector-hint">Subprocessos recolhidos. Expanda para ver as atividades internas.</p>}
-                <div className="inspector-divider"/>
-                <div className="inspector-section-head"><strong>Agente selecionado</strong></div>
-                {agentRuns.filter(agent => agent.id === selectedAgent).map(agent => <div className="selected-agent-card" key={agent.id}><div className={"agent-avatar-small " + agent.status}><Bot size={15}/></div><div><strong>{agent.name}</strong><small>{agent.role} · {agent.status === "running" ? "Ativo" : agent.status === "done" ? "Concluído" : "Na fila"}</small></div></div>)}
-                <div className="inspector-output">{agentRuns.find(agent => agent.id === selectedAgent)?.output}</div>
-                <div className="inspector-divider"/>
-                <div className="inspector-section-head"><strong>Contexto e recursos</strong></div>
-                <div className="resource-row"><FileCode2 size={14}/><span>frontend/src/App.tsx</span></div><div className="resource-row"><Files size={14}/><span>Arquivos de interface</span></div>
-                <div className="inspector-note"><AlertCircle size={14}/><span>Grafo e cartões de agentes ainda são demonstrativos; lista de tarefas e timeline já recebem eventos do runtime Python.</span></div>
-              </div>
+                <div className="inspector-section-head"><strong>Runtime Python</strong></div>
+                <div className="selected-agent-card"><div className={"agent-avatar-small " + (runtimeBusy ? "running" : "done")}><Bot size={15}/></div><div><strong>AgentLoop / Orchestrator</strong><small>{runtimeBusy ? "Ativo" : "Ocioso"} · {runtimeLimits?.execution_mode || "modo não informado"}</small></div></div>
+                <div className="inspector-note"><AlertCircle size={14}/><span>O núcleo atual utiliza um executor Python sequencial. Agentes concorrentes só serão exibidos quando existirem workers reais no runtime.</span></div>
+              </div>v>
             </div>
           ) : <>
             <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">{runtimeStatus === "online" ? "● Online" : runtimeStatus === "connecting" ? "● Conectando" : "● Offline"}</span></div>
