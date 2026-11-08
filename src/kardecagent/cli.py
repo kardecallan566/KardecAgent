@@ -40,7 +40,7 @@ def build_parser():
     tasks.add_argument("--project", required=True)
     studio = subs.add_parser("studio", help="Run the JSONL desktop Studio runtime.")
     studio.add_argument("--project", required=True)
-    models = subs.add_parser("models", help="List installed Ollama models and a curated local catalog.")\n    models.add_argument("--installed-only", action="store_true", help="Show only models installed in Ollama.")\n    benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
+    models = subs.add_parser("models", help="List installed Ollama models and a curated local catalog.")\n    models.add_argument("--installed-only", action="store_true", help="Show only models installed in Ollama.")\n    models.add_argument("--inspect", default=None, help="Inspect metadata for an installed model tag.")\n    benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
     benchmark.add_argument("--timeout", type=float, default=180.0)
     benchmark.add_argument("--level", choices=("basic", "agentic"), default="agentic", help="Benchmark level (default: agentic).")
@@ -314,7 +314,7 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
     return 0
 
 
-def _models(settings: Settings, installed_only: bool = False) -> int:
+def _models(settings: Settings, installed_only: bool = False, inspect_model: str | None = None) -> int:
     if settings.llm_provider != "ollama":
         print("The installed-model inventory currently requires provider=ollama.")
         print(f"Configured provider: {settings.llm_provider}")
