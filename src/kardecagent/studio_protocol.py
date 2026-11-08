@@ -178,10 +178,11 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         _write({
             "type": "task.created",
             "schema_version": 1,
-            "event_id": str(uuid.uuid4()),
+            "event_id": f"{identifier}:{execution_id}:created",
+            "execution_id": execution_id,
             "task_id": identifier,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "payload": {"title": instruction},
+            "payload": {"title": instruction, "status": "running"},
         })
 
         def forward_event(event: AgentEvent) -> None:
@@ -212,6 +213,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "type": "task.completed" if state.status.value == "completed" else "task.failed",
                 "schema_version": 1,
                 "event_id": f"{identifier}:{execution_id}:terminal",
+                "execution_id": execution_id,
                 "task_id": identifier,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {
@@ -227,6 +229,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "type": "task.failed",
                 "schema_version": 1,
                 "event_id": f"{identifier}:{execution_id}:terminal-error",
+                "execution_id": execution_id,
                 "task_id": identifier,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {"message": str(exc), "recoverable": True},
