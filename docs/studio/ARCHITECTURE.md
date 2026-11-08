@@ -89,7 +89,8 @@ Every entity needs stable IDs, timestamps, schema versioning and explicit lifecy
 - [x] Typed JSONL commands, approval responses and event subscriptions.
 - [x] Stream plan steps and actual subtask board snapshots into the task map.
 - [x] Bounded startup restoration of the 20 most recently updated persisted tasks and their latest 100 events each.
-- [ ] Explicit resume actions, reconnect during an active child-process session and runtime shutdown/cancel commands.
+- [x] Explicit resume action for approved persisted tasks, with a fresh execution ID and live event forwarding.
+- [ ] Reconnect during an active child-process session and cooperative runtime shutdown/cancel commands.
 
 ### 4 — Task & execution observability
 - Task list/graph, timeline, status, output and change inspection.
@@ -135,6 +136,6 @@ The bridge accepts one task at a time and waits synchronously for approval respo
 
 ### Startup task restoration
 
-The Python runtime now queries the existing `TaskStore` once at startup and replays a bounded history into the Studio event stream (up to 20 tasks and 100 events per task). This reuses the core's atomic snapshots and hash-chained journals rather than introducing a second persistence system. Interrupted executions are labeled recoverable but are not resumed automatically; explicit user intent is required before any further project mutation. Pending approvals that were not yet durably persisted remain outside this restoration scope.
+The Python runtime now queries the existing `TaskStore` once at startup and replays a bounded history into the Studio event stream (up to 20 tasks and 100 events per task). This reuses the core's atomic snapshots and hash-chained journals rather than introducing a second persistence system. Interrupted executions are labeled recoverable but are not resumed automatically; explicit user intent is required before any further project mutation. Pending approvals that were not yet durably persisted remain outside this restoration scope. Recoverable task cards now expose an explicit **Retomar tarefa** action; the protocol validates the active project root and task ID, then calls the existing `AgentLoop.resume` path without creating a new plan or bypassing the original approval record. Resume events are streamed under a new execution ID.
 
 A GitHub Actions workflow now runs the Python test suite and the Studio TypeScript/Vite production build on pushes to the Studio branch and pull requests targeting the development branches. Local validation should still be performed before merging; workflow results are authoritative for the checked commit.
