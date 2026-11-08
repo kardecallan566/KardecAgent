@@ -79,6 +79,7 @@ function App() {
     const streamClosed = listen("runtime-stream-closed", () => {
       if (active) {
         setRuntimeStatus("offline");
+        setRuntimeBusy(false);
         setRuntimeError(current => current || "O processo Python encerrou a conexão.");
       }
     });
