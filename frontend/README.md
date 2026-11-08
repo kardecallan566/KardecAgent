@@ -15,7 +15,13 @@ npm run typecheck
 npm run desktop:build
 ```
 
-The current screen is a visual shell. Project opening, file operations, task execution, and approvals are intentionally not simulated: they will be connected to the Python core through a typed IPC contract in subsequent milestones.
+The Studio starts the Python core as a managed child process when a project is opened. The desktop bridge uses bounded JSON Lines messages over stdin/stdout; runtime events are forwarded to the UI without polling. Task instructions go to the central manager, and plan/high-risk approvals return through the same channel.
+
+Install the core into the Python environment used by the desktop process from the repository root with `python -m pip install -e .`.
+
+On macOS/Linux the default executable is `python3`; on Windows it is `python`. Set `KARDECAGENT_PYTHON` to an explicit interpreter path when needed. The runtime command is `python -m kardecagent.cli studio --project <path>`.
+
+The initial bridge intentionally handles one submitted task at a time. It waits for approval decisions and does not claim concurrent agent execution. The existing Python orchestrator remains sequential until bounded concurrency and file-conflict handling are implemented.
 
 ## Performance constraints
 
