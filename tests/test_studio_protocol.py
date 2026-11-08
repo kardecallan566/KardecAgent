@@ -50,7 +50,7 @@ def test_run_stdio_forwards_real_state_events_and_execution_identity(monkeypatch
 
         def run(self, root, instruction, *, event_callback, approval_callback, high_risk_approval_callback):
             event_callback(AgentEvent(1, "plan_created", "Plan created", {"steps": 2}, sequence=1))
-            return SimpleNamespace(status=TaskStatus.COMPLETED)
+            return SimpleNamespace(status=TaskStatus.COMPLETED, events=[])
 
     assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
