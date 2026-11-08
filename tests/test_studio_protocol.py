@@ -40,7 +40,7 @@ def test_run_stdio_forwards_real_state_events_and_execution_identity(monkeypatch
         "command_id": "command-1",
         "payload": {"instruction": "inspect this project", "project_root": str(tmp_path)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n" + json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
     monkeypatch.setattr(studio_protocol, "_approval", lambda *args, **kwargs: True)
@@ -48,17 +48,25 @@ def test_run_stdio_forwards_real_state_events_and_execution_identity(monkeypatch
     class FakeAgent:
         settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
 
+        def __init__(self):
+            self.calls = 0
+
         def run(self, root, instruction, *, event_callback, approval_callback, high_risk_approval_callback):
+            self.calls += 1
             event_callback(AgentEvent(1, "plan_created", "Plan created", {"steps": 2}, sequence=1))
             return SimpleNamespace(status=TaskStatus.COMPLETED, events=[])
 
-    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    fake_agent = FakeAgent()
+    assert studio_protocol.run_stdio(Path(tmp_path), fake_agent) == 0
+    assert fake_agent.calls == 1
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
     ready = next(item for item in messages if item["type"] == "runtime.ready")
     created = next(item for item in messages if item["type"] == "task.created")
     core_event = next(item for item in messages if item["type"] == "core.event")
     terminal = next(item for item in messages if item["type"] == "task.completed")
+    rejected = next(item for item in messages if item["type"] == "command.rejected")
 
+    assert rejected["reason"] == "command_id has already been processed."
     assert ready["limits"]["max_concurrent_tasks"] == 1
     assert ready["limits"]["max_concurrent_subtasks"] == 1
     assert created["execution_id"]
