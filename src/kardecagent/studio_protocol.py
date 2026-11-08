@@ -229,6 +229,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="plan"),
                 high_risk_approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="high_risk"),
             )
+            result_summary = (
+                state.events[-1].message if state.events
+                else f"Task ended with status {state.status.value}."
+            )
             _write({
                 "type": "task.completed" if state.status.value == "completed" else "task.failed",
                 "schema_version": 1,
@@ -237,8 +241,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "task_id": identifier,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {
-                    "result_summary": f"Task ended with status {state.status.value}.",
-                    "message": f"Task ended with status {state.status.value}.",
+                    "result_summary": result_summary,
+                    "message": result_summary,
                     "recoverable": state.status.value in {"failed", "max_iterations"},
                 },
             })
