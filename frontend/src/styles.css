@@ -201,3 +201,6 @@
 .task-mini svg.failed{color:#dc8290}
 
 .task-mini-content{min-width:0;flex:1}.task-mini-content>strong{overflow-wrap:anywhere}.task-resume-button{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:5px 7px;border:1px solid #51466f;border-radius:5px;background:#272333;color:#c9baff;font-size:10px}.task-resume-button:hover:not(:disabled){background:#342d46}.task-resume-button:disabled{opacity:.45;cursor:not-allowed}
+
+
+.event-search{width:100%;margin:10px 0 12px;padding:9px 11px;border:1px solid #393241;border-radius:6px;background:#17141d;color:#ddd4e7;font:11px inherit;outline:none}.event-search::placeholder{color:#81778c}.event-search:focus{border-color:#8065a3;box-shadow:0 0 0 2px rgba(128,101,163,.14)}
