@@ -91,6 +91,9 @@ export interface RuntimeLimits {
   max_concurrent_subtasks: number;
   max_llm_iterations: number;
   max_command_output_chars: number;
+  max_project_snapshot_files: number;
+  max_llm_timeout_seconds: number;
+  max_command_timeout_seconds: number;
   max_instruction_chars: number;
   max_event_bytes: number;
   execution_mode: "sequential" | "bounded_parallel";
