@@ -88,6 +88,9 @@ export interface RuntimeSubtask {
 export interface RuntimeLimits {
   max_concurrent_tasks: number;
   max_subtasks: number;
+  max_concurrent_subtasks: number;
+  max_llm_iterations: number;
+  max_command_output_chars: number;
   max_instruction_chars: number;
   max_event_bytes: number;
   execution_mode: "sequential" | "bounded_parallel";
