@@ -121,3 +121,10 @@ Every entity needs stable IDs, timestamps, schema versioning and explicit lifecy
 - Unbounded parallel agents.
 - A browser-based remote control plane.
 - Reimplementing controller, task state machine or safety logic in the frontend.
+
+
+## Runtime bridge implementation status
+
+The first desktop bridge is implemented in `src/kardecagent/studio_protocol.py` and `frontend/src-tauri/src/lib.rs`. Tauri manages a single Python child process, forwards JSONL stdout messages as runtime events, and sends typed commands through stdin. The Studio instruction composer submits to the central manager; plan and high-risk approval requests are shown in the Agent panel and resolved against their exact approval IDs.
+
+The bridge currently accepts one task at a time and waits synchronously for approval responses. `TaskState.record` forwards lifecycle events without changing the Python state machine or journal. This is deliberately a narrow first integration, not a concurrent multi-agent scheduler. The visual parallel lanes remain illustrative until the Python orchestrator has bounded concurrency, resource budgets and write-conflict protection.
