@@ -34,6 +34,7 @@ export interface RuntimeEventBase {
 }
 
 export type RuntimeEvent =
+  | (RuntimeEventBase & { type: "core.event"; payload: { event_type: string; message: string; data: Record<string, unknown>; sequence: number; iteration: number } })
   | (RuntimeEventBase & { type: "task.created"; payload: { title: string; parent_id?: string } })
   | (RuntimeEventBase & { type: "task.status_changed"; payload: { status: RuntimeStatus; reason?: string } })
   | (RuntimeEventBase & { type: "task.progress"; payload: { progress: number; message?: string } })
@@ -43,6 +44,22 @@ export type RuntimeEvent =
   | (RuntimeEventBase & { type: "resource.changed"; payload: { path: string; operation: "created" | "modified" | "deleted" } })
   | (RuntimeEventBase & { type: "task.completed"; payload: { result_summary?: string } })
   | (RuntimeEventBase & { type: "task.failed"; payload: { message: string; recoverable: boolean } });
+
+export interface RuntimeCommandBase {
+  command_id: string;
+  schema_version: 1;
+}
+
+export type RuntimeCommand =
+  | (RuntimeCommandBase & { type: "task.submit"; payload: { instruction: string; project_root: string } })
+  | (RuntimeCommandBase & { type: "approval.respond"; payload: { approval_id: string; decision: "approve" | "reject" } })
+  | (RuntimeCommandBase & { type: "task.cancel"; payload: { task_id: string } });
+
+export interface RuntimeCommandAccepted {
+  command_id: string;
+  accepted: boolean;
+  reason?: string;
+}
 
 export interface RuntimeSnapshot {
   schema_version: 1;
