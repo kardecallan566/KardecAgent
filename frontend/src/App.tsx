@@ -58,7 +58,7 @@ function App() {
           <div className="sidebar-heading"><span>{activeNav === "explorer" ? "EXPLORER" : activeNav.toUpperCase()}</span><button className="icon-button" title="Nova ação"><Plus size={15}/></button></div>
           {activeNav === "explorer" ? (
             <>
-              <div className="project-heading"><ChevronDown size={14}/><Folder size={15} className="folder-icon"/> {projectRoot ? projectRoot.split(/[\\\\/]/).filter(Boolean).pop() : "KARDECAGENT"}</div>
+              <div className="project-heading"><ChevronDown size={14}/><Folder size={15} className="folder-icon"/> {projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "KARDECAGENT"}</div>
               <div className="tree">
                 <div className="tree-row"><ChevronDown/><Folder/><span>frontend</span></div>
                 <div className="tree-row indent"><ChevronDown/><Folder/><span>src</span></div>
@@ -85,7 +85,7 @@ function App() {
               <p>Seu ambiente de desenvolvimento orientado por agentes.</p>
               <div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary"><Plus size={15}/> Nova tarefa</button></div>
               <div className="quick-grid">
-                <div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.split(/[\\\\/]/).filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div>
+                <div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div>
                 <div><span className="quick-label">RUNTIME</span><strong className="status-muted">Desconectado</strong><small>Core Python não iniciado</small></div>
               </div>
             </div>
