@@ -1,4 +1,6 @@
-import { useState } from "react";\nimport { invoke } from "@tauri-apps/api/core";\nimport { open } from "@tauri-apps/plugin-dialog";
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, GitBranch, LayoutDashboard,
@@ -6,7 +8,8 @@ import {
   Zap
 } from "lucide-react";
 
-type NavItem = "explorer" | "agent" | "tasks" | "approvals";\ntype ProjectEntry = { name: string; path: string; is_dir: boolean };
+type NavItem = "explorer" | "agent" | "tasks" | "approvals";
+type ProjectEntry = { name: string; path: string; is_dir: boolean };
 
 const tasks = [
   { id: "T-024", title: "Mapear arquitetura do projeto", status: "Concluído", tone: "done" },
@@ -17,7 +20,21 @@ const tasks = [
 function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("explorer");
   const [selectedFile, setSelectedFile] = useState("App.tsx");
-  const [bottomPanel, setBottomPanel] = useState("Atividades");\n  const [projectRoot, setProjectRoot] = useState<string | null>(null);\n  const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);\n  const [projectError, setProjectError] = useState<string | null>(null);\n\n  async function openProject() {\n    const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });\n    if (typeof selected !== "string") return;\n    try {\n      const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectPath: selected });\n      setProjectRoot(selected);\n      setProjectEntries(entries);\n      setProjectError(null);\n    } catch (error) { setProjectError(String(error)); }\n  }
+  const [bottomPanel, setBottomPanel] = useState("Atividades");
+  const [projectRoot, setProjectRoot] = useState<string | null>(null);
+  const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
+  const [projectError, setProjectError] = useState<string | null>(null);
+
+  async function openProject() {
+    const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
+    if (typeof selected !== "string") return;
+    try {
+      const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectPath: selected });
+      setProjectRoot(selected);
+      setProjectEntries(entries);
+      setProjectError(null);
+    } catch (error) { setProjectError(String(error)); }
+  }
 
   return (
     <main className="app-shell">
