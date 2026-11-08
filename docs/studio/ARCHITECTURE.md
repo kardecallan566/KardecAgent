@@ -13,6 +13,7 @@ The application must remain economical in CPU and RAM because local model infere
 - **Editor:** Monaco loaded only when an editor tab is opened; avoid eagerly mounting workers or multiple editor instances.
 - **Core:** existing Python package, launched/managed as a child process by the desktop shell. Do not duplicate business logic in TypeScript.
 - **Bridge:** versioned, typed IPC messages. Prefer request/response for commands and event streams for updates. Validate every payload at the boundary.
+- **Frontend contract:** `frontend/src/types/runtime.ts` defines the versioned snapshot, agent, task and event envelopes. It is a UI-facing contract only; the Python adapter and runtime transport still need to be connected.
 - **Persistence:** Python core owns durable task state and journal. UI stores only preferences/layout/session presentation state.
 - **Filesystem:** backend mediates project operations; enforce canonical paths, workspace boundaries and symlink policy. UI must not become a privileged filesystem executor.
 
@@ -25,6 +26,8 @@ The application must remain economical in CPU and RAM because local model infere
 5. File write conflicts are detected before concurrent edits; no implicit shared-write concurrency.
 6. Cancellation, pause, resume and recovery are explicit commands with observable outcomes.
 7. UI renders snapshots plus incremental events; it never polls at high frequency.
+   - Deduplicate events by `event_id`, tolerate out-of-order delivery, and ignore unknown schema versions/types safely.
+   - Keep event payloads compact; stream large output separately and paginate historical logs.
 8. Event subscriptions are lifecycle-managed and removed when panels/workspaces unmount.
 9. Logs/events are bounded, paginated and virtualized; never retain unbounded output in memory.
 10. Avoid background indexing, file watchers and syntax services until needed; debounce and cap them.
