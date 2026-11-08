@@ -144,7 +144,7 @@ def test_run_stdio_resumes_a_persisted_task_and_streams_new_events(monkeypatch, 
     assert len(resumed) == 1
     execution_id = resumed[0]["execution_id"]
     accepted = next(item for item in messages if item.get("command_id") == "resume-command")
-    history_event = next(item for item in messages if item["type"] == "core.event" and item["payload"].get("restored"))
+    history_event = next(item for item in messages if item["type"] == "core.event" and item.get("execution_id") == execution_id and item["payload"].get("restored"))
     streamed = next(item for item in messages if item["type"] == "core.event" and item["payload"].get("resumed"))
     terminal = next(item for item in messages if item["type"] == "task.completed" and item.get("execution_id") == execution_id)
 
