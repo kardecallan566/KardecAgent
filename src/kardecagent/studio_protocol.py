@@ -229,6 +229,110 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
             continue
 
+        if message.get("schema_version") == 1 and message.get("type") == "task.resume":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            requested_root = payload.get("project_root")
+            requested_task_id = payload.get("task_id")
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            try:
+                workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+            except (OSError, RuntimeError):
+                workspace_matches = False
+            if not workspace_matches:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "project_root does not match the active runtime workspace."})
+                continue
+            if not isinstance(requested_task_id, str) or not requested_task_id.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "task_id is required."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+
+            try:
+                persisted = next(
+                    (item for item in TaskStore(root).list_recent(limit=100) if item[0] == requested_task_id),
+                    None,
+                )
+                if persisted is None:
+                    raise PersistenceError("Persisted task was not found in the recent resumable history.")
+                _, persisted_state, _, _ = persisted
+                if persisted_state.status.value == "completed":
+                    raise PersistenceError("Completed tasks cannot be resumed.")
+                identifier = requested_task_id
+                execution_id = str(uuid.uuid4())
+                _write({
+                    "type": "command.accepted",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "accepted": True,
+                    "task_id": identifier,
+                })
+                _write({
+                    "type": "task.created",
+                    "schema_version": 1,
+                    "event_id": f"{identifier}:{execution_id}:resumed",
+                    "execution_id": execution_id,
+                    "task_id": identifier,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payload": {"title": persisted_state.task, "status": "running", "resumed": True},
+                })
+
+                def forward_resumed_event(event: AgentEvent) -> None:
+                    _write({
+                        "type": "core.event",
+                        "schema_version": 1,
+                        "event_id": f"{identifier}:{execution_id}:{event.sequence}",
+                        "execution_id": execution_id,
+                        "task_id": identifier,
+                        "timestamp": event.timestamp,
+                        "payload": {
+                            "event_type": event.event_type,
+                            "message": event.message,
+                            "data": event.data,
+                            "sequence": event.sequence,
+                            "iteration": event.iteration,
+                            "resumed": True,
+                        },
+                    })
+
+                state = agent.resume(root, persisted_state.task, event_callback=forward_resumed_event)
+                summary = state.events[-1].message if state.events else f"Task ended with status {state.status.value}."
+                completed = state.status.value == "completed"
+                _write({
+                    "type": "task.completed" if completed else "task.failed",
+                    "schema_version": 1,
+                    "event_id": f"{identifier}:{execution_id}:terminal",
+                    "execution_id": execution_id,
+                    "task_id": identifier,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payload": {
+                        "result_summary": summary,
+                        "message": summary,
+                        "recoverable": state.status.value in {"failed", "max_iterations", "recovering", "running", "verifying", "resuming"},
+                        "resumed": True,
+                    },
+                })
+            except (BrokenPipeError, EOFError):
+                return 0
+            except Exception as exc:
+                _write({
+                    "type": "task.failed",
+                    "schema_version": 1,
+                    "event_id": f"{requested_task_id}:{uuid.uuid4()}:resume-error",
+                    "task_id": requested_task_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payload": {"message": str(exc), "recoverable": True, "resumed": True},
+                })
+                _write({"type": "runtime.error", "schema_version": 1, "task_id": requested_task_id, "message": str(exc)})
+            continue
+
         if message.get("schema_version") != 1 or message.get("type") != "task.submit":
             _write({
                 "type": "command.rejected",
