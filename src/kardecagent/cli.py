@@ -314,7 +314,43 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
     return 0
 
 
-def _models(settings: Settings, installed_only: bool = False) -> int:\n    if settings.llm_provider != "ollama":\n        print("The installed-model inventory currently requires provider=ollama.")\n        print(f"Configured provider: {settings.llm_provider}")\n        return 1\n    client = OllamaClient(settings.ollama_base_url, settings.llm_model, settings.llm_timeout_seconds)\n    try:\n        installed = client.list_models()\n    except Exception as exc:\n        print(f"[FAIL] Ollama unavailable at {settings.ollama_base_url}: {exc}")\n        return 1\n    print(f"Ollama: connected ({settings.ollama_base_url})")\n    print(f"Configured model: {settings.llm_model}")\n    print("\\nInstalled models:")\n    if not installed:\n        print("  (none)")\n    for item in installed:\n        if isinstance(item, dict):\n            name = item.get("name", "unknown")\n            size = item.get("size")\n            size_text = f" | {size / (1024**3):.1f} GiB on disk" if isinstance(size, (int, float)) else ""\n            print(f"  - {name}{size_text}")\n    if installed_only:\n        return 0\n    print("\\nCurated local model candidates (indicative memory; benchmark before routing):")\n    names = {str(item.get("name", "")) for item in installed if isinstance(item, dict)}\n    for spec in LOCAL_MODEL_CATALOG:\n        marker = " [installed]" if spec.name in names else ""\n        print(f"  - {spec.name}{marker} | {spec.vram_gb} | {spec.role} | {spec.notes}")\n    print("\\nNote: model weights are not peak VRAM. Context/KV cache and runtime buffers add memory.")\n    return 0\n\n\ndef _tasks(root) -> int:
+def _models(settings: Settings, installed_only: bool = False) -> int:
+    if settings.llm_provider != "ollama":
+        print("The installed-model inventory currently requires provider=ollama.")
+        print(f"Configured provider: {settings.llm_provider}")
+        return 1
+    client = OllamaClient(settings.ollama_base_url, settings.llm_model, settings.llm_timeout_seconds)
+    try:
+        installed = client.list_models()
+    except Exception as exc:
+        print(f"[FAIL] Ollama unavailable at {settings.ollama_base_url}: {exc}")
+        return 1
+    print(f"Ollama: connected ({settings.ollama_base_url})")
+    print(f"Configured model: {settings.llm_model}")
+    print("\
+Installed models:")
+    if not installed:
+        print("  (none)")
+    for item in installed:
+        if isinstance(item, dict):
+            name = item.get("name", "unknown")
+            size = item.get("size")
+            size_text = f" | {size / (1024**3):.1f} GiB on disk" if isinstance(size, (int, float)) else ""
+            print(f"  - {name}{size_text}")
+    if installed_only:
+        return 0
+    print("\
+Curated local model candidates (indicative memory; benchmark before routing):")
+    names = {str(item.get("name", "")) for item in installed if isinstance(item, dict)}
+    for spec in LOCAL_MODEL_CATALOG:
+        marker = " [installed]" if spec.name in names else ""
+        print(f"  - {spec.name}{marker} | {spec.vram_gb} | {spec.role} | {spec.notes}")
+    print("\
+Note: model weights are not peak VRAM. Context/KV cache and runtime buffers add memory.")
+    return 0
+
+
+def _tasks(root) -> int:
     store = TaskStore(root)
     try:
         paths = sorted(store.directory.glob("*.json"))
