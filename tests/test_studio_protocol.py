@@ -104,3 +104,50 @@ def test_run_stdio_restores_persisted_task_history_without_resuming(monkeypatch,
     assert restored_event["payload"]["restored"] is True
     assert terminal["payload"]["recoverable"] is True
     assert "interrompida" in terminal["payload"]["message"].lower()
+
+
+def test_run_stdio_resumes_a_persisted_task_and_streams_new_events(monkeypatch, tmp_path):
+    persisted_state = SimpleNamespace(
+        task="resume this task",
+        status=TaskStatus.RUNNING,
+        events=[AgentEvent(1, "plan_created", "Previously approved plan", {}, sequence=1)],
+    )
+    fake_store = SimpleNamespace(
+        list_recent=lambda limit: [("persisted-task-id", persisted_state, None, None)]
+    )
+    monkeypatch.setattr(studio_protocol, "TaskStore", lambda root: fake_store)
+    command = {
+        "type": "task.resume",
+        "schema_version": 1,
+        "command_id": "resume-command",
+        "payload": {"task_id": "persisted-task-id", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+        def resume(self, root, task, *, event_callback=None):
+            assert task == "resume this task"
+            event = AgentEvent(2, "resume_started", "Resume started", {}, sequence=2)
+            event_callback(event)
+            return SimpleNamespace(
+                status=TaskStatus.COMPLETED,
+                events=[persisted_state.events[0], event],
+            )
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    resumed = [item for item in messages if item["type"] == "task.created" and item.get("payload", {}).get("resumed")]
+    assert len(resumed) == 1
+    execution_id = resumed[0]["execution_id"]
+    accepted = next(item for item in messages if item.get("command_id") == "resume-command")
+    streamed = next(item for item in messages if item["type"] == "core.event" and item["payload"].get("resumed"))
+    terminal = next(item for item in messages if item["type"] == "task.completed" and item.get("execution_id") == execution_id)
+
+    assert accepted["type"] == "command.accepted"
+    assert streamed["execution_id"] == execution_id
+    assert streamed["payload"]["event_type"] == "resume_started"
+    assert terminal["payload"]["resumed"] is True
