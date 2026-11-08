@@ -81,6 +81,9 @@ function App() {
         if (coreType === "plan_created" && Array.isArray(eventData.plan?.steps)) {
           setRuntimePlanSteps(eventData.plan.steps.map((title: string, index: number) => ({ step: index + 1, title, status: "pending" })));
         }
+        if ((coreType === "plan_step_started" || coreType === "subtask_started") && message.execution_id) {
+          setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: "Em execução" } : task));
+        }
         if (coreType === "plan_step_started" && Number.isInteger(eventData.step)) {
           setActiveRuntimeStep(eventData.step);
           setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "running" } : item));
