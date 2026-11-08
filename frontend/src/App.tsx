@@ -65,9 +65,8 @@ function App() {
                 <button className={selectedFile === "App.tsx" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("App.tsx")}><FileCode2/><span>App.tsx</span></button>
                 <button className={selectedFile === "main.tsx" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("main.tsx")}><FileCode2/><span>main.tsx</span></button>
                 <button className={selectedFile === "styles.css" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("styles.css")}><FileCode2/><span>styles.css</span></button>
-                <div className="tree-row"><ChevronRight/><Folder/><span>src (Python)</span></div>
-                <div className="tree-row"><ChevronRight/><Folder/><span>tests</span></div>
-                <div className="tree-row file"><FileCode2/><span>README.md</span></div>
+                {projectEntries.map(entry => <div className="tree-row file" key={entry.path} title={entry.path}>{entry.is_dir ? <Folder/> : <FileCode2/>}<span>{entry.name}</span></div>)}
+                {projectError && <div className="tree-row" role="alert">{projectError}</div>}
               </div>
               <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
             </>
