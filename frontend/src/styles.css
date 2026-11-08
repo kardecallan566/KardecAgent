@@ -33,3 +33,40 @@
 .process-bottom{border:1px solid #292c35;border-radius:8px;background:#17191f;padding:13px 15px}.process-section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.process-section-title strong{font-size:11px;color:#d6d9e2}.process-section-title span{font-size:9px;color:#777e8c}
 .process-step{display:flex;align-items:center;gap:10px;padding:10px 8px;border-top:1px solid #282b33}.process-step.selected{background:#24212f;border-radius:6px;border-top-color:transparent}.step-state{width:21px;height:21px;border-radius:50%;display:grid;place-items:center;flex-shrink:0}.step-state.done{background:#20352e;color:#65bd99}.step-state.active{background:#39304f;color:#b4a1ff}.step-state.wait{background:#302c26;color:#d0a96c}.process-step strong{display:block;font-size:10px;font-weight:550;color:#d4d8e1}.process-step small{display:block;font-size:9px;color:#7c8391;margin-top:4px}.step-duration{margin-left:auto;font-size:10px;color:#9d89f0;font-variant-numeric:tabular-nums}
 @media(max-width:1100px){.process-dashboard{padding:16px}.flow-node{width:150px}.node-root{left:4%}.node-active{left:37%}.node-wait{left:37%}.node-final{left:70%}.line-a{left:calc(4% + 150px);width:calc(33% - 150px)}.line-c{left:calc(37% + 150px);width:calc(33% - 150px)}}
+
+/* Interactive process graph and inspector */
+.flow-node{font:inherit;color:inherit;text-align:left;cursor:pointer;transition:border-color .16s ease,background .16s ease,box-shadow .16s ease}
+.flow-node:hover{border-color:#71609f;background:#282536}
+.flow-node.node-selected{outline:1px solid #a18bf4;outline-offset:2px}
+.process-step{width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;transition:background .15s ease}
+.process-step:hover{background:#20222a}
+.process-inspector{height:100%;display:flex;flex-direction:column;min-height:0}
+.process-inspector .agent-header{flex-shrink:0}
+.inspector-content{padding:18px 15px;overflow:auto}
+.inspector-content h3{font-size:16px;line-height:1.35;margin:8px 0 10px;color:#e8eaf1;font-weight:650}
+.inspector-status{display:inline-flex;border-radius:10px;padding:4px 7px;font-size:8px;letter-spacing:.7px;font-weight:700}
+.status-active{background:#302842;color:#b6a4ff;border:1px solid #51416f}
+.status-done{background:#20352e;color:#72cba7;border:1px solid #345a4b}
+.status-wait{background:#342e24;color:#d5b47d;border:1px solid #594a32}
+.inspector-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:18px}
+.inspector-metrics>div{padding:10px;background:#202229;border:1px solid #30333d;border-radius:6px;min-width:0}
+.inspector-metrics small{display:block;font-size:8px;letter-spacing:.8px;color:#777f8e;margin-bottom:7px}
+.inspector-metrics strong{font-size:10px;color:#d4d8e1;font-weight:550;overflow-wrap:anywhere}
+.inspector-divider{height:1px;background:#2b2e37;margin:17px 0}
+.inspector-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.inspector-section-head strong{font-size:10px;color:#d8dbe4}
+.inspector-section-head button{display:flex;align-items:center;gap:4px;color:#a994f4;font-size:9px}
+.subprocess-list{display:flex;flex-direction:column;gap:0}
+.subprocess-list>div{display:flex;align-items:center;gap:8px;padding:10px 5px;border-bottom:1px solid #292c35}
+.subprocess-list section{flex:1;min-width:0}
+.subprocess-list strong{display:block;font-size:9px;color:#cfd3dd;font-weight:550}
+.subprocess-list small{display:block;font-size:8px;color:#7e8593;margin-top:4px}
+.subprocess-list>div>svg{color:#818897;flex-shrink:0}
+.subprocess-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:#636a78}
+.subprocess-dot.complete{background:#65bd99}.subprocess-dot.running{background:#a18bf4;box-shadow:0 0 0 3px #a18bf422}.subprocess-dot.queued{background:#c49d64}
+.inspector-hint{font-size:9px;color:#818896;line-height:1.6;margin:0}
+.resource-row{display:flex;align-items:center;gap:8px;padding:8px 0;color:#aeb4c1;font-size:9px}
+.resource-row svg{color:#9b8be0}
+.inspector-note{display:flex;align-items:flex-start;gap:7px;margin-top:17px;padding:10px;border:1px solid #393344;background:#211e29;border-radius:6px;color:#938aa9;font-size:9px;line-height:1.55}
+.inspector-note svg{flex-shrink:0;color:#b39aee}
+@media(max-width:1100px){.inspector-content{padding:13px 11px}.process-inspector .agent-header{padding:0 9px}}
