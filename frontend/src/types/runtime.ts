@@ -103,3 +103,9 @@ export interface RuntimeBoardSnapshot {
   subtasks: RuntimeSubtask[];
   completed: boolean;
 }
+
+export interface RuntimePlanStep {
+  step: number;
+  title: string;
+  status: "pending" | "running" | "completed";
+}
