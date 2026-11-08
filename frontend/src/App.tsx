@@ -38,12 +38,24 @@ function App() {
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
-  const [projectError, setProjectError] = useState<string | null>(null);\n  const [openedPath, setOpenedPath] = useState<string | null>(null);\n  const [fileContent, setFileContent] = useState<string>("");
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [openedPath, setOpenedPath] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string>("");
   const [selectedProcess, setSelectedProcess] = useState("implement");
   const [selectedAgent, setSelectedAgent] = useState("agent-frontend");
   const [expandedProcesses, setExpandedProcesses] = useState<string[]>(["implement"]);
 
-  async function openEntry(entry: ProjectEntry) {\n    if (entry.is_dir) {\n      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectPath: entry.path })); setProjectError(null); }\n      catch (error) { setProjectError(String(error)); }\n      return;\n    }\n    try { setFileContent(await invoke<string>("read_project_file", { filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }\n    catch (error) { setProjectError(String(error)); }\n  }\n\n  async function openProject() {
+  async function openEntry(entry: ProjectEntry) {
+    if (entry.is_dir) {
+      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectPath: entry.path })); setProjectError(null); }
+      catch (error) { setProjectError(String(error)); }
+      return;
+    }
+    try { setFileContent(await invoke<string>("read_project_file", { filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }
+    catch (error) { setProjectError(String(error)); }
+  }
+
+  async function openProject() {
     const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
     if (typeof selected !== "string") return;
     try {
