@@ -42,7 +42,7 @@ function App() {
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
-  const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string }>>([]);
+  const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string; recoverable?: boolean }>>([]);
   const [runtimeSubtasks, setRuntimeSubtasks] = useState<RuntimeSubtask[]>([]);
   const [runtimePlanSteps, setRuntimePlanSteps] = useState<RuntimePlanStep[]>([]);
   const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
@@ -120,11 +120,11 @@ function App() {
         setRuntimePlanSteps([]);
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
-        setRuntimeTasks(items => [...items, { id: message.task_id, executionId: message.execution_id, title: message.payload.title, status: "Recebida" }].slice(-50));
+        setRuntimeTasks(items => [...items, { id: message.task_id, executionId: message.execution_id, title: message.payload.title, status: message.payload?.resumed ? "Retomando" : message.payload?.restored ? "Restaurada" : "Recebida", recoverable: false }].slice(-50));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
       } else if (message.type === "task.completed" || message.type === "task.failed") {
         setRuntimeBusy(false);
-        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : message.payload?.recoverable ? "Recuperável" : "Falhou" } : task));
+        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : message.payload?.recoverable ? "Recuperável" : "Falhou", recoverable: message.type === "task.failed" && Boolean(message.payload?.recoverable) } : task));
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
@@ -236,6 +236,21 @@ function App() {
     } catch (error) { setRuntimeError(String(error)); }
   }
 
+  async function resumeTask(task: { id: string; title: string }) {
+    if (!projectRoot || runtimeStatus !== "online" || runtimeBusy) return;
+    try {
+      await invoke("send_runtime_command", { message: {
+        type: "task.resume", schema_version: 1, command_id: crypto.randomUUID(),
+        payload: { task_id: task.id, project_root: projectRoot }
+      }});
+      setRuntimeBusy(true);
+      setRuntimeError(null);
+      setRuntimeEvents(items => [...items, { id: crypto.randomUUID(), type: "task.resume.requested", message: `Solicitada retomada: ${task.title}` }].slice(-100));
+    } catch (error) {
+      setRuntimeError(String(error));
+    }
+  }
+
   async function respondToApproval(decision: "approve" | "reject") {
     if (!pendingApproval) return;
     try {
@@ -290,7 +305,7 @@ function App() {
               <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
             </>
           ) : activeNav === "tasks" ? (
-            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small></div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
+            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
           ) : activeNav === "approvals" ? (pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação pendente</strong><small>Solicitações do gestor aparecerão aqui.</small></div>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>
