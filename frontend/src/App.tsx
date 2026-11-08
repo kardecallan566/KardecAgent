@@ -33,6 +33,7 @@ function App() {
   const [activeRuntimeStep, setActiveRuntimeStep] = useState<number | null>(null);
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const seenEventIds = useRef(new Set<string>());
   const approvalCommandId = useRef<string | null>(null);
 
@@ -106,12 +107,15 @@ function App() {
         setPendingApproval(null);
       } else if (message.type === "command.accepted" && message.command_id === approvalCommandId.current) {
         approvalCommandId.current = null;
+        setApprovalSubmitting(false);
         setPendingApproval(null);
         setRuntimeTasks(items => items.map(task => task.status === "Aguardando aprovação" ? { ...task, status: "Decisão enviada" } : task));
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
         if (message.type === "command.rejected") {
-          if (message.command_id === approvalCommandId.current) approvalCommandId.current = null;
-          else setRuntimeBusy(false);
+          if (message.command_id === approvalCommandId.current) {
+            approvalCommandId.current = null;
+            setApprovalSubmitting(false);
+          } else setRuntimeBusy(false);
         }
         setRuntimeError(message.message || message.reason || "Falha de comunicação com o runtime.");
       }
@@ -208,12 +212,14 @@ function App() {
     try {
       const commandId = crypto.randomUUID();
       approvalCommandId.current = commandId;
+      setApprovalSubmitting(true);
       await invoke("send_runtime_command", { message: {
         type: "approval.respond", schema_version: 1, command_id: commandId,
         payload: { approval_id: pendingApproval.approvalId, decision }
       }});
     } catch (error) {
       approvalCommandId.current = null;
+      setApprovalSubmitting(false);
       setRuntimeError(String(error));
     }
   }
@@ -371,7 +377,7 @@ function App() {
               <div className="approval-prompt-head"><ShieldCheck size={18}/><strong>{pendingApproval.kind === "high_risk" ? "Aprovação adicional de alto risco" : "Aprovar plano de execução"}</strong></div>
               <span className="approval-risk">RISCO: {pendingApproval.risk.toUpperCase()}</span>
               <pre>{pendingApproval.summary}</pre>
-              <div className="approval-actions"><button onClick={() => respondToApproval("reject")} className="approval-reject">Rejeitar</button><button onClick={() => respondToApproval("approve")} className="approval-accept">Aprovar execução</button></div>
+              <div className="approval-actions"><button onClick={() => respondToApproval("reject")} className="approval-reject" disabled={approvalSubmitting}>Rejeitar</button><button onClick={() => respondToApproval("approve")} className="approval-accept" disabled={approvalSubmitting}>{approvalSubmitting ? "Enviando..." : "Aprovar execução"}</button></div>
             </div> : <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>}
             <div className="agent-composer">
               <label htmlFor="manager-instruction">Instrução para o gestor</label>
