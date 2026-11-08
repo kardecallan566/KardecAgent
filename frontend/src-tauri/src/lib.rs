@@ -2,7 +2,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, ErrorKind, Write},
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::Mutex,
@@ -15,6 +15,48 @@ struct ProjectEntry {
     name: String,
     path: String,
     is_dir: bool,
+}
+
+const MAX_RUNTIME_LINE_BYTES: usize = 256 * 1024 + 1;
+const MAX_RUNTIME_LOG_BYTES: usize = 8 * 1024;
+
+fn read_bounded_line<R: BufRead>(reader: &mut R, limit: usize) -> std::io::Result<Option<Vec<u8>>> {
+    let mut line = Vec::with_capacity(4096);
+    let mut overflow = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            if line.is_empty() && !overflow {
+                return Ok(None);
+            }
+            break;
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        if !overflow {
+            let remaining = limit.saturating_sub(line.len());
+            if consumed > remaining {
+                line.extend_from_slice(&available[..remaining]);
+                overflow = true;
+            } else {
+                line.extend_from_slice(&available[..consumed]);
+            }
+        }
+        reader.consume(consumed);
+        if newline.is_some() {
+            break;
+        }
+    }
+    if overflow {
+        return Err(std::io::Error::new(ErrorKind::InvalidData, "runtime line exceeded its byte limit"));
+    }
+    if line.last() == Some(&b'\n') {
+        line.pop();
+    }
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+    Ok(Some(line))
 }
 
 struct RuntimeProcess {
@@ -122,18 +164,23 @@ fn start_runtime(
 
     let stdout_app = app.clone();
     thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            match line {
-                Ok(line) => {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            match read_bounded_line(&mut reader, MAX_RUNTIME_LINE_BYTES) {
+                Ok(Some(bytes)) => {
+                    let line = String::from_utf8_lossy(&bytes);
                     if let Ok(message) = serde_json::from_str::<Value>(&line) {
                         let _ = stdout_app.emit("runtime-message", message);
                     } else {
-                        let _ = stdout_app.emit("runtime-protocol-error", line);
+                        let _ = stdout_app.emit("runtime-protocol-error", line.to_string());
                     }
                 }
+                Ok(None) => break,
                 Err(error) => {
                     let _ = stdout_app.emit("runtime-protocol-error", error.to_string());
-                    break;
+                    if error.kind() != ErrorKind::InvalidData {
+                        break;
+                    }
                 }
             }
         }
@@ -142,8 +189,21 @@ fn start_runtime(
 
     let stderr_app = app.clone();
     thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().flatten() {
-            let _ = stderr_app.emit("runtime-stderr", line);
+        let mut reader = BufReader::new(stderr);
+        loop {
+            match read_bounded_line(&mut reader, MAX_RUNTIME_LOG_BYTES) {
+                Ok(Some(bytes)) => {
+                    let line = String::from_utf8_lossy(&bytes).into_owned();
+                    let _ = stderr_app.emit("runtime-stderr", line);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = stderr_app.emit("runtime-stderr", error.to_string());
+                    if error.kind() != ErrorKind::InvalidData {
+                        break;
+                    }
+                }
+            }
         }
     });
 
