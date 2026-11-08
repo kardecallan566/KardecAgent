@@ -90,6 +90,7 @@ function App() {
         }
         if (coreType === "plan_step_completed" && Number.isInteger(eventData.step)) {
           setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "completed" } : item));
+          setActiveRuntimeStep(null);
         }
         if (board && Array.isArray(board.subtasks)) {
           setRuntimeSubtasks(board.subtasks);
