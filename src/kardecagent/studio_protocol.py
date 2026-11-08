@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from .agent.loop import AgentLoop
 from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
-from .agent.persistence import task_id
+from .agent.persistence import TaskStore, task_id
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -84,6 +84,72 @@ def _approval(
             "risk": risk,
         },
     })
+
+    # Restore a bounded view of persisted work before accepting new commands.
+    # Restored executions are historical UI records; they are never resumed
+    # automatically and therefore cannot unexpectedly modify project files.
+    try:
+        persisted_tasks = TaskStore(root).list_recent(limit=20)
+    except Exception as exc:
+        persisted_tasks = []
+        _write({"type": "runtime.warning", "schema_version": 1,
+                "message": f"Could not restore task history: {exc}"})
+
+    for persisted_id, persisted_state, _plan, _board in reversed(persisted_tasks):
+        last_sequence = persisted_state.events[-1].sequence if persisted_state.events else 0
+        restored_execution_id = f"restored:{persisted_id}:{last_sequence}"
+        _write({
+            "type": "task.created",
+            "schema_version": 1,
+            "event_id": f"{restored_execution_id}:created",
+            "execution_id": restored_execution_id,
+            "task_id": persisted_id,
+            "timestamp": persisted_state.events[0].timestamp if persisted_state.events else datetime.now(timezone.utc).isoformat(),
+            "payload": {"title": persisted_state.task, "status": "restored", "restored": True},
+        })
+        for event in persisted_state.events[-100:]:
+            _write({
+                "type": "core.event",
+                "schema_version": 1,
+                "event_id": f"{restored_execution_id}:{event.sequence}",
+                "execution_id": restored_execution_id,
+                "task_id": persisted_id,
+                "timestamp": event.timestamp,
+                "payload": {
+                    "event_type": event.event_type,
+                    "message": event.message,
+                    "data": event.data,
+                    "sequence": event.sequence,
+                    "iteration": event.iteration,
+                    "restored": True,
+                },
+            })
+
+        if persisted_state.status.value == "completed":
+            _write({
+                "type": "task.completed",
+                "schema_version": 1,
+                "event_id": f"{restored_execution_id}:terminal",
+                "execution_id": restored_execution_id,
+                "task_id": persisted_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": {"result_summary": "Tarefa concluída e restaurada do histórico.", "restored": True},
+            })
+        else:
+            interrupted = persisted_state.status.value in {"running", "verifying", "resuming", "recovering"}
+            _write({
+                "type": "task.failed",
+                "schema_version": 1,
+                "event_id": f"{restored_execution_id}:terminal",
+                "execution_id": restored_execution_id,
+                "task_id": persisted_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": {
+                    "message": "Execução interrompida antes de encerrar. A tarefa permanece disponível para recuperação." if interrupted else f"Tarefa encerrada com estado {persisted_state.status.value}.",
+                    "recoverable": persisted_state.status.value in {"running", "verifying", "resuming", "recovering", "failed", "max_iterations"},
+                    "restored": True,
+                },
+            })
 
     while True:
         try:
