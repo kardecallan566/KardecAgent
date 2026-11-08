@@ -24,6 +24,8 @@ function App() {
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
   const [projectError, setProjectError] = useState<string | null>(null);\n  const [openedPath, setOpenedPath] = useState<string | null>(null);\n  const [fileContent, setFileContent] = useState<string>("");
+  const [selectedProcess, setSelectedProcess] = useState("implement");
+  const [expandedProcesses, setExpandedProcesses] = useState<string[]>(["implement"]);
 
   async function openEntry(entry: ProjectEntry) {\n    if (entry.is_dir) {\n      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectPath: entry.path })); setProjectError(null); }\n      catch (error) { setProjectError(String(error)); }\n      return;\n    }\n    try { setFileContent(await invoke<string>("read_project_file", { filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }\n    catch (error) { setProjectError(String(error)); }\n  }\n\n  async function openProject() {
     const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
@@ -85,14 +87,19 @@ function App() {
                 <div className="flow-grid"/>
                 <div className="flow-label">T-025 · Criar shell desktop <span className="pill-running">EM EXECUÇÃO</span></div>
                 <div className="flow-line line-a"/><div className="flow-line line-b"/><div className="flow-line line-c"/><div className="flow-line line-d"/>
-                <div className="flow-node node-root"><div className="node-icon"><Workflow size={16}/></div><div><strong>Planejamento</strong><small>Plano definido</small></div><Check size={14} className="node-check"/></div>
-                <div className="flow-node node-active"><div className="node-icon"><Bot size={16}/></div><div><strong>Implementar UI</strong><small>Agente principal · 68%</small></div><span className="node-spinner"/></div>
-                <div className="flow-node node-done"><div className="node-icon"><FileCode2 size={16}/></div><div><strong>Estrutura base</strong><small>Concluído · 34s</small></div><Check size={14} className="node-check"/></div>
-                <div className="flow-node node-wait"><div className="node-icon"><ShieldCheck size={16}/></div><div><strong>Revisão</strong><small>Aguardando etapa anterior</small></div><Clock3 size={14} className="node-clock"/></div>
-                <div className="flow-node node-final"><div className="node-icon"><CheckCircle2 size={16}/></div><div><strong>Finalização</strong><small>Na fila</small></div></div>
+                <button className={`flow-node node-root ${selectedProcess === "plan" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("plan")}><div className="node-icon"><Workflow size={16}/></div><div><strong>Planejamento</strong><small>Plano definido</small></div><Check size={14} className="node-check"/></button>
+                <button className={`flow-node node-active ${selectedProcess === "implement" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("implement")}><div className="node-icon"><Bot size={16}/></div><div><strong>Implementar UI</strong><small>Agente principal · 68%</small></div><span className="node-spinner"/></button>
+                <button className={`flow-node node-done ${selectedProcess === "structure" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("structure")}><div className="node-icon"><FileCode2 size={16}/></div><div><strong>Estrutura base</strong><small>Concluído · 34s</small></div><Check size={14} className="node-check"/></button>
+                <button className={`flow-node node-wait ${selectedProcess === "review" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("review")}><div className="node-icon"><ShieldCheck size={16}/></div><div><strong>Revisão</strong><small>Aguardando etapa anterior</small></div><Clock3 size={14} className="node-clock"/></button>
+                <button className={`flow-node node-final ${selectedProcess === "finish" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("finish")}><div className="node-icon"><CheckCircle2 size={16}/></div><div><strong>Finalização</strong><small>Na fila</small></div></button>
                 <div className="canvas-legend"><span><i className="legend-dot done"/> Concluído</span><span><i className="legend-dot active"/> Em execução</span><span><i className="legend-dot wait"/> Aguardando</span></div>
               </div>
-              <div className="process-bottom"><div className="process-section-title"><strong>Etapas da execução</strong><span>4 etapas · ordenadas por dependência</span></div><div className="process-step"><span className="step-state done"><Check size={13}/></span><div><strong>Planejamento e decomposição</strong><small>Agente coordenador · 12:41:08</small></div><span className="step-duration">18s</span></div><div className="process-step selected"><span className="step-state active"><Play size={11}/></span><div><strong>Implementar UI</strong><small>Agente principal · trabalhando em App.tsx</small></div><span className="step-duration">68%</span></div><div className="process-step"><span className="step-state wait"><Clock3 size={12}/></span><div><strong>Revisão de alterações</strong><small>Dependência: Implementar UI</small></div><span className="step-duration">—</span></div></div>
+              <div className="process-bottom"><div className="process-section-title"><strong>Etapas da execução</strong><span>5 etapas · selecione para inspecionar</span></div>
+                <button className={`process-step ${selectedProcess === "plan" ? "selected" : ""}`} onClick={() => setSelectedProcess("plan")}><span className="step-state done"><Check size={13}/></span><div><strong>Planejamento e decomposição</strong><small>Agente coordenador · 12:41:08</small></div><span className="step-duration">18s</span></button>
+                <button className={`process-step ${selectedProcess === "implement" ? "selected" : ""}`} onClick={() => setSelectedProcess("implement")}><span className="step-state active"><Play size={11}/></span><div><strong>Implementar UI</strong><small>Agente principal · trabalhando em App.tsx</small></div><span className="step-duration">68%</span></button>
+                <button className={`process-step ${selectedProcess === "structure" ? "selected" : ""}`} onClick={() => setSelectedProcess("structure")}><span className="step-state done"><Check size={13}/></span><div><strong>Estrutura base</strong><small>Agente frontend · concluído</small></div><span className="step-duration">34s</span></button>
+                <button className={`process-step ${selectedProcess === "review" ? "selected" : ""}`} onClick={() => setSelectedProcess("review")}><span className="step-state wait"><Clock3 size={12}/></span><div><strong>Revisão de alterações</strong><small>Dependência: Implementar UI</small></div><span className="step-duration">—</span></button>
+              </div>
             </div>
           ) : (
             <>
@@ -105,10 +112,29 @@ function App() {
           )}
         </section>
         <aside className="agent-panel">
-          <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">● Offline</span></div>
-          <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>
-          <div className="agent-composer"><textarea placeholder="Descreva uma tarefa para o agente..." rows={3}/><div className="composer-footer"><span>Enter para enviar</span><button disabled title="Core ainda não conectado"><Plus size={15}/></button></div></div>
-          <div className="agent-foot"><ShieldCheck size={13}/> Aprovações e ações sensíveis sob seu controle</div>
+          {activeNav === "tasks" ? (
+            <div className="process-inspector">
+              <div className="agent-header"><div><GitFork size={16}/><strong>Detalhes do processo</strong></div><span className="live-dot">INSPECTOR</span></div>
+              <div className="inspector-content">
+                <span className="eyebrow">T-025 / ETAPA</span>
+                <h3>{({plan:"Planejamento",implement:"Implementar UI",structure:"Estrutura base",review:"Revisão de alterações",finish:"Finalização"} as Record<string,string>)[selectedProcess]}</h3>
+                <span className={`inspector-status status-${selectedProcess === "implement" ? "active" : selectedProcess === "plan" || selectedProcess === "structure" ? "done" : "wait"}`}>{selectedProcess === "implement" ? "EM EXECUÇÃO" : selectedProcess === "plan" || selectedProcess === "structure" ? "CONCLUÍDO" : "AGUARDANDO"}</span>
+                <div className="inspector-metrics"><div><small>AGENTE</small><strong>{selectedProcess === "plan" ? "Coordenador" : selectedProcess === "structure" ? "Frontend" : "Agente principal"}</strong></div><div><small>DURAÇÃO</small><strong>{selectedProcess === "plan" ? "18s" : selectedProcess === "structure" ? "34s" : selectedProcess === "implement" ? "02m 41s" : "—"}</strong></div></div>
+                <div className="inspector-divider"/>
+                <div className="inspector-section-head"><strong>Subprocessos</strong><button onClick={() => setExpandedProcesses(current => current.includes(selectedProcess) ? current.filter(id => id !== selectedProcess) : [...current, selectedProcess])}>{expandedProcesses.includes(selectedProcess) ? "Recolher" : "Expandir"} <ChevronDown size={12}/></button></div>
+                {expandedProcesses.includes(selectedProcess) ? <div className="subprocess-list"><div><span className="subprocess-dot complete"/><section><strong>{selectedProcess === "plan" ? "Analisar contexto" : "Preparar contexto"}</strong><small>Concluído · etapa interna</small></section><Check size={13}/></div><div><span className={`subprocess-dot ${selectedProcess === "implement" ? "running" : "queued"}`}/><section><strong>{selectedProcess === "implement" ? "Construir componentes" : "Validar dependências"}</strong><small>{selectedProcess === "implement" ? "Executando · agente frontend" : "Na fila"}</small></section>{selectedProcess === "implement" ? <span className="node-spinner"/> : <Clock3 size={13}/>}</div><div><span className="subprocess-dot queued"/><section><strong>Registrar resultados</strong><small>Dependente da etapa anterior</small></section><Clock3 size={13}/></div></div> : <p className="inspector-hint">Subprocessos recolhidos. Expanda para ver as atividades internas.</p>}
+                <div className="inspector-divider"/>
+                <div className="inspector-section-head"><strong>Contexto e recursos</strong></div>
+                <div className="resource-row"><FileCode2 size={14}/><span>frontend/src/App.tsx</span></div><div className="resource-row"><Files size={14}/><span>Arquivos de interface</span></div>
+                <div className="inspector-note"><AlertCircle size={14}/><span>Dados demonstrativos. A conexão com eventos reais será adicionada na integração do runtime.</span></div>
+              </div>
+            </div>
+          ) : <>
+            <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">● Offline</span></div>
+            <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>
+            <div className="agent-composer"><textarea placeholder="Descreva uma tarefa para o agente..." rows={3}/><div className="composer-footer"><span>Enter para enviar</span><button disabled title="Core ainda não conectado"><Plus size={15}/></button></div></div>
+            <div className="agent-foot"><ShieldCheck size={13}/> Aprovações e ações sensíveis sob seu controle</div>
+          </>}
         </aside>
       </div>
 
