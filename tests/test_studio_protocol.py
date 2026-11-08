@@ -73,3 +73,34 @@ def test_run_stdio_forwards_real_state_events_and_execution_identity(monkeypatch
     assert core_event["execution_id"] == created["execution_id"]
     assert terminal["execution_id"] == created["execution_id"]
     assert core_event["payload"]["event_type"] == "plan_created"
+
+
+def test_run_stdio_restores_persisted_task_history_without_resuming(monkeypatch, tmp_path):
+    persisted_state = SimpleNamespace(
+        task="continue implementing the feature",
+        status=TaskStatus.RUNNING,
+        events=[AgentEvent(2, "plan_created", "Approved plan", {"plan": {"steps": ["Implement"]}}, sequence=1)],
+    )
+    fake_store = SimpleNamespace(
+        list_recent=lambda limit: [("persisted-task-id", persisted_state, None, None)]
+    )
+    monkeypatch.setattr(studio_protocol, "TaskStore", lambda root: fake_store)
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(""))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    restored = next(item for item in messages if item["type"] == "task.created")
+    restored_event = next(item for item in messages if item["type"] == "core.event")
+    terminal = next(item for item in messages if item["type"] == "task.failed")
+
+    assert restored["task_id"] == "persisted-task-id"
+    assert restored["payload"]["restored"] is True
+    assert restored_event["payload"]["event_type"] == "plan_created"
+    assert restored_event["payload"]["restored"] is True
+    assert terminal["payload"]["recoverable"] is True
+    assert "interrompida" in terminal["payload"]["message"].lower()
