@@ -343,7 +343,7 @@ function App() {
                 </div>
               </section>
               <section className="runtime-capacity">
-                <div className="process-section-title"><strong>Limites operacionais anunciados pelo core</strong><span>Valores recebidos no runtime.ready</span></div>
+                <div className="process-section-title"><strong>Orçamento de execução do core</strong><span>Limites lógicos recebidos no runtime.ready · não são quotas do sistema operacional</span></div>
                 <div className="runtime-capacity-grid">
                   <div><span>Concorrência</span><strong>{runtimeLimits?.max_concurrent_tasks ?? "—"}</strong><small>tarefas simultâneas</small></div>
                   <div><span>Subtarefas por plano</span><strong>{runtimeLimits?.max_subtasks ?? "—"}</strong><small>limite do decompositor</small></div>
