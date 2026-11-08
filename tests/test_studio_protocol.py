@@ -38,7 +38,7 @@ def test_run_stdio_forwards_real_state_events_and_execution_identity(monkeypatch
         "type": "task.submit",
         "schema_version": 1,
         "command_id": "command-1",
-        "payload": {"instruction": "inspect this project"},
+        "payload": {"instruction": "inspect this project", "project_root": str(tmp_path)},
     }
     monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
