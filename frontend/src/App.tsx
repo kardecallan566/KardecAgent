@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -39,12 +39,21 @@ function App() {
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; title: string; status: string }>>([]);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
+  const seenEventIds = useRef(new Set<string>());
 
   useEffect(() => {
     let active = true;
     const unlisten = listen<Record<string, any>>("runtime-message", event => {
       if (!active) return;
       const message = event.payload;
+      if (typeof message.event_id === "string") {
+        if (seenEventIds.current.has(message.event_id)) return;
+        seenEventIds.current.add(message.event_id);
+        if (seenEventIds.current.size > 500) {
+          const oldest = seenEventIds.current.values().next().value;
+          if (oldest) seenEventIds.current.delete(oldest);
+        }
+      }
       if (message.type === "runtime.ready") {
         setRuntimeStatus("online");
         setRuntimeError(null);
@@ -103,6 +112,11 @@ function App() {
       setProjectRoot(selected);
       setProjectEntries(entries);
       setProjectError(null);
+      setRuntimeEvents([]);
+      setRuntimeTasks([]);
+      setRuntimeBusy(false);
+      setPendingApproval(null);
+      seenEventIds.current.clear();
       setRuntimeStatus("connecting");
       setRuntimeError(null);
       await invoke("stop_runtime").catch(() => undefined);
