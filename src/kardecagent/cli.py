@@ -326,7 +326,29 @@ def _models(settings: Settings, installed_only: bool = False, inspect_model: str
         print(f"[FAIL] Ollama unavailable at {settings.ollama_base_url}: {exc}")
         return 1
     print(f"Ollama: connected ({settings.ollama_base_url})")
+    try:
+        version = client.server_version()
+    except Exception:
+        version = "unknown"
+    print(f"Ollama: connected ({settings.ollama_base_url}) | version={version}")
     print(f"Configured model: {settings.llm_model}")
+    if inspect_model:
+        try:
+            metadata = client.show_model(inspect_model)
+        except Exception as exc:
+            print(f"[FAIL] Could not inspect {inspect_model}: {exc}")
+            return 1
+        details = metadata.get("details", {})
+        print(f"Model metadata: {inspect_model}")
+        for key in ("family", "parameter_size", "quantization_level", "format"):
+            if details.get(key):
+                print(f"  {key}: {details[key]}")
+        print("  capabilities: " + ", ".join(metadata.get("capabilities", [])))
+        model_info = metadata.get("model_info", {})
+        context_values = [value for key, value in model_info.items() if key.endswith("context_length")]
+        if context_values:
+            print(f"  context_length: {max(context_values)}")
+        return 0
     print("Installed models:")
     if not installed:
         print("  (none)")
