@@ -66,7 +66,7 @@ def _approval(
 
     while True:
         message = _read_message()
-        if message.get("type") != "approval.respond":
+        if message.get("schema_version") != 1 or message.get("type") != "approval.respond":
             _write({
                 "type": "command.rejected",
                 "schema_version": 1,
@@ -186,7 +186,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "schema_version": 1,
                 "event_id": f"{identifier}:terminal",
                 "task_id": identifier,
-                "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {
                     "result_summary": f"Task ended with status {state.status.value}.",
                     "message": f"Task ended with status {state.status.value}.",
