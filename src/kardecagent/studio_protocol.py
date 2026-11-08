@@ -174,8 +174,12 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         payload = message.get("payload")
         payload = payload if isinstance(payload, dict) else {}
         instruction = payload.get("instruction")
+        requested_root = payload.get("project_root")
         if not isinstance(command_identifier, str) or not command_identifier.strip():
             _write({"type": "command.rejected", "reason": "command_id is required."})
+            continue
+        if not isinstance(requested_root, str) or Path(requested_root).resolve() != root:
+            _write({"type": "command.rejected", "command_id": command_identifier, "reason": "project_root does not match the active runtime workspace."})
             continue
         if not isinstance(instruction, str) or not instruction.strip():
             _write({"type": "command.rejected", "command_id": command_identifier, "reason": "instruction is required."})
