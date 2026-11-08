@@ -206,11 +206,11 @@ function App() {
             </div>
           ) : activeNav === "tasks" ? (
             <div className="process-dashboard">
-              <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Visão de processos e dependências da tarefa selecionada</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
+              <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Prévia do grafo de tarefas · aguardando dados reais do runtime</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
               <div className="process-summary"><div><span>PROCESSOS</span><strong>05</strong><small>1 ativo · 2 concluídos · 2 aguardando</small></div><div><span>PROGRESSO</span><strong>68%</strong><div className="progress-track"><i style={{width:"68%"}}/></div></div><div><span>TEMPO DECORRIDO</span><strong>02m 41s</strong><small>Última atualização há 3s</small></div></div>
               <div className="flow-canvas">
                 <div className="flow-grid"/>
-                <div className="flow-label">T-025 · Criar shell desktop <span className="pill-running">EM EXECUÇÃO</span></div>
+                <div className="flow-label">PRÉVIA · Fluxo ilustrativo <span className="pill-running">EM EXECUÇÃO</span></div>
                 <div className="flow-line line-a"/><div className="flow-line line-b"/><div className="flow-line line-c"/><div className="flow-line line-d"/>
                 <button className={`flow-node node-root ${selectedProcess === "plan" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("plan")}><div className="node-icon"><Workflow size={16}/></div><div><strong>Planejamento</strong><small>Plano definido</small></div><Check size={14} className="node-check"/></button>
                 <button className={`flow-node node-active ${selectedProcess === "implement" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("implement")}><div className="node-icon"><Bot size={16}/></div><div><strong>Implementar UI</strong><small>Agente principal · 68%</small></div><span className="node-spinner"/></button>
@@ -220,7 +220,7 @@ function App() {
                 <div className="canvas-legend"><span><i className="legend-dot done"/> Concluído</span><span><i className="legend-dot active"/> Em execução</span><span><i className="legend-dot wait"/> Aguardando</span></div>
               </div>
               <section className="agent-team">
-                <div className="process-section-title"><strong>Equipe de agentes</strong><span>Execução paralela · 4 agentes</span></div>
+                <div className="process-section-title"><strong>Agentes (prévia visual)</strong><span>Papéis demonstrativos · core sequencial</span></div>
                 <div className="agent-lanes">
                   {agentRuns.map(agent => <button key={agent.id} className={"agent-lane " + (selectedAgent === agent.id ? "agent-lane-selected" : "")} onClick={() => setSelectedAgent(agent.id)}>
                     <div className="agent-lane-top"><span className={"agent-avatar-small " + agent.status}><Bot size={14}/></span><span className="agent-lane-identity"><strong>{agent.name}</strong><small>{agent.role}</small></span><span className={"agent-state state-" + agent.status}>{agent.status === "running" ? "ATIVO" : agent.status === "done" ? "CONCLUÍDO" : "NA FILA"}</span></div>
@@ -237,7 +237,7 @@ function App() {
                 <button className={`process-step ${selectedProcess === "review" ? "selected" : ""}`} onClick={() => setSelectedProcess("review")}><span className="step-state wait"><Clock3 size={12}/></span><div><strong>Revisão de alterações</strong><small>Dependência: Implementar UI</small></div><span className="step-duration">—</span></button>
               </div>
               <section className="process-events">
-                <div className="process-section-title"><strong>Eventos recentes</strong><span>Feed local demonstrativo · sem polling</span></div>
+                <div className="process-section-title"><strong>Eventos recentes</strong><span>Eventos ilustrativos · runtime real no painel do gestor</span></div>
                 {processEvents.map(event => <div className="process-event" key={event.id}><span className={"event-marker " + event.kind}/><time>{event.time}</time><strong>{event.agent}</strong><span>{event.message}</span></div>)}
               </section>
             </div>
