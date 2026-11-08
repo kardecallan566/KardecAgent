@@ -4,7 +4,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Callable
+from datetime import datetime, timezone
 
 from .agent.loop import AgentLoop
 from .agent.plan import ExecutionPlan
@@ -55,7 +55,7 @@ def _approval(
         "schema_version": 1,
         "event_id": str(uuid.uuid4()),
         "task_id": task_identifier,
-        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": {
             "approval_id": approval_identifier,
             "kind": kind,
