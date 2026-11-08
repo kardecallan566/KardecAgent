@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { RuntimeLimits, RuntimeSubtask } from "./types/runtime";
 import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, GitBranch, LayoutDashboard,
@@ -37,7 +38,10 @@ function App() {
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
-  const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; title: string; status: string }>>([]);
+  const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string }>>([]);
+  const [runtimeSubtasks, setRuntimeSubtasks] = useState<RuntimeSubtask[]>([]);
+  const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
+  const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
   const seenEventIds = useRef(new Set<string>());
 
@@ -56,19 +60,35 @@ function App() {
       }
       if (message.type === "runtime.ready") {
         setRuntimeStatus("online");
+        setRuntimeLimits(message.limits || null);
         setRuntimeError(null);
       } else if (message.type === "approval.requested") {
+        setRuntimeTasks(items => items.map(task => task.id === message.task_id ? { ...task, status: "Aguardando aprovação" } : task));
         setPendingApproval({ approvalId: message.payload.approval_id, kind: message.payload.kind, summary: message.payload.summary, risk: message.payload.risk });
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: "Plano aguardando sua aprovação." }].slice(-100));
       } else if (message.type === "core.event") {
-        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.payload.event_type, message: message.payload.message }].slice(-100));
+        const coreType = message.payload?.event_type || "core.event";
+        const eventData = message.payload?.data || {};
+        const board = eventData.board;
+        if (board && Array.isArray(board.subtasks)) {
+          setRuntimeSubtasks(board.subtasks);
+          const running = board.subtasks.find((item: RuntimeSubtask) => item.status === "running");
+          setActiveRuntimeSubtask(running?.id || null);
+        }
+        if (coreType === "status_changed" && eventData.to_status) {
+          setRuntimeTasks(items => items.map(task => task.id === message.task_id ? { ...task, status: String(eventData.to_status) } : task));
+        }
+        if (coreType === "subtask_started") setActiveRuntimeSubtask(eventData.subtask_id || null);
+        if (["subtask_completed", "subtask_failed", "subtask_blocked"].includes(coreType) && activeRuntimeSubtask === eventData.subtask_id) setActiveRuntimeSubtask(null);
+        setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
       } else if (message.type === "task.created") {
         setRuntimeBusy(true);
-        setRuntimeTasks(items => [...items, { id: message.task_id, title: message.payload.title, status: "Em execução" }].slice(-50));
+        setRuntimeTasks(items => [...items, { id: message.task_id, executionId: message.execution_id, title: message.payload.title, status: "Recebida" }].slice(-50));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
       } else if (message.type === "task.completed" || message.type === "task.failed") {
         setRuntimeBusy(false);
-        setRuntimeTasks(items => items.map(task => task.id === message.task_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : "Falhou" } : task));
+        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : "Falhou" } : task));
+        setActiveRuntimeSubtask(null);
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
         setPendingApproval(null);
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
@@ -79,6 +99,8 @@ function App() {
       if (active) {
         setRuntimeStatus("offline");
         setRuntimeBusy(false);
+        setRuntimeSubtasks([]);
+        setActiveRuntimeSubtask(null);
         setRuntimeError(current => current || "O processo Python encerrou a conexão.");
       }
     });
@@ -114,6 +136,9 @@ function App() {
       setProjectError(null);
       setRuntimeEvents([]);
       setRuntimeTasks([]);
+      setRuntimeSubtasks([]);
+      setActiveRuntimeSubtask(null);
+      setRuntimeLimits(null);
       setRuntimeBusy(false);
       setPendingApproval(null);
       seenEventIds.current.clear();
