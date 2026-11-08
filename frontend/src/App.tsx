@@ -82,7 +82,7 @@ function App() {
           {activeNav === "tasks" ? (
             <div className="process-dashboard">
               <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Visão de processos e dependências da tarefa selecionada</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
-              <div className="process-summary"><div><span>PROCESSOS</span><strong>04</strong><small>1 ativo · 2 concluídos · 1 aguardando</small></div><div><span>PROGRESSO</span><strong>68%</strong><div className="progress-track"><i style={{width:"68%"}}/></div></div><div><span>TEMPO DECORRIDO</span><strong>02m 41s</strong><small>Última atualização há 3s</small></div></div>
+              <div className="process-summary"><div><span>PROCESSOS</span><strong>05</strong><small>1 ativo · 2 concluídos · 2 aguardando</small></div><div><span>PROGRESSO</span><strong>68%</strong><div className="progress-track"><i style={{width:"68%"}}/></div></div><div><span>TEMPO DECORRIDO</span><strong>02m 41s</strong><small>Última atualização há 3s</small></div></div>
               <div className="flow-canvas">
                 <div className="flow-grid"/>
                 <div className="flow-label">T-025 · Criar shell desktop <span className="pill-running">EM EXECUÇÃO</span></div>
