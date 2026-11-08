@@ -21,7 +21,7 @@ Install the core into the Python environment used by the desktop process from th
 
 On macOS/Linux the default executable is `python3`; on Windows it is `python`. Set `KARDECAGENT_PYTHON` to an explicit interpreter path when needed. The runtime command is `python -m kardecagent.cli studio --project <path>`.
 
-The bridge intentionally handles one submitted task and one subtask at a time. The Studio graph is driven by `TaskState.record` events and real `TaskBoard` snapshots; it displays the dependency graph, scopes, results and statuses without polling. A single Python executor is shown until the core has actual worker processes. The runtime announces its current limits (six planned subtasks, configured LLM iteration cap, bounded command output, 8,000-character instruction and 256 KiB event). Concurrent execution remains deferred until resource budgets, file-conflict detection, cancellation and recovery are implemented.
+The bridge intentionally handles one submitted task and one subtask at a time. The Studio graph is driven by `TaskState.record` events and real `TaskBoard` snapshots; it displays the dependency graph, scopes, results and statuses without polling. A single Python executor is shown until the core has actual worker processes. The runtime announces its current limits (one concurrent task and subtask, six planned subtasks, configured LLM iterations and timeouts, bounded command output, 500-file project snapshots, 8,000-character instructions and 256 KiB events). Concurrent execution remains deferred until resource budgets, file-conflict detection, cancellation and recovery are implemented.
 
 ## Performance constraints
 
