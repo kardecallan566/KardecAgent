@@ -58,12 +58,12 @@ A response is accepted only for the currently pending approval ID. While approva
 - `runtime.ready`: process initialized and workspace fixed.
 - `command.accepted` / `command.rejected`: command acknowledgement.
 - `task.created`: task accepted by the manager.
-- `core.event`: lossless lifecycle envelope from `TaskState.record`, including event type, sequence, iteration, message and event data.
+- `core.event`: bounded lifecycle envelope from `TaskState.record`, including event type, sequence, iteration, message and event data.
 - `approval.requested`: plan or additional high-risk approval; contains the exact approval ID and formatted plan.
 - `task.completed` / `task.failed`: terminal task result.
 - `runtime.error`: protocol or runtime error.
 
-Event IDs are unique per runtime execution; task IDs remain the Python persistence IDs. The UI should deduplicate by `event_id`, cap retained events and treat unknown event types as forward-compatible.
+Event IDs are unique per runtime execution; task IDs remain the Python persistence IDs. Oversized event payloads are compacted at the bridge boundary. The UI should deduplicate by `event_id`, cap retained events and treat unknown event types as forward-compatible.
 
 ## Current operational limits
 
