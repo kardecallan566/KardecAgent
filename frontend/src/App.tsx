@@ -217,10 +217,10 @@ function App() {
           ) : activeNav === "tasks" ? (
             <div className="process-dashboard">
               <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Prévia do grafo de tarefas · aguardando dados reais do runtime</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
-              <div className="process-summary"><div><span>PROCESSOS</span><strong>05</strong><small>1 ativo · 2 concluídos · 2 aguardando</small></div><div><span>PROGRESSO</span><strong>68%</strong><div className="progress-track"><i style={{width:"68%"}}/></div></div><div><span>TEMPO DECORRIDO</span><strong>02m 41s</strong><small>Última atualização há 3s</small></div></div>
+              <div className="process-summary"><div><span>ESTADO DO CORE</span><strong>{runtimeStatus === "online" ? "Online" : runtimeStatus === "connecting" ? "Conectando" : "Offline"}</strong><small>{runtimeBusy ? "Uma tarefa está em execução" : "Aguardando instrução"}</small></div><div><span>TAREFAS RECEBIDAS</span><strong>{String(runtimeTasks.length).padStart(2, "0")}</strong><small>Histórico recente nesta sessão</small></div><div><span>EVENTOS</span><strong>{String(runtimeEvents.length).padStart(2, "0")}</strong><small>Buffer limitado a 100 eventos</small></div></div>
               <div className="flow-canvas">
                 <div className="flow-grid"/>
-                <div className="flow-label">PRÉVIA · Fluxo ilustrativo <span className="pill-running">EM EXECUÇÃO</span></div>
+                <div className="flow-label">PRÉVIA · Fluxo ilustrativo <span className="runtime-offline">ILUSTRATIVO</span></div>
                 <div className="flow-line line-a"/><div className="flow-line line-b"/><div className="flow-line line-c"/><div className="flow-line line-d"/>
                 <button className={`flow-node node-root ${selectedProcess === "plan" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("plan")}><div className="node-icon"><Workflow size={16}/></div><div><strong>Planejamento</strong><small>Plano definido</small></div><Check size={14} className="node-check"/></button>
                 <button className={`flow-node node-active ${selectedProcess === "implement" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("implement")}><div className="node-icon"><Bot size={16}/></div><div><strong>Implementar UI</strong><small>Agente principal · 68%</small></div><span className="node-spinner"/></button>
