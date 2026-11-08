@@ -73,11 +73,20 @@ function App() {
         setRuntimeError(message.message || message.reason || "Falha de comunicação com o runtime.");
       }
     });
-    const streamClosed = listen("runtime-stream-closed", () => { if (active) setRuntimeStatus("offline"); });
+    const streamClosed = listen("runtime-stream-closed", () => {
+      if (active) {
+        setRuntimeStatus("offline");
+        setRuntimeError(current => current || "O processo Python encerrou a conexão.");
+      }
+    });
+    const stderr = listen<string>("runtime-stderr", event => {
+      if (active && event.payload.trim()) setRuntimeError(event.payload.slice(0, 2000));
+    });
     return () => {
       active = false;
       unlisten.then(stop => stop());
       streamClosed.then(stop => stop());
+      stderr.then(stop => stop());
       void invoke("stop_runtime").catch(() => undefined);
     };
   }, []);
@@ -170,7 +179,7 @@ function App() {
             </>
           ) : activeNav === "tasks" ? (
             <div className="task-sidebar">{tasks.map(task => <div className="task-mini" key={task.id}><CircleDot className={task.tone}/><div><strong>{task.title}</strong><small>{task.id} · {task.status}</small></div></div>)}</div>
-          ) : activeNav === "approvals" ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação pendente</strong><small>Solicitações aparecerão aqui.</small></div> :
+          ) : activeNav === "approvals" ? (pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação pendente</strong><small>Solicitações do gestor aparecerão aqui.</small></div>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>
 
