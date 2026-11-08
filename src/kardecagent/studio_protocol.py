@@ -92,7 +92,7 @@ def _approval(
             _write({
                 "type": "command.rejected",
                 "schema_version": 1,
-                "command_id": command_identifier,
+                "command_id": message.get("command_id"),
                 "reason": "Only the matching approval response is accepted while approval is pending.",
             })
             continue
@@ -106,7 +106,7 @@ def _approval(
             _write({
                 "type": "command.rejected",
                 "schema_version": 1,
-                "command_id": message.get("command_id"),
+                "command_id": command_identifier,
                 "reason": "Approval identifier does not match the pending request.",
             })
             continue
@@ -115,14 +115,14 @@ def _approval(
             _write({
                 "type": "command.rejected",
                 "schema_version": 1,
-                "command_id": message.get("command_id"),
+                "command_id": command_identifier,
                 "reason": "Decision must be approve or reject.",
             })
             continue
         _write({
             "type": "command.accepted",
             "schema_version": 1,
-            "command_id": message.get("command_id"),
+            "command_id": command_identifier,
             "accepted": True,
         })
         return decision == "approve"
