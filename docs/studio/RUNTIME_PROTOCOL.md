@@ -35,7 +35,7 @@ Submit an instruction to the central manager:
 }
 ```
 
-The runtime root is fixed when the child process starts. The payload's `project_root` is contextual metadata and cannot switch the process to another workspace.
+The runtime root is fixed and canonicalized when the child process starts. Each `task.submit` must carry a `project_root` resolving to that same workspace; mismatches are rejected and cannot switch the process to another workspace.
 
 Resolve an approval:
 
