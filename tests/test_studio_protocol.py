@@ -151,3 +151,31 @@ def test_run_stdio_resumes_a_persisted_task_and_streams_new_events(monkeypatch, 
     assert streamed["execution_id"] == execution_id
     assert streamed["payload"]["event_type"] == "resume_started"
     assert terminal["payload"]["resumed"] is True
+
+
+def test_run_stdio_rejects_resume_for_unknown_persisted_task(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        studio_protocol,
+        "TaskStore",
+        lambda root: SimpleNamespace(list_recent=lambda limit: []),
+    )
+    command = {
+        "type": "task.resume",
+        "schema_version": 1,
+        "command_id": "resume-missing",
+        "payload": {"task_id": "missing-task", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    rejected = next(item for item in messages if item.get("command_id") == "resume-missing")
+
+    assert rejected["type"] == "command.rejected"
+    assert "not found" in rejected["reason"].lower()
+    assert not any(item["type"] == "task.created" for item in messages)
