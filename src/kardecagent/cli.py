@@ -327,8 +327,7 @@ def _models(settings: Settings, installed_only: bool = False) -> int:
         return 1
     print(f"Ollama: connected ({settings.ollama_base_url})")
     print(f"Configured model: {settings.llm_model}")
-    print("\
-Installed models:")
+    print("Installed models:")
     if not installed:
         print("  (none)")
     for item in installed:
@@ -339,14 +338,12 @@ Installed models:")
             print(f"  - {name}{size_text}")
     if installed_only:
         return 0
-    print("\
-Curated local model candidates (indicative memory; benchmark before routing):")
+    print("Curated local model candidates (indicative memory; benchmark before routing):")
     names = {str(item.get("name", "")) for item in installed if isinstance(item, dict)}
     for spec in LOCAL_MODEL_CATALOG:
         marker = " [installed]" if spec.name in names else ""
         print(f"  - {spec.name}{marker} | {spec.vram_gb} | {spec.role} | {spec.notes}")
-    print("\
-Note: model weights are not peak VRAM. Context/KV cache and runtime buffers add memory.")
+    print("Note: model weights are not peak VRAM. Context/KV cache and runtime buffers add memory.")
     return 0
 
 
