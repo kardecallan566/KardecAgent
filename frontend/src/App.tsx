@@ -96,6 +96,10 @@ function App() {
         setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
       } else if (message.type === "task.created") {
         setRuntimeBusy(true);
+        setRuntimeSubtasks([]);
+        setRuntimePlanSteps([]);
+        setActiveRuntimeSubtask(null);
+        setActiveRuntimeStep(null);
         setRuntimeTasks(items => [...items, { id: message.task_id, executionId: message.execution_id, title: message.payload.title, status: "Recebida" }].slice(-50));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
       } else if (message.type === "task.completed" || message.type === "task.failed") {
