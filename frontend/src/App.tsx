@@ -23,9 +23,9 @@ function App() {
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
-  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);\n  const [openedPath, setOpenedPath] = useState<string | null>(null);\n  const [fileContent, setFileContent] = useState<string>("");
 
-  async function openProject() {
+  async function openEntry(entry: ProjectEntry) {\n    if (entry.is_dir) {\n      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectPath: entry.path })); setProjectError(null); }\n      catch (error) { setProjectError(String(error)); }\n      return;\n    }\n    try { setFileContent(await invoke<string>("read_project_file", { filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }\n    catch (error) { setProjectError(String(error)); }\n  }\n\n  async function openProject() {
     const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
     if (typeof selected !== "string") return;
     try {
@@ -65,7 +65,7 @@ function App() {
                 <button className={selectedFile === "App.tsx" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("App.tsx")}><FileCode2/><span>App.tsx</span></button>
                 <button className={selectedFile === "main.tsx" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("main.tsx")}><FileCode2/><span>main.tsx</span></button>
                 <button className={selectedFile === "styles.css" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("styles.css")}><FileCode2/><span>styles.css</span></button>
-                {projectEntries.map(entry => <div className="tree-row file" key={entry.path} title={entry.path}>{entry.is_dir ? <Folder/> : <FileCode2/>}<span>{entry.name}</span></div>)}
+                {projectEntries.map(entry => <button className="tree-row file" key={entry.path} title={entry.path} onClick={() => openEntry(entry)}>{entry.is_dir ? <Folder/> : <FileCode2/>}<span>{entry.name}</span></button>)}
                 {projectError && <div className="tree-row" role="alert">{projectError}</div>}
               </div>
               <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
