@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from .agent.loop import AgentLoop
 from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
-from .agent.persistence import TaskStore, task_id
+from .agent.persistence import PersistenceError, TaskStore, task_id
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
