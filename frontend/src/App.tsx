@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState } from "react";\nimport { invoke } from "@tauri-apps/api/core";\nimport { open } from "@tauri-apps/plugin-dialog";
 import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, GitBranch, LayoutDashboard,
@@ -6,7 +6,7 @@ import {
   Zap
 } from "lucide-react";
 
-type NavItem = "explorer" | "agent" | "tasks" | "approvals";
+type NavItem = "explorer" | "agent" | "tasks" | "approvals";\ntype ProjectEntry = { name: string; path: string; is_dir: boolean };
 
 const tasks = [
   { id: "T-024", title: "Mapear arquitetura do projeto", status: "Concluído", tone: "done" },
@@ -17,14 +17,14 @@ const tasks = [
 function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("explorer");
   const [selectedFile, setSelectedFile] = useState("App.tsx");
-  const [bottomPanel, setBottomPanel] = useState("Atividades");
+  const [bottomPanel, setBottomPanel] = useState("Atividades");\n  const [projectRoot, setProjectRoot] = useState<string | null>(null);\n  const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);\n  const [projectError, setProjectError] = useState<string | null>(null);\n\n  async function openProject() {\n    const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });\n    if (typeof selected !== "string") return;\n    try {\n      const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectPath: selected });\n      setProjectRoot(selected);\n      setProjectEntries(entries);\n      setProjectError(null);\n    } catch (error) { setProjectError(String(error)); }\n  }
 
   return (
     <main className="app-shell">
       <header className="titlebar">
         <div className="brand"><div className="brand-mark"><Zap size={15} /></div><span>KARDEC<span className="brand-light">AGENT</span></span>
         <span className="workspace-label">Studio <span className="muted">/</span> Workspace</span>
-        <div className="titlebar-right"><span className="connection"><span /> Core desconectado</span><span className="avatar">KA</span></div>
+        <div className="titlebar-right"><span className="connection"><span /> {projectRoot ? "Projeto aberto · Core offline" : "Core desconectado"}</span><span className="avatar">KA</span></div>
       </header>
 
       <div className="work-area">
@@ -41,7 +41,7 @@ function App() {
           <div className="sidebar-heading"><span>{activeNav === "explorer" ? "EXPLORER" : activeNav.toUpperCase()}</span><button className="icon-button" title="Nova ação"><Plus size={15}/></button></div>
           {activeNav === "explorer" ? (
             <>
-              <div className="project-heading"><ChevronDown size={14}/><Folder size={15} className="folder-icon"/> KARDECAGENT</div>
+              <div className="project-heading"><ChevronDown size={14}/><Folder size={15} className="folder-icon"/> {projectRoot ? projectRoot.split(/[\\\\/]/).filter(Boolean).pop() : "KARDECAGENT"}</div>
               <div className="tree">
                 <div className="tree-row"><ChevronDown/><Folder/><span>frontend</span></div>
                 <div className="tree-row indent"><ChevronDown/><Folder/><span>src</span></div>
@@ -67,9 +67,9 @@ function App() {
               <div className="welcome-icon"><Zap size={24}/></div>
               <h1>KardecAgent <span>Studio</span></h1>
               <p>Seu ambiente de desenvolvimento orientado por agentes.</p>
-              <div className="welcome-actions"><button><Folder size={15}/> Abrir projeto</button><button className="secondary"><Plus size={15}/> Nova tarefa</button></div>
+              <div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary"><Plus size={15}/> Nova tarefa</button></div>
               <div className="quick-grid">
-                <div><span className="quick-label">WORKSPACE</span><strong>Projeto local</strong><small>Selecione uma pasta para começar</small></div>
+                <div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.split(/[\\\\/]/).filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div>
                 <div><span className="quick-label">RUNTIME</span><strong className="status-muted">Desconectado</strong><small>Core Python não iniciado</small></div>
               </div>
             </div>
@@ -88,7 +88,7 @@ function App() {
         </aside>
       </div>
 
-      <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> Workspace local</div><div><span className="status-indicator"/> UI Preview <span>·</span> Runtime não conectado</div></footer>
+      <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> UI Preview <span>·</span> Runtime não conectado</div></footer>
     </main>
   );
 }
