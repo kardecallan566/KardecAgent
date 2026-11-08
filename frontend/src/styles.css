@@ -180,3 +180,9 @@
 .runtime-capacity-grid strong { color: #e1d7e9; font-size: 18px; font-weight: 600; }
 .runtime-capacity-grid small { color: #83798d; font-size: 9px; }
 @media (max-width: 900px) { .runtime-capacity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+
+.runtime-capacity-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.runtime-inspector-item { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid #302b39; }
+.runtime-inspector-item strong { color: #d8cddd; font-size: 10px; }
+.runtime-inspector-item small { color: #93889d; font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
