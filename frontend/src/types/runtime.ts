@@ -40,7 +40,7 @@ export type RuntimeEvent =
   | (RuntimeEventBase & { type: "task.progress"; payload: { progress: number; message?: string } })
   | (RuntimeEventBase & { type: "agent.assigned"; payload: { agent_id: string } })
   | (RuntimeEventBase & { type: "agent.output"; payload: { channel: "stdout" | "stderr" | "summary"; content: string } })
-  | (RuntimeEventBase & { type: "approval.requested"; payload: { approval_id: string; summary: string; risk: "low" | "medium" | "high" } })
+  | (RuntimeEventBase & { type: "approval.requested"; payload: { approval_id: string; kind: "plan" | "high_risk"; summary: string; risk: "low" | "medium" | "high" } })
   | (RuntimeEventBase & { type: "resource.changed"; payload: { path: string; operation: "created" | "modified" | "deleted" } })
   | (RuntimeEventBase & { type: "task.completed"; payload: { result_summary?: string } })
   | (RuntimeEventBase & { type: "task.failed"; payload: { message: string; recoverable: boolean } });
@@ -53,7 +53,7 @@ export interface RuntimeCommandBase {
 export type RuntimeCommand =
   | (RuntimeCommandBase & { type: "task.submit"; payload: { instruction: string; project_root: string } })
   | (RuntimeCommandBase & { type: "approval.respond"; payload: { approval_id: string; decision: "approve" | "reject" } })
-  | (RuntimeCommandBase & { type: "task.cancel"; payload: { task_id: string } });
+;
 
 export interface RuntimeCommandAccepted {
   command_id: string;
