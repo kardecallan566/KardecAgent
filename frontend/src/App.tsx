@@ -243,34 +243,34 @@ function App() {
             <div className="process-dashboard">
               <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Prévia do grafo de tarefas · aguardando dados reais do runtime</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
               <div className="process-summary"><div><span>ESTADO DO CORE</span><strong>{runtimeStatus === "online" ? "Online" : runtimeStatus === "connecting" ? "Conectando" : "Offline"}</strong><small>{runtimeBusy ? "Uma tarefa está em execução" : "Aguardando instrução"}</small></div><div><span>TAREFAS RECEBIDAS</span><strong>{String(runtimeTasks.length).padStart(2, "0")}</strong><small>Histórico recente nesta sessão</small></div><div><span>EVENTOS</span><strong>{String(runtimeEvents.length).padStart(2, "0")}</strong><small>Buffer limitado a 100 eventos</small></div></div>
-              <div className="flow-canvas">
-                <div className="flow-grid"/>
-                <div className="flow-label">PRÉVIA · Fluxo ilustrativo <span className="runtime-offline">ILUSTRATIVO</span></div>
-                <div className="flow-line line-a"/><div className="flow-line line-b"/><div className="flow-line line-c"/><div className="flow-line line-d"/>
-                <button className={`flow-node node-root ${selectedProcess === "plan" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("plan")}><div className="node-icon"><Workflow size={16}/></div><div><strong>Planejamento</strong><small>Plano definido</small></div><Check size={14} className="node-check"/></button>
-                <button className={`flow-node node-active ${selectedProcess === "implement" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("implement")}><div className="node-icon"><Bot size={16}/></div><div><strong>Implementar UI</strong><small>Agente principal · 68%</small></div><span className="node-spinner"/></button>
-                <button className={`flow-node node-done ${selectedProcess === "structure" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("structure")}><div className="node-icon"><FileCode2 size={16}/></div><div><strong>Estrutura base</strong><small>Concluído · 34s</small></div><Check size={14} className="node-check"/></button>
-                <button className={`flow-node node-wait ${selectedProcess === "review" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("review")}><div className="node-icon"><ShieldCheck size={16}/></div><div><strong>Revisão</strong><small>Aguardando etapa anterior</small></div><Clock3 size={14} className="node-clock"/></button>
-                <button className={`flow-node node-final ${selectedProcess === "finish" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("finish")}><div className="node-icon"><CheckCircle2 size={16}/></div><div><strong>Finalização</strong><small>Na fila</small></div></button>
-                <div className="canvas-legend"><span><i className="legend-dot done"/> Concluído</span><span><i className="legend-dot active"/> Em execução</span><span><i className="legend-dot wait"/> Aguardando</span></div>
-              </div>
+              <section className="runtime-task-graph">
+                <div className="process-section-title"><strong>Mapa de execução do runtime</strong><span>{runtimeSubtasks.length ? `${runtimeSubtasks.length} subtarefas · dependências do core` : "Aguardando decomposição do plano"}</span></div>
+                {runtimeSubtasks.length ? <div className="runtime-board-grid">
+                  {runtimeSubtasks.map(subtask => <article className={`runtime-subtask-card status-${subtask.status}`} key={subtask.id}>
+                    <div className="runtime-subtask-head"><span className="runtime-subtask-id">{subtask.id}</span><span className={`runtime-subtask-status status-${subtask.status}`}>{subtask.status === "running" ? "EM EXECUÇÃO" : subtask.status === "completed" ? "CONCLUÍDA" : subtask.status === "failed" ? "FALHOU" : subtask.status === "blocked" ? "BLOQUEADA" : "PENDENTE"}</span></div>
+                    <strong>{subtask.title}</strong><p>{subtask.objective}</p>
+                    <div className="runtime-subtask-meta"><span>Dependências: {subtask.dependencies.length ? subtask.dependencies.join(", ") : "Nenhuma"}</span><span>Etapas aprovadas: {subtask.plan_steps.join(", ") || "—"}</span></div>
+                    {subtask.scope.length > 0 && <div className="runtime-subtask-scope">{subtask.scope.slice(0, 3).join(" · ")}{subtask.scope.length > 3 ? ` · +${subtask.scope.length - 3}` : ""}</div>}
+                    {subtask.result && <small className="runtime-subtask-result">{subtask.result}</small>}
+                  </article>)}
+                </div> : <div className="runtime-graph-empty"><Workflow size={22}/><strong>O grafo será construído a partir do plano aprovado</strong><p>Quando o core decompor uma tarefa, o Studio receberá o quadro real, incluindo dependências, escopos e estados de cada subtarefa.</p></div>}
+              </section>
               <section className="agent-team">
-                <div className="process-section-title"><strong>Agentes (prévia visual)</strong><span>Papéis demonstrativos · core sequencial</span></div>
-                <div className="agent-lanes">
-                  {agentRuns.map(agent => <button key={agent.id} className={"agent-lane " + (selectedAgent === agent.id ? "agent-lane-selected" : "")} onClick={() => setSelectedAgent(agent.id)}>
-                    <div className="agent-lane-top"><span className={"agent-avatar-small " + agent.status}><Bot size={14}/></span><span className="agent-lane-identity"><strong>{agent.name}</strong><small>{agent.role}</small></span><span className={"agent-state state-" + agent.status}>{agent.status === "running" ? "ATIVO" : agent.status === "done" ? "CONCLUÍDO" : "NA FILA"}</span></div>
-                    <div className="agent-lane-task">{agent.task}</div>
-                    <div className="agent-progress"><i style={{width: agent.progress + "%"}}/></div>
-                    <div className="agent-lane-foot"><span>{agent.status === "running" ? "Trabalhando" : agent.status === "done" ? "Finalizado" : "Aguardando"}</span><strong>{agent.progress}%</strong></div>
-                  </button>)}
+                <div className="process-section-title"><strong>Executor do runtime</strong><span>Estado real · sem agentes simulados</span></div>
+                <div className="runtime-executor-card">
+                  <span className={`runtime-executor-indicator ${runtimeBusy ? "busy" : "idle"}`}/><div><strong>Core Python · AgentLoop / Orchestrator</strong><small>{runtimeBusy ? activeRuntimeSubtask ? `Executando subtarefa ${activeRuntimeSubtask}` : "Planejando, aguardando aprovação ou executando tarefa" : "Ocioso · aguardando instrução"}</small></div>
+                  <span className="runtime-executor-mode">{runtimeLimits?.execution_mode || "—"}</span>
                 </div>
               </section>
-              <div className="process-bottom"><div className="process-section-title"><strong>Etapas da execução</strong><span>5 etapas · selecione para inspecionar</span></div>
-                <button className={`process-step ${selectedProcess === "plan" ? "selected" : ""}`} onClick={() => setSelectedProcess("plan")}><span className="step-state done"><Check size={13}/></span><div><strong>Planejamento e decomposição</strong><small>Agente coordenador · 12:41:08</small></div><span className="step-duration">18s</span></button>
-                <button className={`process-step ${selectedProcess === "implement" ? "selected" : ""}`} onClick={() => setSelectedProcess("implement")}><span className="step-state active"><Play size={11}/></span><div><strong>Implementar UI</strong><small>Agente principal · trabalhando em App.tsx</small></div><span className="step-duration">68%</span></button>
-                <button className={`process-step ${selectedProcess === "structure" ? "selected" : ""}`} onClick={() => setSelectedProcess("structure")}><span className="step-state done"><Check size={13}/></span><div><strong>Estrutura base</strong><small>Agente frontend · concluído</small></div><span className="step-duration">34s</span></button>
-                <button className={`process-step ${selectedProcess === "review" ? "selected" : ""}`} onClick={() => setSelectedProcess("review")}><span className="step-state wait"><Clock3 size={12}/></span><div><strong>Revisão de alterações</strong><small>Dependência: Implementar UI</small></div><span className="step-duration">—</span></button>
-              </div>
+              <section className="runtime-capacity">
+                <div className="process-section-title"><strong>Limites operacionais anunciados pelo core</strong><span>Valores recebidos no runtime.ready</span></div>
+                <div className="runtime-capacity-grid">
+                  <div><span>Concorrência</span><strong>{runtimeLimits?.max_concurrent_tasks ?? "—"}</strong><small>tarefas simultâneas</small></div>
+                  <div><span>Subtarefas por plano</span><strong>{runtimeLimits?.max_subtasks ?? "—"}</strong><small>limite do decompositor</small></div>
+                  <div><span>Instrução máxima</span><strong>{runtimeLimits ? runtimeLimits.max_instruction_chars.toLocaleString("pt-BR") : "—"}</strong><small>caracteres</small></div>
+                  <div><span>Evento máximo</span><strong>{runtimeLimits ? Math.round(runtimeLimits.max_event_bytes / 1024) + " KB" : "—"}</strong><small>payload JSONL</small></div>
+                </div>
+              </section>
               <section className="process-events">
                 <div className="process-section-title"><strong>Eventos recentes</strong><span>Eventos reais recebidos do core</span></div>
                 {runtimeEvents.length ? runtimeEvents.slice().reverse().slice(0, 12).map(event => <div className="process-event" key={event.id}><span className="event-marker info"/><time>Studio</time><strong>{event.type}</strong><span>{event.message}</span></div>) : <p className="manager-no-events">Nenhum evento recebido. Inicie uma tarefa pela área Agent.</p>}
