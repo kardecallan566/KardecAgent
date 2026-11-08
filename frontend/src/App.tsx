@@ -42,6 +42,8 @@ function App() {
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
+  const [eventSearch, setEventSearch] = useState("");
+  const filteredEvents = runtimeEvents.filter(event => `${event.type} ${event.message}`.toLowerCase().includes(eventSearch.trim().toLowerCase()));
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string; recoverable?: boolean }>>([]);
   const [runtimeSubtasks, setRuntimeSubtasks] = useState<RuntimeSubtask[]>([]);
   const [runtimePlanSteps, setRuntimePlanSteps] = useState<RuntimePlanStep[]>([]);
@@ -326,8 +328,8 @@ function App() {
               </div>
               {runtimeError && <div className="manager-runtime-error" role="alert">{runtimeError}</div>}
               <section className="manager-event-list">
-                <div className="process-section-title"><strong>Atividade do gestor</strong><span>{runtimeEvents.length} eventos recentes · fluxo em tempo real</span></div>
-                {runtimeEvents.length === 0 ? <p className="manager-no-events">As instruções recebidas e as atualizações do core aparecerão aqui.</p> : runtimeEvents.slice().reverse().map(item => <div className="manager-event" key={item.id}><span>{item.type}</span><p>{item.message}</p></div>)}
+                <div className="process-section-title"><strong>Atividade do gestor</strong><span>{filteredEvents.length}/{runtimeEvents.length} eventos</span></div><input className="event-search" aria-label="Filtrar eventos" placeholder="Filtrar por tipo ou mensagem..." value={eventSearch} onChange={event => setEventSearch(event.target.value)} />
+                {runtimeEvents.length === 0 ? <p className="manager-no-events">As instruções recebidas e as atualizações do core aparecerão aqui.</p> : filteredEvents.slice().reverse().map(item => <div className="manager-event" key={item.id}><span>{item.type}</span><p>{item.message}</p></div>)}
               </section>
               <div className="manager-inbox-note"><ShieldCheck size={15}/> Nenhuma instrução será executada sem passar pelas regras de aprovação do core.</div>
             </div>
@@ -374,8 +376,8 @@ function App() {
                 </div>
               </section>
               <section className="process-events">
-                <div className="process-section-title"><strong>Eventos recentes</strong><span>Eventos reais recebidos do core</span></div>
-                {runtimeEvents.length ? runtimeEvents.slice().reverse().slice(0, 12).map(event => <div className="process-event" key={event.id}><span className="event-marker info"/><time>Studio</time><strong>{event.type}</strong><span>{event.message}</span></div>) : <p className="manager-no-events">Nenhum evento recebido. Inicie uma tarefa pela área Agent.</p>}
+                <div className="process-section-title"><strong>Eventos recentes</strong><span>{filteredEvents.length} correspondentes</span></div><input className="event-search" aria-label="Filtrar eventos" placeholder="Filtrar por tipo ou mensagem..." value={eventSearch} onChange={event => setEventSearch(event.target.value)} />
+                {runtimeEvents.length ? filteredEvents.slice().reverse().slice(0, 12).map(event => <div className="process-event" key={event.id}><span className="event-marker info"/><time>Studio</time><strong>{event.type}</strong><span>{event.message}</span></div>) : <p className="manager-no-events">Nenhum evento recebido. Inicie uma tarefa pela área Agent.</p>}
               </section>
             </div>
           ) : (
