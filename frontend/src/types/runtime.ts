@@ -27,6 +27,7 @@ export interface RuntimeTask {
 
 export interface RuntimeEventBase {
   event_id: string;
+  execution_id: string;
   schema_version: 1;
   task_id: string;
   timestamp: string;
@@ -35,7 +36,7 @@ export interface RuntimeEventBase {
 
 export type RuntimeEvent =
   | (RuntimeEventBase & { type: "core.event"; payload: { event_type: string; message: string; data: Record<string, unknown>; sequence: number; iteration: number } })
-  | (RuntimeEventBase & { type: "task.created"; payload: { title: string; parent_id?: string } })
+  | (RuntimeEventBase & { type: "task.created"; payload: { title: string; status?: RuntimeStatus; parent_id?: string } })
   | (RuntimeEventBase & { type: "task.status_changed"; payload: { status: RuntimeStatus; reason?: string } })
   | (RuntimeEventBase & { type: "task.progress"; payload: { progress: number; message?: string } })
   | (RuntimeEventBase & { type: "agent.assigned"; payload: { agent_id: string } })
