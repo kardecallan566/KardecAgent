@@ -88,7 +88,8 @@ Every entity needs stable IDs, timestamps, schema versioning and explicit lifecy
 - [x] Launch the Python core and expose a startup handshake with its resource envelope.
 - [x] Typed JSONL commands, approval responses and event subscriptions.
 - [x] Stream plan steps and actual subtask board snapshots into the task map.
-- [ ] Durable task snapshots, reconnect/recovery and explicit runtime shutdown/cancel commands.
+- [x] Bounded startup restoration of the 20 most recently updated persisted tasks and their latest 100 events each.
+- [ ] Explicit resume actions, reconnect during an active child-process session and runtime shutdown/cancel commands.
 
 ### 4 — Task & execution observability
 - Task list/graph, timeline, status, output and change inspection.
@@ -130,3 +131,10 @@ Every entity needs stable IDs, timestamps, schema versioning and explicit lifecy
 The first desktop bridge is implemented in `src/kardecagent/studio_protocol.py` and `frontend/src-tauri/src/lib.rs`. Tauri manages a single Python child process, forwards JSONL stdout messages as runtime events, and sends typed commands through stdin. The Studio instruction composer submits to the central manager; plan and high-risk approval requests are shown in the Agent panel and resolved against their exact approval IDs.
 
 The bridge accepts one task at a time and waits synchronously for approval responses. `TaskState.record` forwards lifecycle events without changing the Python state machine or journal. The Studio consumes the real approved plan steps and `TaskBoard` snapshots embedded in lifecycle events, rendering current step progress, dependency, scope and status information. It shows one Python executor rather than simulated parallel agents. The runtime announces conservative limits (one task and one subtask at a time, at most six planned subtasks, configured LLM iterations and timeouts, bounded command output, 500-file project snapshots and 256 KiB events). Concurrent scheduling remains deferred until resource budgets, workspace write-conflict protection, cancellation and recovery are implemented in Python.
+
+
+### Startup task restoration
+
+The Python runtime now queries the existing `TaskStore` once at startup and replays a bounded history into the Studio event stream (up to 20 tasks and 100 events per task). This reuses the core's atomic snapshots and hash-chained journals rather than introducing a second persistence system. Interrupted executions are labeled recoverable but are not resumed automatically; explicit user intent is required before any further project mutation. Pending approvals that were not yet durably persisted remain outside this restoration scope.
+
+A GitHub Actions workflow now runs the Python test suite and the Studio TypeScript/Vite production build on pushes to the Studio branch and pull requests targeting the development branches. Local validation should still be performed before merging; workflow results are authoritative for the checked commit.
