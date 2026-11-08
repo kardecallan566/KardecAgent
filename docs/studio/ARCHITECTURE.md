@@ -13,7 +13,7 @@ The application must remain economical in CPU and RAM because local model infere
 - **Editor:** Monaco loaded only when an editor tab is opened; avoid eagerly mounting workers or multiple editor instances.
 - **Core:** existing Python package, launched/managed as a child process by the desktop shell. Do not duplicate business logic in TypeScript.
 - **Bridge:** versioned, typed IPC messages. Prefer request/response for commands and event streams for updates. Validate every payload at the boundary.
-- **Frontend contract:** `frontend/src/types/runtime.ts` defines the versioned snapshot, agent, task and event envelopes. It is a UI-facing contract only; the Python adapter and runtime transport still need to be connected.
+- **Frontend contract:** `frontend/src/types/runtime.ts` defines the versioned snapshot, agent, task and event envelopes. It is the UI-facing contract; the Python JSONL adapter and Tauri child-process transport are now connected for task submission, approvals and lifecycle events.
 - **Persistence:** Python core owns durable task state and journal. UI stores only preferences/layout/session presentation state.
 - **Filesystem:** backend mediates project operations; enforce canonical paths, workspace boundaries and symlink policy. UI must not become a privileged filesystem executor.
 
@@ -85,8 +85,10 @@ Every entity needs stable IDs, timestamps, schema versioning and explicit lifecy
 - Bounded filesystem/event handling and tests.
 
 ### 3 — Runtime bridge
-- Launch/health-check Python core.
-- Typed IPC, snapshots, event subscriptions and reconnect behavior.
+- [x] Launch the Python core and expose a startup handshake with its resource envelope.
+- [x] Typed JSONL commands, approval responses and event subscriptions.
+- [x] Stream plan steps and actual subtask board snapshots into the task map.
+- [ ] Durable task snapshots, reconnect/recovery and explicit runtime shutdown/cancel commands.
 
 ### 4 — Task & execution observability
 - Task list/graph, timeline, status, output and change inspection.
