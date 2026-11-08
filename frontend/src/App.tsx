@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { RuntimeLimits, RuntimeSubtask } from "./types/runtime";
+import type { RuntimeLimits, RuntimePlanStep, RuntimeSubtask } from "./types/runtime";
 import {
   Activity, Bot, CheckCircle2, ChevronDown, CircleDot,
   Clock3, FileCode2, Files, Folder, GitBranch,
@@ -28,6 +28,7 @@ function App() {
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string }>>([]);
   const [runtimeSubtasks, setRuntimeSubtasks] = useState<RuntimeSubtask[]>([]);
+  const [runtimePlanSteps, setRuntimePlanSteps] = useState<RuntimePlanStep[]>([]);
   const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
   const [activeRuntimeStep, setActiveRuntimeStep] = useState<number | null>(null);
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
@@ -59,6 +60,16 @@ function App() {
         const coreType = message.payload?.event_type || "core.event";
         const eventData = message.payload?.data || {};
         const board = eventData.board;
+        if (coreType === "plan_created" && Array.isArray(eventData.plan?.steps)) {
+          setRuntimePlanSteps(eventData.plan.steps.map((title: string, index: number) => ({ step: index + 1, title, status: "pending" })));
+        }
+        if (coreType === "plan_step_started" && Number.isInteger(eventData.step)) {
+          setActiveRuntimeStep(eventData.step);
+          setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "running" } : item));
+        }
+        if (coreType === "plan_step_completed" && Number.isInteger(eventData.step)) {
+          setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "completed" } : item));
+        }
         if (board && Array.isArray(board.subtasks)) {
           setRuntimeSubtasks(board.subtasks);
           const running = board.subtasks.find((item: RuntimeSubtask) => item.status === "running");
@@ -102,6 +113,7 @@ function App() {
         setRuntimeStatus("offline");
         setRuntimeBusy(false);
         setRuntimeSubtasks([]);
+        setRuntimePlanSteps([]);
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
         setRuntimeError(current => current || "O processo Python encerrou a conexão.");
@@ -151,6 +163,7 @@ function App() {
       setRuntimeEvents([]);
       setRuntimeTasks([]);
       setRuntimeSubtasks([]);
+      setRuntimePlanSteps([]);
       setActiveRuntimeSubtask(null);
       setActiveRuntimeStep(null);
       setRuntimeLimits(null);
