@@ -96,9 +96,10 @@ class AgentLoop:
         *,
         approval_callback=None,
         high_risk_approval_callback=None,
+        event_callback=None,
     ) -> TaskState:
         root = project_root.resolve()
-        state = TaskState(task, str(root))
+        state = TaskState(task, str(root), event_callback=event_callback)
         state.transition(TaskStatus.RUNNING, reason="Task execution initialized.")
         profile = detect_project(root)
         state.record("project_detected", f"Detected project kind: {profile.kind}.",
