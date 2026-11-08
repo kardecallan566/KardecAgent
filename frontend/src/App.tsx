@@ -85,7 +85,7 @@ function App() {
         }
         if (coreType === "subtask_progress") {
           setActiveRuntimeSubtask(eventData.subtask_id || null);
-          setActiveRuntimeStep(eventData.plan_step || null);
+          setActiveRuntimeStep(eventData.parent_plan_step || eventData.plan_step || null);
         }
         if (["subtask_completed", "subtask_failed", "subtask_blocked"].includes(coreType)) {
           setActiveRuntimeSubtask(null);
