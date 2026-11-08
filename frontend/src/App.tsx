@@ -80,6 +80,7 @@ function App() {
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
         setPendingApproval(null);
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
+        if (message.type === "command.rejected") setRuntimeBusy(false);
         setRuntimeError(message.message || message.reason || "Falha de comunicação com o runtime.");
       }
     });
@@ -122,6 +123,10 @@ function App() {
   }
 
   async function openProject() {
+    if (runtimeBusy) {
+      setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace.");
+      return;
+    }
     const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
     if (typeof selected !== "string") return;
     try {
@@ -155,6 +160,7 @@ function App() {
         type: "task.submit", schema_version: 1, command_id: crypto.randomUUID(),
         payload: { instruction: instructionDraft.trim(), project_root: projectRoot }
       }});
+      setRuntimeBusy(true);
       setInstructionDraft("");
       setRuntimeError(null);
     } catch (error) { setRuntimeError(String(error)); }
@@ -262,6 +268,9 @@ function App() {
                 <div className="runtime-capacity-grid">
                   <div><span>Concorrência</span><strong>{runtimeLimits?.max_concurrent_tasks ?? "—"}</strong><small>tarefas simultâneas</small></div>
                   <div><span>Subtarefas por plano</span><strong>{runtimeLimits?.max_subtasks ?? "—"}</strong><small>limite do decompositor</small></div>
+                  <div><span>Concorrência de subtarefas</span><strong>{runtimeLimits?.max_concurrent_subtasks ?? "—"}</strong><small>workers simultâneos</small></div>
+                  <div><span>Iterações LLM</span><strong>{runtimeLimits?.max_llm_iterations ?? "—"}</strong><small>máximo por tarefa</small></div>
+                  <div><span>Saída de comandos</span><strong>{runtimeLimits ? Math.round(runtimeLimits.max_command_output_chars / 1000) + "k" : "—"}</strong><small>caracteres retidos</small></div>
                   <div><span>Instrução máxima</span><strong>{runtimeLimits ? runtimeLimits.max_instruction_chars.toLocaleString("pt-BR") : "—"}</strong><small>caracteres</small></div>
                   <div><span>Evento máximo</span><strong>{runtimeLimits ? Math.round(runtimeLimits.max_event_bytes / 1024) + " KB" : "—"}</strong><small>payload JSONL</small></div>
                 </div>
