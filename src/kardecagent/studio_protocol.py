@@ -178,7 +178,11 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         if not isinstance(command_identifier, str) or not command_identifier.strip():
             _write({"type": "command.rejected", "reason": "command_id is required."})
             continue
-        if not isinstance(requested_root, str) or Path(requested_root).resolve() != root:
+        try:
+            workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+        except (OSError, RuntimeError):
+            workspace_matches = False
+        if not workspace_matches:
             _write({"type": "command.rejected", "command_id": command_identifier, "reason": "project_root does not match the active runtime workspace."})
             continue
         if not isinstance(instruction, str) or not instruction.strip():
