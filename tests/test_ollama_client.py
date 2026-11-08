@@ -66,3 +66,38 @@ def test_ollama_client_list_models(monkeypatch):
     )
 
     assert OllamaClient().list_models() == [{"name": "qwen3-coder:30b"}]
+
+
+def test_ollama_client_show_model(monkeypatch):
+    calls = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"details": {"family": "qwen", "parameter_size": "4B", "quantization_level": "Q4_K_M"}, "capabilities": ["tools"]}
+
+    def fake_post(url, **kwargs):
+        calls["url"] = url
+        calls["json"] = kwargs["json"]
+        return FakeResponse()
+
+    monkeypatch.setattr("kardecagent.llm.ollama.httpx.post", fake_post)
+    metadata = OllamaClient().show_model("qwen3.5:4b")
+    assert calls["url"].endswith("/api/show")
+    assert calls["json"]["model"] == "qwen3.5:4b"
+    assert metadata["details"]["quantization_level"] == "Q4_K_M"
+    assert "tools" in metadata["capabilities"]
+
+
+def test_ollama_client_server_version(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"version": "0.12.0"}
+
+    monkeypatch.setattr("kardecagent.llm.ollama.httpx.get", lambda *args, **kwargs: FakeResponse())
+    assert OllamaClient().server_version() == "0.12.0"
