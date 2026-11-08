@@ -286,6 +286,23 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "payload": {"title": persisted_state.task, "status": "running", "resumed": True},
                 })
+                for previous_event in persisted_state.events[-100:]:
+                    _write({
+                        "type": "core.event",
+                        "schema_version": 1,
+                        "event_id": f"{identifier}:{execution_id}:history:{previous_event.sequence}",
+                        "execution_id": execution_id,
+                        "task_id": identifier,
+                        "timestamp": previous_event.timestamp,
+                        "payload": {
+                            "event_type": previous_event.event_type,
+                            "message": previous_event.message,
+                            "data": previous_event.data,
+                            "sequence": previous_event.sequence,
+                            "iteration": previous_event.iteration,
+                            "restored": True,
+                        },
+                    })
 
                 def forward_resumed_event(event: AgentEvent) -> None:
                     _write({
