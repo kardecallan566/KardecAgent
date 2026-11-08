@@ -44,6 +44,7 @@ function App() {
   const [selectedProcess, setSelectedProcess] = useState("implement");
   const [selectedAgent, setSelectedAgent] = useState("agent-frontend");
   const [expandedProcesses, setExpandedProcesses] = useState<string[]>(["implement"]);
+  const [instructionDraft, setInstructionDraft] = useState("");
 
   async function openEntry(entry: ProjectEntry) {
     if (entry.is_dir) {
@@ -107,7 +108,22 @@ function App() {
         </aside>
 
         <section className="center-pane">
-          {activeNav === "tasks" ? (
+          {activeNav === "agent" ? (
+            <div className="manager-inbox">
+              <div className="process-toolbar"><div><span className="eyebrow">CENTRAL DE COMANDO</span><h2>Gestor de tarefas</h2><p>Envie uma instrução em linguagem natural. O gestor será responsável por planejar, decompor e distribuir o trabalho aos agentes.</p></div><span className="runtime-offline">CORE OFFLINE</span></div>
+              <section className="manager-inbox-card">
+                <div className="manager-inbox-icon"><Bot size={22}/></div>
+                <div><strong>Aguardando a primeira instrução</strong><p>As solicitações enviadas aparecerão aqui com seu estado: recebida, em planejamento, aguardando aprovação, em execução ou concluída.</p></div>
+              </section>
+              <div className="manager-flow">
+                <div><span>01</span><strong>Receber</strong><small>O gestor recebe seu objetivo e o contexto do projeto.</small></div>
+                <div><span>02</span><strong>Planejar</strong><small>O core Python cria um plano e solicita sua aprovação.</small></div>
+                <div><span>03</span><strong>Distribuir</strong><small>As tarefas são atribuídas aos agentes conforme dependências e recursos.</small></div>
+                <div><span>04</span><strong>Entregar</strong><small>Resultados, alterações e bloqueios ficam visíveis nesta área.</small></div>
+              </div>
+              <div className="manager-inbox-note"><ShieldCheck size={15}/> Nenhuma instrução será executada sem passar pelas regras de aprovação do core.</div>
+            </div>
+          ) : activeNav === "tasks" ? (
             <div className="process-dashboard">
               <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Visão de processos e dependências da tarefa selecionada</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
               <div className="process-summary"><div><span>PROCESSOS</span><strong>05</strong><small>1 ativo · 2 concluídos · 2 aguardando</small></div><div><span>PROGRESSO</span><strong>68%</strong><div className="progress-track"><i style={{width:"68%"}}/></div></div><div><span>TEMPO DECORRIDO</span><strong>02m 41s</strong><small>Última atualização há 3s</small></div></div>
@@ -179,7 +195,12 @@ function App() {
           ) : <>
             <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">● Offline</span></div>
             <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>
-            <div className="agent-composer"><textarea placeholder="Descreva uma tarefa para o agente..." rows={3}/><div className="composer-footer"><span>Enter para enviar</span><button disabled title="Core ainda não conectado"><Plus size={15}/></button></div></div>
+            <div className="agent-composer">
+              <label htmlFor="manager-instruction">Instrução para o gestor</label>
+              <textarea id="manager-instruction" value={instructionDraft} onChange={event => setInstructionDraft(event.target.value.slice(0, 8000))} placeholder="Ex.: Analise o projeto, proponha um plano e implemente a autenticação..." rows={4} maxLength={8000}/>
+              <div className="composer-footer"><span>{instructionDraft.length}/8000 · Envio disponível quando o core conectar</span><button disabled={!projectRoot || !instructionDraft.trim()} title="Runtime Python ainda não conectado"><Plus size={15}/></button></div>
+              <small className="composer-hint">A instrução será enviada ao gestor central, não diretamente a um agente individual.</small>
+            </div>
             <div className="agent-foot"><ShieldCheck size={13}/> Aprovações e ações sensíveis sob seu controle</div>
           </>}
         </aside>
