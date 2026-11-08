@@ -52,8 +52,7 @@ export interface RuntimeCommandBase {
 
 export type RuntimeCommand =
   | (RuntimeCommandBase & { type: "task.submit"; payload: { instruction: string; project_root: string } })
-  | (RuntimeCommandBase & { type: "approval.respond"; payload: { approval_id: string; decision: "approve" | "reject" } })
-;
+  | (RuntimeCommandBase & { type: "approval.respond"; payload: { approval_id: string; decision: "approve" | "reject" } });
 
 export interface RuntimeCommandAccepted {
   command_id: string;
