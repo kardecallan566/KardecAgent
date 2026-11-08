@@ -47,6 +47,7 @@ function App() {
   const [expandedProcesses, setExpandedProcesses] = useState<string[]>(["implement"]);
   const [instructionDraft, setInstructionDraft] = useState("");
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
@@ -65,8 +66,10 @@ function App() {
       } else if (message.type === "core.event") {
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.payload.event_type, message: message.payload.message }].slice(-100));
       } else if (message.type === "task.created") {
+        setRuntimeBusy(true);
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
       } else if (message.type === "task.completed" || message.type === "task.failed") {
+        setRuntimeBusy(false);
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
         setPendingApproval(null);
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
@@ -286,7 +289,7 @@ function App() {
             <div className="agent-composer">
               <label htmlFor="manager-instruction">Instrução para o gestor</label>
               <textarea id="manager-instruction" value={instructionDraft} onChange={event => setInstructionDraft(event.target.value.slice(0, 8000))} placeholder="Ex.: Analise o projeto, proponha um plano e implemente a autenticação..." rows={4} maxLength={8000}/>
-              <div className="composer-footer"><span>{instructionDraft.length}/8000 · {runtimeStatus === "online" ? "Pronto para enviar" : "Aguardando conexão"}</span><button onClick={submitInstruction} disabled={!projectRoot || !instructionDraft.trim() || runtimeStatus !== "online"} title={runtimeStatus === "online" ? "Enviar instrução ao gestor" : "Runtime Python ainda não conectado"}><Plus size={15}/></button></div>
+              <div className="composer-footer"><span>{instructionDraft.length}/8000 · {runtimeStatus !== "online" ? "Aguardando conexão" : runtimeBusy ? "Gestor ocupado" : "Pronto para enviar"}</span><button onClick={submitInstruction} disabled={!projectRoot || !instructionDraft.trim() || runtimeStatus !== "online" || runtimeBusy} title={runtimeStatus === "online" ? "Enviar instrução ao gestor" : "Runtime Python ainda não conectado"}><Plus size={15}/></button></div>
               <small className="composer-hint">A instrução será enviada ao gestor central, não diretamente a um agente individual.</small>
             </div>
             <div className="agent-foot"><ShieldCheck size={13}/> Aprovações e ações sensíveis sob seu controle</div>
