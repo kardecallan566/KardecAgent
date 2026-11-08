@@ -5,7 +5,7 @@ import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, GitBranch, LayoutDashboard,
   ListTodo, Plus, Search, ShieldCheck, TerminalSquare, Workflow,
-  Zap
+  Zap, Play, Pause, GitFork, Check, Circle, AlertCircle
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
@@ -77,25 +77,33 @@ function App() {
         </aside>
 
         <section className="center-pane">
-          <div className="tabs"><div className="tab active"><FileCode2 size={14}/>{selectedFile}<span className="tab-close">×</span></div><div className="tab-placeholder">KardecAgent Studio</div></div>
-          <div className="editor">
-            <div className="welcome">
-              <div className="welcome-icon"><Zap size={24}/></div>
-              <h1>KardecAgent <span>Studio</span></h1>
-              <p>Seu ambiente de desenvolvimento orientado por agentes.</p>
-              <div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary"><Plus size={15}/> Nova tarefa</button></div>
-              <div className="quick-grid">
-                <div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div>
-                <div><span className="quick-label">RUNTIME</span><strong className="status-muted">Desconectado</strong><small>Core Python não iniciado</small></div>
+          {activeNav === "tasks" ? (
+            <div className="process-dashboard">
+              <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Visão de processos e dependências da tarefa selecionada</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
+              <div className="process-summary"><div><span>PROCESSOS</span><strong>04</strong><small>1 ativo · 2 concluídos · 1 aguardando</small></div><div><span>PROGRESSO</span><strong>68%</strong><div className="progress-track"><i style={{width:"68%"}}/></div></div><div><span>TEMPO DECORRIDO</span><strong>02m 41s</strong><small>Última atualização há 3s</small></div></div>
+              <div className="flow-canvas">
+                <div className="flow-grid"/>
+                <div className="flow-label">T-025 · Criar shell desktop <span className="pill-running">EM EXECUÇÃO</span></div>
+                <div className="flow-line line-a"/><div className="flow-line line-b"/><div className="flow-line line-c"/><div className="flow-line line-d"/>
+                <div className="flow-node node-root"><div className="node-icon"><Workflow size={16}/></div><div><strong>Planejamento</strong><small>Plano definido</small></div><Check size={14} className="node-check"/></div>
+                <div className="flow-node node-active"><div className="node-icon"><Bot size={16}/></div><div><strong>Implementar UI</strong><small>Agente principal · 68%</small></div><span className="node-spinner"/></div>
+                <div className="flow-node node-done"><div className="node-icon"><FileCode2 size={16}/></div><div><strong>Estrutura base</strong><small>Concluído · 34s</small></div><Check size={14} className="node-check"/></div>
+                <div className="flow-node node-wait"><div className="node-icon"><ShieldCheck size={16}/></div><div><strong>Revisão</strong><small>Aguardando etapa anterior</small></div><Clock3 size={14} className="node-clock"/></div>
+                <div className="flow-node node-final"><div className="node-icon"><CheckCircle2 size={16}/></div><div><strong>Finalização</strong><small>Na fila</small></div></div>
+                <div className="canvas-legend"><span><i className="legend-dot done"/> Concluído</span><span><i className="legend-dot active"/> Em execução</span><span><i className="legend-dot wait"/> Aguardando</span></div>
               </div>
+              <div className="process-bottom"><div className="process-section-title"><strong>Etapas da execução</strong><span>4 etapas · ordenadas por dependência</span></div><div className="process-step"><span className="step-state done"><Check size={13}/></span><div><strong>Planejamento e decomposição</strong><small>Agente coordenador · 12:41:08</small></div><span className="step-duration">18s</span></div><div className="process-step selected"><span className="step-state active"><Play size={11}/></span><div><strong>Implementar UI</strong><small>Agente principal · trabalhando em App.tsx</small></div><span className="step-duration">68%</span></div><div className="process-step"><span className="step-state wait"><Clock3 size={12}/></span><div><strong>Revisão de alterações</strong><small>Dependência: Implementar UI</small></div><span className="step-duration">—</span></div></div>
             </div>
-          </div>
-          <div className="bottom-panel">
-            <div className="panel-tabs">{["Atividades","Output","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div>
-            <div className="panel-content"><Clock3 size={14}/><span>Eventos do runtime aparecerão aqui, sem polling contínuo.</span></div>
-          </div>
+          ) : (
+            <>
+              <div className="tabs"><div className="tab active"><FileCode2 size={14}/>{selectedFile}<span className="tab-close">×</span></div><div className="tab-placeholder">KardecAgent Studio</div></div>
+              <div className="editor">
+                {openedPath ? <div className="file-view"><div className="file-path">{openedPath}</div><pre>{fileContent}</pre></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">Desconectado</strong><small>Core Python não iniciado</small></div></div></div>}
+              </div>
+              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content"><Clock3 size={14}/><span>Eventos do runtime aparecerão aqui, sem polling contínuo.</span></div></div>
+            </>
+          )}
         </section>
-
         <aside className="agent-panel">
           <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">● Offline</span></div>
           <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>
