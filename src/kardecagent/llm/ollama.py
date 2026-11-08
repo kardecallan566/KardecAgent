@@ -58,6 +58,29 @@ class OllamaClient:
             raise RuntimeError("Ollama returned an invalid model list.")
         return models
 
+    def show_model(self, model: str | None = None) -> dict[str, Any]:
+        """Return Ollama metadata for a model (family, quantization, context, capabilities)."""
+        response = httpx.post(
+            f"{self.base_url}/api/show",
+            json={"model": model or self.model},
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("Ollama returned invalid model metadata.")
+        return data
+
+    def server_version(self) -> str:
+        """Return the Ollama server version without loading a model."""
+        response = httpx.get(f"{self.base_url}/api/version", timeout=self.timeout)
+        response.raise_for_status()
+        data = response.json()
+        version = data.get("version") if isinstance(data, dict) else None
+        if not isinstance(version, str) or not version:
+            raise RuntimeError("Ollama returned an invalid server version.")
+        return version
+
     def health_check(self) -> OllamaResponse:
         return self.chat(
             [
