@@ -273,7 +273,7 @@ function App() {
               <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Mapa de dependências e estados recebido por eventos do core Python</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
               <div className="process-summary"><div><span>ESTADO DO CORE</span><strong>{runtimeStatus === "online" ? "Online" : runtimeStatus === "connecting" ? "Conectando" : "Offline"}</strong><small>{runtimeBusy ? "Uma tarefa está em execução" : "Aguardando instrução"}</small></div><div><span>TAREFAS RECEBIDAS</span><strong>{String(runtimeTasks.length).padStart(2, "0")}</strong><small>Histórico recente nesta sessão</small></div><div><span>EVENTOS</span><strong>{String(runtimeEvents.length).padStart(2, "0")}</strong><small>Buffer limitado a 100 eventos</small></div></div>
               <section className="runtime-task-graph">
-                <div className="process-section-title"><strong>Mapa de execução do runtime</strong><span>{runtimeSubtasks.length ? `${runtimeSubtasks.length} subtarefas · dependências do core` : "Aguardando decomposição do plano"}</span></div>
+                <div className="process-section-title"><strong>Mapa de execução do runtime</strong><span>{runtimeSubtasks.length ? `${runtimeSubtasks.length} subtarefas · dependências do core` : runtimePlanSteps.length ? `${runtimePlanSteps.length} etapas aprovadas · progresso do executor` : "Aguardando o plano do core"}</span></div>
                 {runtimeSubtasks.length ? <div className="runtime-board-grid">
                   {runtimeSubtasks.map(subtask => <article className={`runtime-subtask-card status-${subtask.status}`} key={subtask.id}>
                     <div className="runtime-subtask-head"><span className="runtime-subtask-id">{subtask.id}</span><span className={`runtime-subtask-status status-${subtask.status}`}>{subtask.status === "running" ? "EM EXECUÇÃO" : subtask.status === "completed" ? "CONCLUÍDA" : subtask.status === "failed" ? "FALHOU" : subtask.status === "blocked" ? "BLOQUEADA" : "PENDENTE"}</span></div>
@@ -282,12 +282,16 @@ function App() {
                     {subtask.scope.length > 0 && <div className="runtime-subtask-scope">{subtask.scope.slice(0, 3).join(" · ")}{subtask.scope.length > 3 ? ` · +${subtask.scope.length - 3}` : ""}</div>}
                     {subtask.result && <small className="runtime-subtask-result">{subtask.result}</small>}
                   </article>)}
-                </div> : <div className="runtime-graph-empty"><Workflow size={22}/><strong>O grafo será construído a partir do plano aprovado</strong><p>Quando o core decompor uma tarefa, o Studio receberá o quadro real, incluindo dependências, escopos e estados de cada subtarefa.</p></div>}
+                </div> : runtimePlanSteps.length ? <div className="runtime-plan-grid">
+                  {runtimePlanSteps.map(step => <article className={`runtime-plan-step status-${step.status}`} key={step.step}>
+                    <span>ETAPA {step.step}</span><strong>{step.title}</strong><small>{step.status === "running" ? "EM EXECUÇÃO" : step.status === "completed" ? "CONCLUÍDA" : "PENDENTE"}</small>
+                  </article>)}
+                </div> : <div className="runtime-graph-empty"><Workflow size={22}/><strong>Aguardando o plano do gestor</strong><p>Assim que o core gerar o plano aprovado, as etapas aparecerão aqui. Se houver decomposição, o mapa muda para o grafo real de subtarefas e dependências.</p></div>}
               </section>
               <section className="agent-team">
                 <div className="process-section-title"><strong>Executor do runtime</strong><span>Estado real · sem agentes simulados</span></div>
                 <div className="runtime-executor-card">
-                  <span className={`runtime-executor-indicator ${runtimeBusy ? "busy" : "idle"}`}/><div><strong>Core Python · AgentLoop / Orchestrator</strong><small>{runtimeBusy ? activeRuntimeSubtask ? "Executando subtarefa " + activeRuntimeSubtask + (activeRuntimeStep ? " · etapa " + activeRuntimeStep : "") : "Planejando, aguardando aprovação ou executando tarefa" : "Ocioso · aguardando instrução"}</small></div>
+                  <span className={`runtime-executor-indicator ${runtimeBusy ? "busy" : "idle"}`}/><div><strong>Core Python · AgentLoop / Orchestrator</strong><small>{runtimeBusy ? activeRuntimeSubtask ? "Executando subtarefa " + activeRuntimeSubtask + (activeRuntimeStep ? " · etapa " + activeRuntimeStep : "") : activeRuntimeStep ? "Executando etapa " + activeRuntimeStep + " do plano" : "Planejando, aguardando aprovação ou executando tarefa" : "Ocioso · aguardando instrução"}</small></div>
                   <span className="runtime-executor-mode">{runtimeLimits?.execution_mode || "—"}</span>
                 </div>
               </section>
@@ -337,7 +341,11 @@ function App() {
                     <small>Estado: {item.status} · depende de: {item.dependencies.length ? item.dependencies.join(", ") : "nenhuma"}</small>
                     <small>Escopo: {item.scope.length ? item.scope.join(", ") : "não informado"}</small>
                   </div>)}
-                </> : <div className="runtime-graph-empty"><Workflow size={20}/><strong>Nenhum quadro de subtarefas recebido</strong><p>O inspetor será preenchido quando o gestor publicar a decomposição do plano aprovado.</p></div>}
+                </> : runtimePlanSteps.length ? <>
+                  <h3>Plano aprovado</h3>
+                  <div className="inspector-section-head"><strong>Etapas do plano</strong></div>
+                  {runtimePlanSteps.map(step => <div className="runtime-inspector-item" key={step.step}><strong>Etapa {step.step} · {step.title}</strong><small>Estado: {step.status}</small></div>)}
+                </> : <div className="runtime-graph-empty"><Workflow size={20}/><strong>Nenhum plano recebido</strong><p>O inspetor será preenchido quando o gestor publicar o plano aprovado.</p></div>}
                 <div className="inspector-divider"/>
                 <div className="inspector-section-head"><strong>Runtime Python</strong></div>
                 <div className="selected-agent-card"><div className={"agent-avatar-small " + (runtimeBusy ? "running" : "done")}><Bot size={15}/></div><div><strong>AgentLoop / Orchestrator</strong><small>{runtimeBusy ? "Ativo" : "Ocioso"} · {runtimeLimits?.execution_mode || "modo não informado"}</small></div></div>
