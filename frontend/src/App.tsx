@@ -10,6 +10,21 @@ import {
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
+type AgentRun = { id: string; name: string; role: string; task: string; status: "running" | "done" | "queued"; progress: number; output: string };
+type ProcessEvent = { id: string; time: string; kind: "info" | "success" | "warning"; agent: string; message: string };
+
+const agentRuns: AgentRun[] = [
+  { id: "agent-orchestrator", name: "Orquestrador", role: "Coordenação", task: "Distribuir etapas e dependências", status: "done", progress: 100, output: "Plano de execução definido e dividido em três frentes." },
+  { id: "agent-frontend", name: "Frontend", role: "Interface", task: "Construir componentes do Studio", status: "running", progress: 68, output: "Estrutura visual e painel de processos em implementação." },
+  { id: "agent-runtime", name: "Runtime", role: "Integração Python", task: "Preparar eventos do runtime", status: "running", progress: 42, output: "Contrato de eventos em preparação; execução real ainda desconectada." },
+  { id: "agent-review", name: "Revisor", role: "Qualidade", task: "Revisar alterações", status: "queued", progress: 0, output: "Aguardando a conclusão das frentes de implementação." }
+];
+
+const processEvents: ProcessEvent[] = [
+  { id: "evt-05", time: "12:43:49", kind: "info", agent: "Frontend", message: "Atualizando o inspetor de processos." },
+  { id: "evt-04", time: "12:43:22", kind: "success", agent: "Orquestrador", message: "Dependências das tarefas foram definidas." },
+  { id: "evt-03", time: "12:42:58", kind: "info", agent: "Runtime", message: "Contrato de eventos preparado para integração." }
+];
 
 const tasks = [
   { id: "T-024", title: "Mapear arquitetura do projeto", status: "Concluído", tone: "done" },
@@ -25,6 +40,7 @@ function App() {
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
   const [projectError, setProjectError] = useState<string | null>(null);\n  const [openedPath, setOpenedPath] = useState<string | null>(null);\n  const [fileContent, setFileContent] = useState<string>("");
   const [selectedProcess, setSelectedProcess] = useState("implement");
+  const [selectedAgent, setSelectedAgent] = useState("agent-frontend");
   const [expandedProcesses, setExpandedProcesses] = useState<string[]>(["implement"]);
 
   async function openEntry(entry: ProjectEntry) {\n    if (entry.is_dir) {\n      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectPath: entry.path })); setProjectError(null); }\n      catch (error) { setProjectError(String(error)); }\n      return;\n    }\n    try { setFileContent(await invoke<string>("read_project_file", { filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }\n    catch (error) { setProjectError(String(error)); }\n  }\n\n  async function openProject() {
@@ -94,12 +110,27 @@ function App() {
                 <button className={`flow-node node-final ${selectedProcess === "finish" ? "node-selected" : ""}`} onClick={() => setSelectedProcess("finish")}><div className="node-icon"><CheckCircle2 size={16}/></div><div><strong>Finalização</strong><small>Na fila</small></div></button>
                 <div className="canvas-legend"><span><i className="legend-dot done"/> Concluído</span><span><i className="legend-dot active"/> Em execução</span><span><i className="legend-dot wait"/> Aguardando</span></div>
               </div>
+              <section className="agent-team">
+                <div className="process-section-title"><strong>Equipe de agentes</strong><span>Execução paralela · 4 agentes</span></div>
+                <div className="agent-lanes">
+                  {agentRuns.map(agent => <button key={agent.id} className={"agent-lane " + (selectedAgent === agent.id ? "agent-lane-selected" : "")} onClick={() => setSelectedAgent(agent.id)}>
+                    <div className="agent-lane-top"><span className={"agent-avatar-small " + agent.status}><Bot size={14}/></span><span className="agent-lane-identity"><strong>{agent.name}</strong><small>{agent.role}</small></span><span className={"agent-state state-" + agent.status}>{agent.status === "running" ? "ATIVO" : agent.status === "done" ? "CONCLUÍDO" : "NA FILA"}</span></div>
+                    <div className="agent-lane-task">{agent.task}</div>
+                    <div className="agent-progress"><i style={{width: agent.progress + "%"}}/></div>
+                    <div className="agent-lane-foot"><span>{agent.status === "running" ? "Trabalhando" : agent.status === "done" ? "Finalizado" : "Aguardando"}</span><strong>{agent.progress}%</strong></div>
+                  </button>)}
+                </div>
+              </section>
               <div className="process-bottom"><div className="process-section-title"><strong>Etapas da execução</strong><span>5 etapas · selecione para inspecionar</span></div>
                 <button className={`process-step ${selectedProcess === "plan" ? "selected" : ""}`} onClick={() => setSelectedProcess("plan")}><span className="step-state done"><Check size={13}/></span><div><strong>Planejamento e decomposição</strong><small>Agente coordenador · 12:41:08</small></div><span className="step-duration">18s</span></button>
                 <button className={`process-step ${selectedProcess === "implement" ? "selected" : ""}`} onClick={() => setSelectedProcess("implement")}><span className="step-state active"><Play size={11}/></span><div><strong>Implementar UI</strong><small>Agente principal · trabalhando em App.tsx</small></div><span className="step-duration">68%</span></button>
                 <button className={`process-step ${selectedProcess === "structure" ? "selected" : ""}`} onClick={() => setSelectedProcess("structure")}><span className="step-state done"><Check size={13}/></span><div><strong>Estrutura base</strong><small>Agente frontend · concluído</small></div><span className="step-duration">34s</span></button>
                 <button className={`process-step ${selectedProcess === "review" ? "selected" : ""}`} onClick={() => setSelectedProcess("review")}><span className="step-state wait"><Clock3 size={12}/></span><div><strong>Revisão de alterações</strong><small>Dependência: Implementar UI</small></div><span className="step-duration">—</span></button>
               </div>
+              <section className="process-events">
+                <div className="process-section-title"><strong>Eventos recentes</strong><span>Feed local demonstrativo · sem polling</span></div>
+                {processEvents.map(event => <div className="process-event" key={event.id}><span className={"event-marker " + event.kind}/><time>{event.time}</time><strong>{event.agent}</strong><span>{event.message}</span></div>)}
+              </section>
             </div>
           ) : (
             <>
@@ -123,6 +154,10 @@ function App() {
                 <div className="inspector-divider"/>
                 <div className="inspector-section-head"><strong>Subprocessos</strong><button onClick={() => setExpandedProcesses(current => current.includes(selectedProcess) ? current.filter(id => id !== selectedProcess) : [...current, selectedProcess])}>{expandedProcesses.includes(selectedProcess) ? "Recolher" : "Expandir"} <ChevronDown size={12}/></button></div>
                 {expandedProcesses.includes(selectedProcess) ? <div className="subprocess-list"><div><span className="subprocess-dot complete"/><section><strong>{selectedProcess === "plan" ? "Analisar contexto" : "Preparar contexto"}</strong><small>Concluído · etapa interna</small></section><Check size={13}/></div><div><span className={`subprocess-dot ${selectedProcess === "implement" ? "running" : "queued"}`}/><section><strong>{selectedProcess === "implement" ? "Construir componentes" : "Validar dependências"}</strong><small>{selectedProcess === "implement" ? "Executando · agente frontend" : "Na fila"}</small></section>{selectedProcess === "implement" ? <span className="node-spinner"/> : <Clock3 size={13}/>}</div><div><span className="subprocess-dot queued"/><section><strong>Registrar resultados</strong><small>Dependente da etapa anterior</small></section><Clock3 size={13}/></div></div> : <p className="inspector-hint">Subprocessos recolhidos. Expanda para ver as atividades internas.</p>}
+                <div className="inspector-divider"/>
+                <div className="inspector-section-head"><strong>Agente selecionado</strong></div>
+                {agentRuns.filter(agent => agent.id === selectedAgent).map(agent => <div className="selected-agent-card" key={agent.id}><div className={"agent-avatar-small " + agent.status}><Bot size={15}/></div><div><strong>{agent.name}</strong><small>{agent.role} · {agent.status === "running" ? "Ativo" : agent.status === "done" ? "Concluído" : "Na fila"}</small></div></div>)}
+                <div className="inspector-output">{agentRuns.find(agent => agent.id === selectedAgent)?.output}</div>
                 <div className="inspector-divider"/>
                 <div className="inspector-section-head"><strong>Contexto e recursos</strong></div>
                 <div className="resource-row"><FileCode2 size={14}/><span>frontend/src/App.tsx</span></div><div className="resource-row"><Files size={14}/><span>Arquivos de interface</span></div>
