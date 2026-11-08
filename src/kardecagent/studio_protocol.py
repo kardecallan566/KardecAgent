@@ -74,7 +74,9 @@ def _approval(
                 "reason": "Only the matching approval response is accepted while approval is pending.",
             })
             continue
-        if message.get("approval_id") != approval_identifier:
+        payload = message.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
+        if payload.get("approval_id") != approval_identifier:
             _write({
                 "type": "command.rejected",
                 "schema_version": 1,
@@ -82,7 +84,7 @@ def _approval(
                 "reason": "Approval identifier does not match the pending request.",
             })
             continue
-        decision = message.get("decision")
+        decision = payload.get("decision")
         if decision not in {"approve", "reject"}:
             _write({
                 "type": "command.rejected",
@@ -114,7 +116,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
             continue
 
-        if message.get("type") != "task.submit":
+        if message.get("schema_version") != 1 or message.get("type") != "task.submit":
             _write({
                 "type": "command.rejected",
                 "schema_version": 1,
@@ -124,7 +126,9 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             continue
 
         command_identifier = message.get("command_id")
-        instruction = message.get("instruction")
+        payload = message.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
+        instruction = payload.get("instruction")
         if not isinstance(command_identifier, str) or not command_identifier.strip():
             _write({"type": "command.rejected", "reason": "command_id is required."})
             continue
@@ -149,7 +153,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             "schema_version": 1,
             "event_id": str(uuid.uuid4()),
             "task_id": identifier,
-            "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {"title": instruction},
         })
 
