@@ -105,6 +105,7 @@ function App() {
         setActiveRuntimeStep(null);
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
         setPendingApproval(null);
+        setApprovalSubmitting(false);
       } else if (message.type === "command.accepted" && message.command_id === approvalCommandId.current) {
         approvalCommandId.current = null;
         setApprovalSubmitting(false);
@@ -128,6 +129,9 @@ function App() {
         setRuntimePlanSteps([]);
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
+        setPendingApproval(null);
+        setApprovalSubmitting(false);
+        approvalCommandId.current = null;
         setRuntimeError(current => current || "O processo Python encerrou a conexão.");
       }
     });
@@ -181,6 +185,7 @@ function App() {
       setRuntimeLimits(null);
       setRuntimeBusy(false);
       setPendingApproval(null);
+      setApprovalSubmitting(false);
       seenEventIds.current.clear();
       approvalCommandId.current = null;
       setRuntimeStatus("connecting");
