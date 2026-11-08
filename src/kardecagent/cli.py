@@ -37,6 +37,8 @@ def build_parser():
     doctor.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider to check.")
     tasks = subs.add_parser("tasks", help="List persisted tasks for a project.")
     tasks.add_argument("--project", required=True)
+    studio = subs.add_parser("studio", help="Run the JSONL desktop Studio runtime.")
+    studio.add_argument("--project", required=True)
     benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
     benchmark.add_argument("--timeout", type=float, default=180.0)
@@ -358,6 +360,10 @@ def main() -> int:
     if args.command == "tasks":
         root = resolve_project_root(args.project)
         return _tasks(root)
+    if args.command == "studio":
+        from .studio_protocol import run_stdio
+        root = resolve_project_root(args.project)
+        return run_stdio(root, AgentLoop(_build_llm(settings), settings))
     if args.command == "benchmark":
         return _benchmark(settings, args.models, args.timeout, args.level)
 
