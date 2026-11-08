@@ -46,7 +46,7 @@ def test_run_stdio_forwards_real_state_events_and_execution_identity(monkeypatch
     monkeypatch.setattr(studio_protocol, "_approval", lambda *args, **kwargs: True)
 
     class FakeAgent:
-        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200)
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
 
         def run(self, root, instruction, *, event_callback, approval_callback, high_risk_approval_callback):
             event_callback(AgentEvent(1, "plan_created", "Plan created", {"steps": 2}, sequence=1))
