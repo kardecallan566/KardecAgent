@@ -15,6 +15,7 @@ from .agent.persistence import task_id
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_EVENT_BYTES = 256 * 1024
 MAX_INSTRUCTION_LENGTH = 8000
+MAX_SEEN_COMMAND_IDS = 1000
 
 
 class StudioProtocolError(ValueError):
@@ -133,6 +134,7 @@ def _approval(
 def run_stdio(project_root: Path, agent: AgentLoop) -> int:
     """Serve a bounded JSONL command/event stream for the desktop Studio."""
     root = project_root.resolve()
+    seen_command_ids: dict[str, None] = {}
     _write({
         "type": "runtime.ready",
         "schema_version": 1,
@@ -192,6 +194,12 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         if len(instruction) > MAX_INSTRUCTION_LENGTH:
             _write({"type": "command.rejected", "command_id": command_identifier, "reason": "instruction exceeds 8000 characters."})
             continue
+        if command_identifier in seen_command_ids:
+            _write({"type": "command.rejected", "command_id": command_identifier, "reason": "command_id has already been processed."})
+            continue
+        seen_command_ids[command_identifier] = None
+        if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+            del seen_command_ids[next(iter(seen_command_ids))]
 
         identifier = task_id(instruction, root)
         execution_id = str(uuid.uuid4())
