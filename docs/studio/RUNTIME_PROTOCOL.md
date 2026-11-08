@@ -55,9 +55,9 @@ A response is accepted only for the currently pending approval ID. While approva
 
 ## Events
 
-- `runtime.ready`: process initialized, workspace fixed and resource limits announced (`max_concurrent_tasks`, `max_concurrent_subtasks`, `max_subtasks`, LLM iteration and output caps).
+- `runtime.ready`: process initialized, workspace fixed and resource limits announced (`max_concurrent_tasks`, `max_concurrent_subtasks`, `max_subtasks`, LLM iteration and output caps). After this event, the runtime replays a bounded history of up to 20 persisted tasks as `task.created`, their last 100 `core.event` records and a terminal event.
 - `command.accepted` / `command.rejected`: command acknowledgement.
-- `task.created`: task accepted by the manager.
+- `task.created`: task accepted by the manager. On startup restoration, `payload.restored` is `true` and the event represents historical work, not a new execution.
 - `core.event`: bounded lifecycle envelope from `TaskState.record`, including event type, sequence, iteration, message and event data. The UI uses `plan_created`, `plan_step_started`, `plan_step_completed` and subtask board snapshots to build the live task map. Events carry both the persisted task ID and a per-execution ID so repeated runs of the same task remain distinct.
 - `task.created`, `approval.requested`, `core.event`, `task.completed` and `task.failed` include the execution ID.
 - `approval.requested`: plan or additional high-risk approval; contains the exact approval ID and formatted plan.
@@ -73,5 +73,6 @@ Event IDs are unique per runtime execution; task IDs remain the Python persisten
 - The existing Python orchestrator still executes logical subtasks sequentially. The Studio renders the actual subtask dependency board and one real Python executor; it does not fabricate parallel agents.
 - Default resource envelope: one active task per runtime, one active subtask, up to six planned subtasks, configured `max_iterations`, bounded command output, 500-file project snapshots, configured LLM/command timeouts, 8,000-character instructions and 256 KiB event messages.
 - These are application-level workload limits, not hard operating-system CPU/RAM quotas; process isolation will be evaluated with profiling before workers are enabled.
-- Cancellation, pause/resume commands, startup/reconnect snapshots, durable approval inbox recovery and concurrent submissions are not yet exposed through this protocol.
+- Startup restoration loads up to 20 most recently updated persisted tasks from the project's `TaskStore`, replaying at most 100 events per task. Interrupted tasks are marked recoverable in the UI; they are never resumed automatically, so opening the Studio cannot unexpectedly modify files. Only approved tasks already written to the durable store are included; approvals waiting before persistence are not yet recoverable.
+- Cancellation, pause commands, durable approval inbox recovery and concurrent submissions are not yet exposed through this protocol. Resume remains an explicit core operation and is not yet wired to the Studio UI.
 - Do not add concurrency until resource budgets, workspace write-conflict checks, cancellation and recovery semantics are implemented in the Python scheduler.
