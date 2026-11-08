@@ -13,6 +13,7 @@ from .agent.persistence import task_id
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
+MAX_EVENT_BYTES = 256 * 1024
 MAX_INSTRUCTION_LENGTH = 8000
 
 
@@ -21,7 +22,22 @@ class StudioProtocolError(ValueError):
 
 
 def _write(message: dict) -> None:
-    sys.stdout.write(json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n")
+    encoded = json.dumps(message, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(encoded.encode("utf-8")) > MAX_EVENT_BYTES:
+        bounded = dict(message)
+        payload = bounded.get("payload")
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            if "data" in payload:
+                payload["data"] = {"truncated": True}
+            for key in ("message", "summary", "result_summary"):
+                if isinstance(payload.get(key), str):
+                    payload[key] = payload[key][:4000]
+            bounded["payload"] = payload
+        if isinstance(bounded.get("message"), str):
+            bounded["message"] = bounded["message"][:4000]
+        encoded = json.dumps(bounded, ensure_ascii=False, separators=(",", ":"), default=str)
+    sys.stdout.write(encoded + "\n")
     sys.stdout.flush()
 
 
@@ -30,6 +46,8 @@ def _read_message() -> dict:
     if not line:
         raise EOFError("Studio disconnected while waiting for a command or approval.")
     if len(line.encode("utf-8")) > MAX_MESSAGE_BYTES:
+        while line and not line.endswith("\n"):
+            line = sys.stdin.readline(MAX_MESSAGE_BYTES + 1)
         raise StudioProtocolError("Command exceeds the 64 KiB protocol limit.")
     try:
         message = json.loads(line)
@@ -65,7 +83,11 @@ def _approval(
     })
 
     while True:
-        message = _read_message()
+        try:
+            message = _read_message()
+        except StudioProtocolError as exc:
+            _write({"type": "command.rejected", "schema_version": 1, "reason": str(exc)})
+            continue
         if message.get("schema_version") != 1 or message.get("type") != "approval.respond":
             _write({
                 "type": "command.rejected",
