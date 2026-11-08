@@ -60,6 +60,7 @@ def _read_message() -> dict:
 
 def _approval(
     task_identifier: str,
+    execution_identifier: str,
     plan: ExecutionPlan,
     *,
     kind: str,
@@ -71,7 +72,8 @@ def _approval(
     _write({
         "type": "approval.requested",
         "schema_version": 1,
-        "event_id": str(uuid.uuid4()),
+        "event_id": f"{task_identifier}:{execution_identifier}:approval:{uuid.uuid4()}",
+        "execution_id": execution_identifier,
         "task_id": task_identifier,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": {
@@ -190,6 +192,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "type": "core.event",
                 "schema_version": 1,
                 "event_id": f"{identifier}:{execution_id}:{event.sequence}",
+                "execution_id": execution_id,
                 "task_id": identifier,
                 "timestamp": event.timestamp,
                 "payload": {
@@ -206,8 +209,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 root,
                 instruction,
                 event_callback=forward_event,
-                approval_callback=lambda plan: _approval(identifier, plan, kind="plan"),
-                high_risk_approval_callback=lambda plan: _approval(identifier, plan, kind="high_risk"),
+                approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="plan"),
+                high_risk_approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="high_risk"),
             )
             _write({
                 "type": "task.completed" if state.status.value == "completed" else "task.failed",
