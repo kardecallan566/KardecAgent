@@ -133,7 +133,21 @@ def _approval(
 def run_stdio(project_root: Path, agent: AgentLoop) -> int:
     """Serve a bounded JSONL command/event stream for the desktop Studio."""
     root = project_root.resolve()
-    _write({"type": "runtime.ready", "schema_version": 1, "project_root": str(root)})
+    _write({
+        "type": "runtime.ready",
+        "schema_version": 1,
+        "project_root": str(root),
+        "limits": {
+            "max_concurrent_tasks": 1,
+            "max_subtasks": 6,
+            "max_concurrent_subtasks": 1,
+            "max_llm_iterations": agent.settings.max_iterations,
+            "max_command_output_chars": agent.settings.max_command_output_chars,
+            "max_instruction_chars": MAX_INSTRUCTION_LENGTH,
+            "max_event_bytes": MAX_EVENT_BYTES,
+            "execution_mode": "sequential",
+        },
+    })
 
     while True:
         try:
