@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Callable
 
 
 class TaskStatus(str, Enum):
@@ -54,6 +55,7 @@ class TaskState:
     active_plan_step: int = 1
     active_subtask_id: str | None = None
     active_subtask_step: int = 1
+    event_callback: Callable[[AgentEvent], None] | None = field(default=None, repr=False, compare=False)
 
     def record(self, event_type: str, message: str, **data) -> None:
         # Keep the in-memory cursor synchronized. The journal replays the same
@@ -88,7 +90,10 @@ class TaskState:
             if data.get("subtask_id") == self.active_subtask_id:
                 self.active_subtask_id = None
                 self.active_subtask_step = 1
-        self.events.append(AgentEvent(self.iteration, event_type, message, data, sequence=len(self.events) + 1))
+        event = AgentEvent(self.iteration, event_type, message, data, sequence=len(self.events) + 1)
+        self.events.append(event)
+        if self.event_callback is not None:
+            self.event_callback(event)
 
     def transition(self, new_status: TaskStatus, *, reason: str = "", **data) -> None:
         """Move the controller-owned task state through a legal transition."""
