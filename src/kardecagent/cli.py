@@ -7,6 +7,7 @@ from .agent import AgentLoop
 from .config import Settings, resolve_project_root
 from .llm import LocalLLMClient, OllamaClient
 from .llm.benchmark import default_models, run_benchmark, run_agentic_benchmark
+from .llm.catalog import LOCAL_MODEL_CATALOG
 from .project import detect_project
 from .agent.persistence import TaskStore, PersistenceError
 
@@ -39,7 +40,7 @@ def build_parser():
     tasks.add_argument("--project", required=True)
     studio = subs.add_parser("studio", help="Run the JSONL desktop Studio runtime.")
     studio.add_argument("--project", required=True)
-    benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
+    models = subs.add_parser("models", help="List installed Ollama models and a curated local catalog.")\n    models.add_argument("--installed-only", action="store_true", help="Show only models installed in Ollama.")\n    benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
     benchmark.add_argument("--timeout", type=float, default=180.0)
     benchmark.add_argument("--level", choices=("basic", "agentic"), default="agentic", help="Benchmark level (default: agentic).")
@@ -313,7 +314,7 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
     return 0
 
 
-def _tasks(root) -> int:
+def _models(settings: Settings, installed_only: bool = False) -> int:\n    if settings.llm_provider != "ollama":\n        print("The installed-model inventory currently requires provider=ollama.")\n        print(f"Configured provider: {settings.llm_provider}")\n        return 1\n    client = OllamaClient(settings.ollama_base_url, settings.llm_model, settings.llm_timeout_seconds)\n    try:\n        installed = client.list_models()\n    except Exception as exc:\n        print(f"[FAIL] Ollama unavailable at {settings.ollama_base_url}: {exc}")\n        return 1\n    print(f"Ollama: connected ({settings.ollama_base_url})")\n    print(f"Configured model: {settings.llm_model}")\n    print("\\nInstalled models:")\n    if not installed:\n        print("  (none)")\n    for item in installed:\n        if isinstance(item, dict):\n            name = item.get("name", "unknown")\n            size = item.get("size")\n            size_text = f" | {size / (1024**3):.1f} GiB on disk" if isinstance(size, (int, float)) else ""\n            print(f"  - {name}{size_text}")\n    if installed_only:\n        return 0\n    print("\\nCurated local model candidates (indicative memory; benchmark before routing):")\n    names = {str(item.get("name", "")) for item in installed if isinstance(item, dict)}\n    for spec in LOCAL_MODEL_CATALOG:\n        marker = " [installed]" if spec.name in names else ""\n        print(f"  - {spec.name}{marker} | {spec.vram_gb} | {spec.role} | {spec.notes}")\n    print("\\nNote: model weights are not peak VRAM. Context/KV cache and runtime buffers add memory.")\n    return 0\n\n\ndef _tasks(root) -> int:
     store = TaskStore(root)
     try:
         paths = sorted(store.directory.glob("*.json"))
