@@ -93,13 +93,20 @@ function App() {
       }
     });
     const stderr = listen<string>("runtime-stderr", event => {
-      if (active && event.payload.trim()) setRuntimeError(event.payload.slice(0, 2000));
+      if (!active || !event.payload.trim()) return;
+      const line = event.payload.slice(0, 2000);
+      setRuntimeEvents(items => [...items, { id: crypto.randomUUID(), type: "runtime.log", message: line }].slice(-100));
+      if (/\\b(ERROR|CRITICAL|Traceback|Exception)\\b/.test(line)) setRuntimeError(line);
+    });
+    const protocolError = listen<string>("runtime-protocol-error", event => {
+      if (active) setRuntimeError("Falha no protocolo do runtime: " + event.payload.slice(0, 1000));
     });
     return () => {
       active = false;
       unlisten.then(stop => stop());
       streamClosed.then(stop => stop());
       stderr.then(stop => stop());
+      protocolError.then(stop => stop());
       void invoke("stop_runtime").catch(() => undefined);
     };
   }, []);
@@ -229,7 +236,7 @@ function App() {
             </div>
           ) : activeNav === "tasks" ? (
             <div className="process-dashboard">
-              <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Prévia do grafo de tarefas · aguardando dados reais do runtime</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
+              <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Mapa de dependências e estados recebido por eventos do core Python</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
               <div className="process-summary"><div><span>ESTADO DO CORE</span><strong>{runtimeStatus === "online" ? "Online" : runtimeStatus === "connecting" ? "Conectando" : "Offline"}</strong><small>{runtimeBusy ? "Uma tarefa está em execução" : "Aguardando instrução"}</small></div><div><span>TAREFAS RECEBIDAS</span><strong>{String(runtimeTasks.length).padStart(2, "0")}</strong><small>Histórico recente nesta sessão</small></div><div><span>EVENTOS</span><strong>{String(runtimeEvents.length).padStart(2, "0")}</strong><small>Buffer limitado a 100 eventos</small></div></div>
               <section className="runtime-task-graph">
                 <div className="process-section-title"><strong>Mapa de execução do runtime</strong><span>{runtimeSubtasks.length ? `${runtimeSubtasks.length} subtarefas · dependências do core` : "Aguardando decomposição do plano"}</span></div>
@@ -316,7 +323,7 @@ function App() {
         </aside>
       </div>
 
-      <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> UI Preview <span>·</span> {runtimeStatus === "online" ? "Runtime conectado" : runtimeStatus === "connecting" ? "Conectando runtime" : "Runtime offline"}</div></footer>
+      <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> Studio <span>·</span> {runtimeStatus === "online" ? "Runtime conectado" : runtimeStatus === "connecting" ? "Conectando runtime" : "Runtime offline"}</div></footer>
     </main>
   );
 }
