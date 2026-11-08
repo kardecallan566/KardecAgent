@@ -32,11 +32,22 @@ impl Drop for RuntimeProcess {
 #[derive(Default)]
 struct RuntimeState(Mutex<Option<RuntimeProcess>>);
 
-#[tauri::command]
-fn read_project_entries(project_path: String) -> Result<Vec<ProjectEntry>, String> {
-    let root = Path::new(&project_path)
+fn resolve_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
+    let root = Path::new(project_root)
         .canonicalize()
-        .map_err(|e| format!("Não foi possível acessar o projeto: {e}"))?;
+        .map_err(|e| format!("Não foi possível acessar a raiz do projeto: {e}"))?;
+    let path = Path::new(requested_path)
+        .canonicalize()
+        .map_err(|e| format!("Não foi possível acessar o caminho: {e}"))?;
+    if !path.starts_with(&root) {
+        return Err("A operação está fora da pasta do projeto.".into());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn read_project_entries(project_root: String, project_path: String) -> Result<Vec<ProjectEntry>, String> {
+    let root = resolve_workspace_path(&project_root, &project_path)?;
     if !root.is_dir() {
         return Err("O caminho selecionado não é uma pasta.".into());
     }
@@ -64,8 +75,8 @@ fn read_project_entries(project_path: String) -> Result<Vec<ProjectEntry>, Strin
 }
 
 #[tauri::command]
-fn read_project_file(file_path: String) -> Result<String, String> {
-    let path = Path::new(&file_path).canonicalize()
+fn read_project_file(project_root: String, file_path: String) -> Result<String, String> {
+    let path = resolve_workspace_path(&project_root, &file_path)
         .map_err(|e| format!("Não foi possível abrir o arquivo: {e}"))?;
     if !path.is_file() { return Err("O caminho selecionado não é um arquivo.".into()); }
     let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
