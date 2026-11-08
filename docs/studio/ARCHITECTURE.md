@@ -2,7 +2,7 @@
 
 ## Product goal
 
-Build a native desktop workspace for KardecAgent. The UI is a control and observation surface; the existing Python core remains the source of truth for task execution, authorization, state transitions, persistence, verification, and recovery.
+Build a native desktop workspace for KardecAgent. The UI is a control and observation surface; the existing Python core remains the source of truth for task execution, authorization, state transitions, persistence, verification, and recovery. Rust is a possible future, selective optimization—not a prerequisite for the MVP. See [Rust migration note](./RUST_MIGRATION_NOTE.md).
 
 The application must remain economical in CPU and RAM because local model inference is already resource-intensive.
 
@@ -65,7 +65,7 @@ The application must remain economical in CPU and RAM because local model infere
 
 Every entity needs stable IDs, timestamps, schema versioning and explicit lifecycle states. Approval decisions must reference the exact request and operation fingerprint; never authorize a broad future action.
 
-## Delivery sequence
+## Technology evolution (deferred)\n\n- Keep Python as the agent/core implementation through the MVP and early versions.\n- Validate desktop UX, real agent execution, approvals, recovery and CPU/RAM usage before architectural rewrites.\n- Revisit Rust after several versions and profiling; port only modules with clear measured benefit.\n- No full rewrite: preserve Python components that remain appropriate.\n\n## Delivery sequence
 
 ### 0 — Baseline and contracts
 - Audit current core APIs, controller, persistence and tests.
