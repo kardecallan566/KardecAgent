@@ -220,6 +220,14 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             return 0
         except Exception as exc:
             _write({
+                "type": "task.failed",
+                "schema_version": 1,
+                "event_id": f"{identifier}:{execution_id}:terminal-error",
+                "task_id": identifier,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": {"message": str(exc), "recoverable": True},
+            })
+            _write({
                 "type": "runtime.error",
                 "schema_version": 1,
                 "task_id": identifier,
