@@ -197,3 +197,5 @@
 .runtime-plan-step.status-running > small { color: #c4a4e8; }
 .runtime-plan-step.status-completed { border-color: #365d4d; }
 .runtime-plan-step.status-completed > small { color: #8bc5a7; }
+
+.task-mini svg.failed{color:#dc8290}
