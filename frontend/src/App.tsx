@@ -271,6 +271,9 @@ function App() {
                   <div><span>Concorrência de subtarefas</span><strong>{runtimeLimits?.max_concurrent_subtasks ?? "—"}</strong><small>workers simultâneos</small></div>
                   <div><span>Iterações LLM</span><strong>{runtimeLimits?.max_llm_iterations ?? "—"}</strong><small>máximo por tarefa</small></div>
                   <div><span>Saída de comandos</span><strong>{runtimeLimits ? Math.round(runtimeLimits.max_command_output_chars / 1000) + "k" : "—"}</strong><small>caracteres retidos</small></div>
+                  <div><span>Snapshot de projeto</span><strong>{runtimeLimits?.max_project_snapshot_files ?? "—"}</strong><small>arquivos por contexto</small></div>
+                  <div><span>Timeout LLM</span><strong>{runtimeLimits?.max_llm_timeout_seconds ?? "—"}s</strong><small>por chamada</small></div>
+                  <div><span>Timeout de comando</span><strong>{runtimeLimits?.max_command_timeout_seconds ?? "—"}s</strong><small>por execução</small></div>
                   <div><span>Instrução máxima</span><strong>{runtimeLimits ? runtimeLimits.max_instruction_chars.toLocaleString("pt-BR") : "—"}</strong><small>caracteres</small></div>
                   <div><span>Evento máximo</span><strong>{runtimeLimits ? Math.round(runtimeLimits.max_event_bytes / 1024) + " KB" : "—"}</strong><small>payload JSONL</small></div>
                 </div>
