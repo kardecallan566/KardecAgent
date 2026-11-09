@@ -439,8 +439,8 @@ def main() -> int:
                           high_risk_approval_callback=_approve_high_risk)
     else:
         state = agent.resume(root, args.task)
-    print(f"Status: {state.status.value}
-Iterations: {state.iteration}")
+    print(f"Status: {state.status.value}")
+    print(f"Iterations: {state.iteration}")
     for event in state.events[-10:]:
         print(f"[{event.event_type}] {event.message}")
     return 0 if state.status.value == "completed" else 1
