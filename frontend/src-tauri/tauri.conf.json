@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [],
     "category": "DeveloperTool",
     "shortDescription": "Local-first agent development workspace"
   }
