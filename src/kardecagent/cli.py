@@ -40,7 +40,10 @@ def build_parser():
     tasks.add_argument("--project", required=True)
     studio = subs.add_parser("studio", help="Run the JSONL desktop Studio runtime.")
     studio.add_argument("--project", required=True)
-    models = subs.add_parser("models", help="List installed Ollama models and a curated local catalog.")\n    models.add_argument("--installed-only", action="store_true", help="Show only models installed in Ollama.")\n    models.add_argument("--inspect", default=None, help="Inspect metadata for an installed model tag.")\n    benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
+    models = subs.add_parser("models", help="List installed Ollama models and a curated local catalog.")
+    models.add_argument("--installed-only", action="store_true", help="Show only models installed in Ollama.")
+    models.add_argument("--inspect", default=None, help="Inspect metadata for an installed model tag.")
+    benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
     benchmark.add_argument("--timeout", type=float, default=180.0)
     benchmark.add_argument("--level", choices=("basic", "agentic"), default="agentic", help="Benchmark level (default: agentic).")
@@ -198,7 +201,8 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
         if not overall:
             print("Benchmark completed with no successful model runs.")
             return 1
-        print("\nSummary")
+        print("
+Summary")
         for model, passed, total, elapsed, tps in overall:
             print(f"- {model}: {passed}/{total} passed | {elapsed:.2f}s total | {tps:.2f} tok/s avg")
         return 0
@@ -436,7 +440,8 @@ def main() -> int:
                           high_risk_approval_callback=_approve_high_risk)
     else:
         state = agent.resume(root, args.task)
-    print(f"Status: {state.status.value}\nIterations: {state.iteration}")
+    print(f"Status: {state.status.value}
+Iterations: {state.iteration}")
     for event in state.events[-10:]:
         print(f"[{event.event_type}] {event.message}")
     return 0 if state.status.value == "completed" else 1
