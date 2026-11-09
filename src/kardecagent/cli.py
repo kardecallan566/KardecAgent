@@ -201,8 +201,7 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
         if not overall:
             print("Benchmark completed with no successful model runs.")
             return 1
-        print("
-Summary")
+        print("\nSummary")
         for model, passed, total, elapsed, tps in overall:
             print(f"- {model}: {passed}/{total} passed | {elapsed:.2f}s total | {tps:.2f} tok/s avg")
         return 0
