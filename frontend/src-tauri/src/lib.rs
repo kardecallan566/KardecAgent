@@ -1,9 +1,10 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::{
+    ffi::{OsStr, OsString},
     fs,
     io::{BufRead, BufReader, ErrorKind, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::Mutex,
     thread,
@@ -73,6 +74,83 @@ impl Drop for RuntimeProcess {
 
 #[derive(Default)]
 struct RuntimeState(Mutex<Option<RuntimeProcess>>);
+
+/// Add virtual-environment interpreters for a directory, if present.
+fn add_venv_candidates(directory: &Path, candidates: &mut Vec<PathBuf>) {
+    let venv_names = if cfg!(windows) {
+        ["Scripts/python.exe", "Scripts/python.exe"]
+    } else {
+        ["bin/python", "bin/python3"]
+    };
+    for venv in [".venv", "venv"] {
+        for executable in venv_names {
+            candidates.push(directory.join(venv).join(executable));
+        }
+    }
+}
+
+/// Resolve Python in a predictable order: explicit override, workspace/repository
+/// virtual environments, then the system Python command.
+fn resolve_python(project_root: &Path) -> OsString {
+    if let Some(explicit) = std::env::var_os("KARDECAGENT_PYTHON") {
+        return explicit;
+    }
+
+    let mut candidates = Vec::new();
+    add_venv_candidates(project_root, &mut candidates);
+    if let Ok(current_dir) = std::env::current_dir() {
+        add_venv_candidates(&current_dir, &mut candidates);
+    }
+
+    // During development the Python package is installed in the repository venv.
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")));
+    add_venv_candidates(repository_root, &mut candidates);
+
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(app_dir) = executable.parent() {
+            let bundled_python = if cfg!(windows) {
+                app_dir.join("python").join("python.exe")
+            } else {
+                app_dir.join("python").join("bin").join("python3")
+            };
+            candidates.push(bundled_python);
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .map(OsString::from)
+        .unwrap_or_else(|| if cfg!(windows) { "python".into() } else { "python3".into() })
+}
+
+fn validate_python(python: &OsStr, project_root: &Path) -> Result<(), String> {
+    let output = Command::new(python)
+        .args(["-c", "import kardecagent"])
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| {
+            format!(
+                "Não foi possível executar Python ({}): {error}. Instale Python ou configure KARDECAGENT_PYTHON.",
+                python.to_string_lossy()
+            )
+        })?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    Err(format!(
+        "O Python selecionado ({}) não consegue importar kardecagent. Instale o pacote nesse ambiente (python -m pip install -e .) ou configure KARDECAGENT_PYTHON.{}{}",
+        python.to_string_lossy(),
+        if detail.is_empty() { "" } else { "\nDetalhes: " },
+        detail
+    ))
+}
 
 fn resolve_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
     let root = Path::new(project_root)
@@ -146,9 +224,9 @@ fn start_runtime(
         return Err("O runtime já está iniciado.".into());
     }
 
-    let python = std::env::var_os("KARDECAGENT_PYTHON")
-        .unwrap_or_else(|| if cfg!(windows) { "python".into() } else { "python3".into() });
-    let mut child = Command::new(python)
+    let python = resolve_python(&root);
+    validate_python(&python, &root)?;
+    let mut child = Command::new(&python)
         .args(["-m", "kardecagent.cli", "studio", "--project"])
         .arg(&root)
         .current_dir(&root)
@@ -158,7 +236,7 @@ fn start_runtime(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Não foi possível iniciar o core Python. Configure KARDECAGENT_PYTHON se necessário: {e}"))?;
+        .map_err(|e| format!("Não foi possível iniciar o core Python ({}): {e}", python.to_string_lossy()))?;
 
     let stdin = child.stdin.take().ok_or("Falha ao abrir stdin do runtime.")?;
     let stdout = child.stdout.take().ok_or("Falha ao abrir stdout do runtime.")?;
