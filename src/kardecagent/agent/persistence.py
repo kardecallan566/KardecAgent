@@ -227,6 +227,36 @@ class TaskStore:
                 os.unlink(temp_name)
         return target
 
+    def list_recent(
+        self, limit: int = 20
+    ) -> list[tuple[str, TaskState, ExecutionPlan, TaskBoard | None]]:
+        """Load the most recently updated persisted tasks, newest first."""
+        if limit <= 0 or not self.directory.is_dir():
+            return []
+        try:
+            paths = sorted(
+                self.directory.glob("*.json"),
+                key=lambda path: path.stat().st_mtime_ns,
+                reverse=True,
+            )
+        except OSError as exc:
+            raise PersistenceError("failed to enumerate persisted tasks") from exc
+
+        recent = []
+        for path in paths:
+            if len(recent) >= min(limit, 100):
+                break
+            try:
+                payload = self._load_snapshot_with_backup(path)
+                task = payload["task"]
+                state, plan, board = self.load(task)
+            except (PersistenceError, KeyError, OSError):
+                # A damaged task must not prevent the Studio from restoring
+                # other valid sessions.
+                continue
+            recent.append((task_id(task, self.project_root), state, plan, board))
+        return recent
+
     def load(self, task: str) -> tuple[TaskState, ExecutionPlan, TaskBoard | None]:
         target = self.path_for(task)
         if not target.is_file():

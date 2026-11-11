@@ -256,3 +256,19 @@ O benchmark não baixa modelos automaticamente. Use `ollama pull` antes de execu
 The default agentic benchmark now exercises an iterative local-agent loop instead of a single-shot FILE response. Each model can READ fixture files, WRITE complete files, RUN the isolated pytest command, receive the test output, and retry after failures. A case succeeds only when the tests pass and its verification predicate passes.
 
 The CLI reports additional agentic metrics: `attempts` (test executions), `tool_calls`, `recovery` (failed test attempts before a later pass), and `first_pass` (passed on the first test execution). The benchmark remains descriptive and does not automatically select a model.
+
+
+### Catálogo local de modelos
+
+```powershell
+# Verificar conexão Ollama e modelo configurado
+kardec-agent doctor --project D:/caminho/para/seu-projeto
+
+# Inventariar modelos instalados e consultar opções leves/fortes
+kardec-agent models
+
+# Apenas modelos instalados
+kardec-agent models --installed-only
+```
+
+O catálogo inicial inclui estimativas indicativas de memória e perfis de uso, além de variantes Dolphin/Llama menos restritivas para experimentação opcional. A estimativa de pesos não representa VRAM máxima: contexto, KV cache e buffers elevam o consumo. Veja [docs/llm/MODEL_ROUTING.md](docs/llm/MODEL_ROUTING.md) para a estratégia de roteamento adaptativo, engines e critérios de benchmark.

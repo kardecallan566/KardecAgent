@@ -7,6 +7,7 @@ from .agent import AgentLoop
 from .config import Settings, resolve_project_root
 from .llm import LocalLLMClient, OllamaClient
 from .llm.benchmark import default_models, run_benchmark, run_agentic_benchmark
+from .llm.catalog import LOCAL_MODEL_CATALOG
 from .project import detect_project
 from .agent.persistence import TaskStore, PersistenceError
 
@@ -37,6 +38,11 @@ def build_parser():
     doctor.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider to check.")
     tasks = subs.add_parser("tasks", help="List persisted tasks for a project.")
     tasks.add_argument("--project", required=True)
+    studio = subs.add_parser("studio", help="Run the JSONL desktop Studio runtime.")
+    studio.add_argument("--project", required=True)
+    models = subs.add_parser("models", help="List installed Ollama models and a curated local catalog.")
+    models.add_argument("--installed-only", action="store_true", help="Show only models installed in Ollama.")
+    models.add_argument("--inspect", default=None, help="Inspect metadata for an installed model tag.")
     benchmark = subs.add_parser("benchmark", help="Benchmark local Ollama coding models.")
     benchmark.add_argument("--models", default=None, help="Comma-separated Ollama model names.")
     benchmark.add_argument("--timeout", type=float, default=180.0)
@@ -311,6 +317,61 @@ def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level
     return 0
 
 
+def _models(settings: Settings, installed_only: bool = False, inspect_model: str | None = None) -> int:
+    if settings.llm_provider != "ollama":
+        print("The installed-model inventory currently requires provider=ollama.")
+        print(f"Configured provider: {settings.llm_provider}")
+        return 1
+    client = OllamaClient(settings.ollama_base_url, settings.llm_model, settings.llm_timeout_seconds)
+    try:
+        installed = client.list_models()
+    except Exception as exc:
+        print(f"[FAIL] Ollama unavailable at {settings.ollama_base_url}: {exc}")
+        return 1
+    print(f"Ollama: connected ({settings.ollama_base_url})")
+    try:
+        version = client.server_version()
+    except Exception:
+        version = "unknown"
+    print(f"Ollama: connected ({settings.ollama_base_url}) | version={version}")
+    print(f"Configured model: {settings.llm_model}")
+    if inspect_model:
+        try:
+            metadata = client.show_model(inspect_model)
+        except Exception as exc:
+            print(f"[FAIL] Could not inspect {inspect_model}: {exc}")
+            return 1
+        details = metadata.get("details", {})
+        print(f"Model metadata: {inspect_model}")
+        for key in ("family", "parameter_size", "quantization_level", "format"):
+            if details.get(key):
+                print(f"  {key}: {details[key]}")
+        print("  capabilities: " + ", ".join(metadata.get("capabilities", [])))
+        model_info = metadata.get("model_info", {})
+        context_values = [value for key, value in model_info.items() if key.endswith("context_length")]
+        if context_values:
+            print(f"  context_length: {max(context_values)}")
+        return 0
+    print("Installed models:")
+    if not installed:
+        print("  (none)")
+    for item in installed:
+        if isinstance(item, dict):
+            name = item.get("name", "unknown")
+            size = item.get("size")
+            size_text = f" | {size / (1024**3):.1f} GiB on disk" if isinstance(size, (int, float)) else ""
+            print(f"  - {name}{size_text}")
+    if installed_only:
+        return 0
+    print("Curated local model candidates (indicative memory; benchmark before routing):")
+    names = {str(item.get("name", "")) for item in installed if isinstance(item, dict)}
+    for spec in LOCAL_MODEL_CATALOG:
+        marker = " [installed]" if spec.name in names else ""
+        print(f"  - {spec.name}{marker} | {spec.vram_gb} | {spec.role} | {spec.notes}")
+    print("Note: model weights are not peak VRAM. Context/KV cache and runtime buffers add memory.")
+    return 0
+
+
 def _tasks(root) -> int:
     store = TaskStore(root)
     try:
@@ -358,6 +419,10 @@ def main() -> int:
     if args.command == "tasks":
         root = resolve_project_root(args.project)
         return _tasks(root)
+    if args.command == "studio":
+        from .studio_protocol import run_stdio
+        root = resolve_project_root(args.project)
+        return run_stdio(root, AgentLoop(_build_llm(settings), settings))
     if args.command == "benchmark":
         return _benchmark(settings, args.models, args.timeout, args.level)
 
@@ -374,7 +439,8 @@ def main() -> int:
                           high_risk_approval_callback=_approve_high_risk)
     else:
         state = agent.resume(root, args.task)
-    print(f"Status: {state.status.value}\nIterations: {state.iteration}")
+    print(f"Status: {state.status.value}")
+    print(f"Iterations: {state.iteration}")
     for event in state.events[-10:]:
         print(f"[{event.event_type}] {event.message}")
     return 0 if state.status.value == "completed" else 1

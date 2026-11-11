@@ -96,9 +96,10 @@ class AgentLoop:
         *,
         approval_callback=None,
         high_risk_approval_callback=None,
+        event_callback=None,
     ) -> TaskState:
         root = project_root.resolve()
-        state = TaskState(task, str(root))
+        state = TaskState(task, str(root), event_callback=event_callback)
         state.transition(TaskStatus.RUNNING, reason="Task execution initialized.")
         profile = detect_project(root)
         state.record("project_detected", f"Detected project kind: {profile.kind}.",
@@ -189,11 +190,12 @@ class AgentLoop:
                                           high_risk_approval_callback=high_risk_approval_callback,
                                           persistence_callback=lambda s, p: store.save(s, plan=p, approved=True))
 
-    def resume(self, project_root: Path, task: str) -> TaskState:
+    def resume(self, project_root: Path, task: str, *, event_callback=None) -> TaskState:
         """Resume an approved persisted task without creating a new plan or approval gate."""
         root = project_root.resolve()
         store = TaskStore(root)
         state, plan, board = store.load(task)
+        state.event_callback = event_callback
         if state.status is TaskStatus.COMPLETED:
             return state
 

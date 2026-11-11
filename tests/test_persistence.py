@@ -262,3 +262,22 @@ def test_journal_record_contains_execution_cursor(tmp_path: Path):
         "subtask_id": "7",
         "subtask_step": 2,
     }
+
+
+def test_task_store_lists_recent_tasks_with_a_hard_limit(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    saved_ids = []
+    for index, task in enumerate(("older", "middle", "newest"), start=1):
+        state = TaskState(task, str(tmp_path))
+        state.transition(TaskStatus.RUNNING)
+        path = store.save(state, plan=make_plan(), approved=True)
+        timestamp = index * 1_000_000_000
+        import os
+        os.utime(path, ns=(timestamp, timestamp))
+        saved_ids.append(store.path_for(task).stem)
+
+    recent = store.list_recent(limit=2)
+
+    assert [item[0] for item in recent] == saved_ids[-2:][::-1]
+    assert [item[1].task for item in recent] == ["newest", "middle"]
+    assert store.list_recent(limit=0) == []
