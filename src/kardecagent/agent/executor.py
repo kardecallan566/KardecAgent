@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Callable
 
 from ..config import Settings
+from ..harness import load_registry
+from ..harness.registry import compose_system_prompt
 from ..project import detect_project, discover_command, project_snapshot, scan_project, validate_project
 from ..project.dependencies import discover_audit_command, summarize_audit
 from ..project.test_results import format_for_model, parse_test_result
@@ -317,8 +319,11 @@ class AgentExecutor:
                            "Complete each step with evidence. Never expand scope.",
         }
         messages = [
-            {"role": "system", "content": "You are KardecAgent, a local software engineering agent. " +
-             tool_instructions()},
+            {"role": "system", "content": compose_system_prompt(
+                "You are KardecAgent, a local software engineering agent.",
+                load_registry(root / ".kardecagent" / "harness.json"),
+                phase=tool_instructions(),
+            )},
             {"role": "user", "content": json.dumps(execution_context, ensure_ascii=False)},
         ]
         state.record("plan_progress", "Plan execution initialized.", progress=tracker.as_dict(),
