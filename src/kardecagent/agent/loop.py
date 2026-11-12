@@ -15,6 +15,9 @@ from .persistence import TaskStore, PersistenceError
 from .recovery import RecoveryManager
 from .tools_schema import ToolCallError
 from ..llm.cleaner import extract_json_payload
+from ..harness import load_registry
+from ..harness.registry import compose_system_prompt
+from ..harness.registry import compose_system_prompt
 
 SYSTEM_PROMPT = (
     "You are KardecAgent, a local software engineering agent. "
@@ -45,8 +48,10 @@ class AgentLoop:
     def _create_plan(self, root: Path, task: str, state: TaskState) -> ExecutionPlan | None:
         context = self._build_context(root, task)
         base_messages = [
-            {"role": "system", "content": SYSTEM_PROMPT + "\n" + plan_instructions() +
-             " You are in the planning phase. Do not call implementation tools."},
+            {"role": "system", "content": compose_system_prompt(
+                SYSTEM_PROMPT, load_registry(root / ".kardecagent" / "harness.json"),
+                phase=plan_instructions() + " You are in the planning phase. Do not call implementation tools.",
+            )},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
         messages = list(base_messages)
