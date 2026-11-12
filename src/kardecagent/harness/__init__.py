@@ -1,12 +1,12 @@
 """Versioned harness configuration primitives for KardecAgent."""
 
-from .registry import HarnessRegistryError, load_registry, save_registry
+from .evaluator import EvaluationResult, evaluate_verification\nfrom .registry import HarnessRegistryError, load_registry, save_registry
 from .schema import HarnessConfig, SkillConfig
 
 __all__ = [
-    "HarnessConfig",
+    "EvaluationResult",\n    "HarnessConfig",
     "HarnessRegistryError",
     "SkillConfig",
-    "load_registry",
+    "evaluate_verification",\n    "load_registry",
     "save_registry",
 ]
