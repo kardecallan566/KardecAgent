@@ -15,6 +15,8 @@ from .persistence import TaskStore, PersistenceError
 from .recovery import RecoveryManager
 from .tools_schema import ToolCallError
 from ..llm.cleaner import extract_json_payload
+from ..harness import load_registry
+from ..harness.registry import compose_system_prompt
 
 SYSTEM_PROMPT = (
     "You are KardecAgent, a local software engineering agent. "
