@@ -77,3 +77,17 @@ the live agent, execute skills, rewrite its own configuration, or run
 optimization experiments. This separation lets later evaluator and experiment
 components compare immutable candidate snapshots against a baseline before
 any candidate is adopted.
+
+
+## Runtime integration
+
+When `.kardecagent/harness.json` exists at the project root, KardecAgent loads
+and validates it for both planning and approved-plan execution. Its system
+prompt, guardrails, enabled skills, and tool guidance are appended to the
+built-in agent instructions. A missing file preserves the original prompt
+exactly; malformed configuration fails explicitly rather than being ignored.
+
+The registry remains project-local and is not executed as Python or shell.
+Skills are plain instruction text and only entries with `enabled: true` are
+included in model context. The existing plan approval, high-risk approval,
+tool scope, and verification gates remain unchanged.
