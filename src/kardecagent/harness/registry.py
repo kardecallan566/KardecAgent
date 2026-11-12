@@ -69,3 +69,28 @@ def save_registry(
                 temporary_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def compose_system_prompt(base_prompt: str, config: HarnessConfig, *, phase: str = "") -> str:
+    """Compose a model-facing prompt from a validated snapshot.
+
+    Registry content is treated as instruction text, never as executable code.
+    """
+    sections = [base_prompt.strip()]
+    if config.system_prompt.strip():
+        sections.append("Project harness instructions:\\n" + config.system_prompt.strip())
+    if config.guardrails:
+        sections.append("Project guardrails (must be followed):\\n- " +
+                       "\\n- ".join(config.guardrails))
+    enabled_skills = [skill for skill in config.skills if skill.enabled]
+    if enabled_skills:
+        sections.append("Enabled skills (instruction bundles):\\n" + "\\n".join(
+            f"[{skill.name}]\\n{skill.instructions}" for skill in enabled_skills
+        ))
+    if config.tool_guidance:
+        sections.append("Tool guidance:\\n" + "\\n".join(
+            f"- {name}: {guidance}" for name, guidance in sorted(config.tool_guidance.items())
+        ))
+    if phase.strip():
+        sections.append(phase.strip())
+    return "\\n\\n".join(sections)
