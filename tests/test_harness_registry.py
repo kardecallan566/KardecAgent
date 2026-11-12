@@ -63,3 +63,33 @@ def test_skill_names_must_be_unique_case_insensitively():
 def test_save_requires_typed_config(tmp_path):
     with pytest.raises(HarnessRegistryError, match="HarnessConfig"):
         save_registry(tmp_path / "harness.json", {"version": 1})
+
+
+def test_compose_system_prompt_includes_only_enabled_skills():
+    from kardecagent.harness.registry import compose_system_prompt
+
+    config = HarnessConfig(
+        system_prompt="Project-specific behavior.",
+        guardrails=("Do not leak secrets.",),
+        tool_guidance={"shell": "Use safe commands."},
+        skills=(
+            SkillConfig("active", "Use focused tests.", enabled=True),
+            SkillConfig("inactive", "Do not include this.", enabled=False),
+        ),
+    )
+
+    prompt = compose_system_prompt("Base agent prompt.", config, phase="Planning phase.")
+
+    assert "Base agent prompt." in prompt
+    assert "Project-specific behavior." in prompt
+    assert "Do not leak secrets." in prompt
+    assert "shell: Use safe commands." in prompt
+    assert "[active]" in prompt and "Use focused tests." in prompt
+    assert "inactive" not in prompt
+    assert "Planning phase." in prompt
+
+
+def test_empty_harness_keeps_base_prompt_unchanged():
+    from kardecagent.harness.registry import compose_system_prompt
+
+    assert compose_system_prompt("Base prompt.", HarnessConfig()) == "Base prompt."
