@@ -47,6 +47,42 @@ jobs:
           toolchain: stable
           target: x86_64-pc-windows-msvc
 
+      - name: Generate Windows app icon
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $iconDir = "src-tauri/icons"
+          New-Item -ItemType Directory -Force -Path $iconDir | Out-Null
+          $bitmap = New-Object System.Drawing.Bitmap 256, 256
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.Clear([System.Drawing.Color]::FromArgb(30, 41, 59))
+          $font = New-Object System.Drawing.Font("Arial", 112, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+          $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(56, 189, 248))
+          $graphics.DrawString("K", $font, $brush, 48, 35)
+          $pngPath = Join-Path $iconDir "icon.png"
+          $icoPath = Join-Path $iconDir "icon.ico"
+          $bitmap.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $graphics.Dispose()
+          $font.Dispose()
+          $brush.Dispose()
+          $bitmap.Dispose()
+          $png = [System.IO.File]::ReadAllBytes($pngPath)
+          $stream = [System.IO.File]::Create($icoPath)
+          $writer = New-Object System.IO.BinaryWriter($stream)
+          $writer.Write([UInt16]0)
+          $writer.Write([UInt16]1)
+          $writer.Write([UInt16]1)
+          $writer.Write([byte]0)
+          $writer.Write([byte]0)
+          $writer.Write([byte]0)
+          $writer.Write([byte]0)
+          $writer.Write([UInt16]1)
+          $writer.Write([UInt16]32)
+          $writer.Write([UInt32]$png.Length)
+          $writer.Write([UInt32]22)
+          $writer.Write($png)
+          $writer.Dispose()
+          Write-Host "Generated $icoPath"
       - name: Build Studio Windows installers
         run: npm run tauri build
 
