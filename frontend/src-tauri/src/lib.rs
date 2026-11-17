@@ -19,6 +19,30 @@ struct ProjectEntry {
 
 const MAX_RUNTIME_LINE_BYTES: usize = 256 * 1024 + 1;
 const MAX_RUNTIME_LOG_BYTES: usize = 8 * 1024;
+fn resolve_python_command() -> Result<(std::ffi::OsString, Vec<String>), String> {
+    let explicit = std::env::var_os("KARDECAGENT_PYTHON");
+    let candidates: Vec<(std::ffi::OsString, Vec<String>)> = if let Some(path) = explicit {
+        vec![(path, Vec::new())]
+    } else if cfg!(windows) {
+        vec![("python".into(), Vec::new()), ("py".into(), vec!["-3".into()]), ("python3".into(), Vec::new())]
+    } else {
+        vec![("python3".into(), Vec::new()), ("python".into(), Vec::new())]
+    };
+    let mut diagnostics = Vec::new();
+    for (program, prefix) in candidates {
+        match Command::new(&program).args(&prefix).args(["-c", "import kardecagent, kardecagent.cli"]).output() {
+            Ok(output) if output.status.success() => return Ok((program, prefix)),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let detail = if stderr.is_empty() { stdout } else { stderr };
+                diagnostics.push(format!("{}: {}", program.to_string_lossy(), if detail.is_empty() { "Python não encontrou o pacote kardecagent.".to_string() } else { detail }));
+            }
+            Err(error) => diagnostics.push(format!("{}: {}", program.to_string_lossy(), error)),
+        }
+    }
+    Err(format!("Python com KardecAgent não encontrado. Instale com python -m pip install git+https://github.com/kardecallan566/KardecAgent.git ou defina KARDECAGENT_PYTHON com o caminho completo do python.exe. Diagnóstico: {}", diagnostics.join(" | ")))
+}
 
 fn read_bounded_line<R: BufRead>(reader: &mut R, limit: usize) -> std::io::Result<Option<Vec<u8>>> {
     let mut line = Vec::with_capacity(4096);
@@ -146,9 +170,10 @@ fn start_runtime(
         return Err("O runtime já está iniciado.".into());
     }
 
-    let python = std::env::var_os("KARDECAGENT_PYTHON")
-        .unwrap_or_else(|| if cfg!(windows) { "python".into() } else { "python3".into() });
-    let mut child = Command::new(python)
+    let (python, python_prefix) = resolve_python_command()?;
+    let mut command = Command::new(python);
+    command
+        .args(&python_prefix)
         .args(["-m", "kardecagent.cli", "studio", "--project"])
         .arg(&root)
         .current_dir(&root)
@@ -156,9 +181,8 @@ fn start_runtime(
         .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Não foi possível iniciar o core Python. Configure KARDECAGENT_PYTHON se necessário: {e}"))?;
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| format!("Não foi possível iniciar o core Python: {e}"))?;
 
     let stdin = child.stdin.take().ok_or("Falha ao abrir stdin do runtime.")?;
     let stdout = child.stdout.take().ok_or("Falha ao abrir stdout do runtime.")?;
