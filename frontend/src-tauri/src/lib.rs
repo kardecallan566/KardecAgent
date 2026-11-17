@@ -136,7 +136,7 @@ fn read_project_entries(project_root: String, project_path: String) -> Result<Ve
     entries.sort_by(|a, b| {
         b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
-    entries.truncate(200);
+    entries.truncate(1000);
     Ok(entries)
 }
 
@@ -150,6 +150,19 @@ fn read_project_file(project_root: String, file_path: String) -> Result<String, 
         return Err("Arquivo maior que 1 MB: visualização bloqueada para preservar recursos.".into());
     }
     fs::read_to_string(path).map_err(|e| format!("Arquivo não é texto UTF-8 ou falha de leitura: {e}"))
+}
+
+#[tauri::command]
+fn write_project_file(project_root: String, file_path: String, content: String) -> Result<(), String> {
+    if content.len() > 1_000_000 {
+        return Err("Arquivo maior que 1 MB: salvamento bloqueado para preservar recursos.".into());
+    }
+    let path = resolve_workspace_path(&project_root, &file_path)
+        .map_err(|e| format!("Não foi possível salvar o arquivo: {e}"))?;
+    if !path.is_file() {
+        return Err("O caminho selecionado não é um arquivo existente.".into());
+    }
+    fs::write(path, content.as_bytes()).map_err(|e| format!("Falha ao gravar arquivo: {e}"))
 }
 
 #[tauri::command]
@@ -266,6 +279,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_project_entries,
             read_project_file,
+            write_project_file,
             start_runtime,
             send_runtime_command,
             stop_runtime
