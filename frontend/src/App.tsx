@@ -188,7 +188,7 @@ function App() {
       if (!active || !event.payload.trim()) return;
       const line = event.payload.slice(0, 2000);
       setRuntimeEvents(items => [...items, { id: crypto.randomUUID(), type: "runtime.log", message: line }].slice(-100));
-      if (/\\b(ERROR|CRITICAL|Traceback|Exception)\\b/.test(line)) setRuntimeError(line);
+      if (/\b(ERROR|CRITICAL|Traceback|Exception)\b/.test(line)) setRuntimeError(line);
     });
     const protocolError = listen<string>("runtime-protocol-error", event => {
       if (active) setRuntimeError("Falha no protocolo do runtime: " + event.payload.slice(0, 1000));
