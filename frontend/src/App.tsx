@@ -228,7 +228,7 @@ function App() {
 
   async function openEntry(entry: ProjectEntry) {
     if (entry.is_dir) return;
-    try { const existing = openTabs.find(tab => tab.path === entry.path);\n    if (existing) { setOpenedPath(existing.path); setSelectedFile(existing.name); setFileContent(existing.content); setFileDirty(existing.dirty); setProjectError(null); setActiveNav("explorer"); return; }\n    const content = await invoke<string>("read_project_file", { projectRoot: projectRoot!, filePath: entry.path });\n    setOpenTabs(tabs => [...tabs, { path: entry.path, name: entry.name, content, dirty: false }]); setFileContent(content); setOpenedPath(entry.path); setSelectedFile(entry.name); setFileDirty(false); setProjectError(null); setActiveNav("explorer"); }
+    try {\n      const existing = openTabs.find(tab => tab.path === entry.path);\n      if (existing) { setOpenedPath(existing.path); setSelectedFile(existing.name); setFileContent(existing.content); setFileDirty(existing.dirty); setProjectError(null); setActiveNav("explorer"); return; }\n      const content = await invoke<string>("read_project_file", { projectRoot: projectRoot!, filePath: entry.path });\n      setOpenTabs(tabs => [...tabs, { path: entry.path, name: entry.name, content, dirty: false }]);\n      setFileContent(content); setOpenedPath(entry.path); setSelectedFile(entry.name); setFileDirty(false); setProjectError(null); setActiveNav("explorer");\n    }
     catch (error) { setProjectError(String(error)); }
   }
 
