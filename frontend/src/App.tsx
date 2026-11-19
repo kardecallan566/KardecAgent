@@ -37,8 +37,8 @@ function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry
 function highlightSource(source: string, extension: string) {
   const language = extension.toLowerCase();
   const patterns = language === "json"
-    ? /(\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\\\.|[^"\\\\])*"(?=\\s*:)|"(?:\\\\.|[^"\\\\])*"|\\b(?:true|false|null)\\b|-?\\b\\d+(?:\\.\\d+)?\\b)/gm
-    : /(#[^\\n]*|\/\/.*$|\/\*[\\s\\S]*?\\*\/|"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|`[^`]*`|\\b(?:const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|type|interface|extends|implements|def|pass|in|is|not|and|or|None|True|False|lambda|with|as|yield|pub|fn|mut|struct|enum|impl|use|mod|match|Some|Ok|Err)\\b|\\b\\d+(?:\\.\\d+)?\\b)/gm;
+    ? /(\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\b\d+(?:\.\d+)?\b)/gm
+    : /(#[^\n]*|\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`|\b(?:const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|type|interface|extends|implements|def|pass|in|is|not|and|or|None|True|False|lambda|with|as|yield|pub|fn|mut|struct|enum|impl|use|mod|match|Some|Ok|Err)\b|\b\d+(?:\.\d+)?\b)/gm;
   const nodes: ReactNode[] = [];
   let cursor = 0, match: RegExpExecArray | null;
   while ((match = patterns.exec(source)) !== null) {
@@ -46,7 +46,7 @@ function highlightSource(source: string, extension: string) {
     const token = match[0];
     const kind = token.startsWith("#") || token.startsWith("//") || token.startsWith("/*") ? "comment"
       : token.startsWith('"') || token.startsWith("'") || token.startsWith("`") ? (language === "json" && source.slice(match.index + token.length).trimStart().startsWith(":") ? "property" : "string")
-      : /^\\d/.test(token) ? "number" : "keyword";
+      : /^\d/.test(token) ? "number" : "keyword";
     nodes.push(<span className={"syntax-" + kind} key={match.index}>{token}</span>);
     cursor = match.index + token.length;
   }
