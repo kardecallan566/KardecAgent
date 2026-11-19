@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -39,7 +39,7 @@ function highlightSource(source: string, extension: string) {
   const patterns = language === "json"
     ? /(\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\\\.|[^"\\\\])*"(?=\\s*:)|"(?:\\\\.|[^"\\\\])*"|\\b(?:true|false|null)\\b|-?\\b\\d+(?:\\.\\d+)?\\b)/gm
     : /(#[^\\n]*|\/\/.*$|\/\*[\\s\\S]*?\\*\/|"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|`[^`]*`|\\b(?:const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|type|interface|extends|implements|def|pass|in|is|not|and|or|None|True|False|lambda|with|as|yield|pub|fn|mut|struct|enum|impl|use|mod|match|Some|Ok|Err)\\b|\\b\\d+(?:\\.\\d+)?\\b)/gm;
-  const nodes: React.ReactNode[] = [];
+  const nodes: ReactNode[] = [];
   let cursor = 0, match: RegExpExecArray | null;
   while ((match = patterns.exec(source)) !== null) {
     if (match.index > cursor) nodes.push(source.slice(cursor, match.index));
