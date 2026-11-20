@@ -490,13 +490,17 @@ impl Drop for TerminalProcess {
 struct TerminalState(Mutex<Option<TerminalProcess>>);
 
 #[tauri::command]
-fn start_integrated_terminal(app: tauri::AppHandle, state: State<'_, TerminalState>, project_path: String) -> Result<(), String> {
+fn start_integrated_terminal(app: tauri::AppHandle, state: State<'_, TerminalState>, project_path: String, shell_name: String) -> Result<(), String> {
     let root = Path::new(&project_path).canonicalize().map_err(|e| format!("Pasta do terminal inválida: {e}"))?;
     if !root.is_dir() { return Err("A pasta selecionada não é um diretório.".into()); }
     let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
     if terminal.is_some() { return Err("O terminal já está em execução.".into()); }
     #[cfg(windows)]
-    let mut command = { let mut c = Command::new("powershell.exe"); c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]); c };
+    let mut command = match shell_name.as_str() {
+        "cmd" => { let mut c = Command::new("cmd.exe"); c.args(["/Q"]); c },
+        "powershell" => { let mut c = Command::new("powershell.exe"); c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]); c },
+        _ => return Err("Shell não permitido. Escolha PowerShell ou CMD.".into()),
+    };
     #[cfg(not(windows))]
     let mut command = { let mut c = Command::new("bash"); c.args(["--noprofile", "--norc"]); c };
     configure_hidden_process(&mut command);
