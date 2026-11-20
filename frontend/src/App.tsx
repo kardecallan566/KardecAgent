@@ -7,7 +7,7 @@ import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
   ListTodo, Plus, Search, ShieldCheck, Workflow, Save,
-  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle
+  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
@@ -85,7 +85,7 @@ function App() {
   const [openedPath, setOpenedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [fileDirty, setFileDirty] = useState(false);
-  const [fileSaving, setFileSaving] = useState(false);
+  const [fileSaving, setFileSaving] = useState(false);\n  const [runningFile, setRunningFile] = useState(false);\n  const [runOutput, setRunOutput] = useState<{ file: string; language: string; exit_code: number; stdout: string; stderr: string; timed_out: boolean } | null>(null);
   const [openTabs, setOpenTabs] = useState<Array<{ path: string; name: string; content: string; dirty: boolean }>>([]);
   const [instructionDraft, setInstructionDraft] = useState("");
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
@@ -286,6 +286,49 @@ function App() {
     }
   }
 
+
+  async function refreshProjectEntries() {
+    if (!projectRoot) return;
+    const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot, projectPath: projectRoot });
+    setProjectEntries(entries);
+  }
+
+  async function createProjectItem(kind: "file" | "directory") {
+    if (!projectRoot) { setProjectError("Abra um projeto antes de criar arquivos ou pastas."); return; }
+    const relativePath = window.prompt(kind === "file" ? "Caminho do novo arquivo (relativo ao projeto):" : "Caminho da nova pasta (relativo ao projeto):");
+    if (!relativePath?.trim()) return;
+    try {
+      if (kind === "file") {
+        await invoke("create_project_file", { projectRoot, relativePath: relativePath.trim(), content: "" });
+        await refreshProjectEntries();
+        const name = relativePath.trim().split(/[\\\\/]/).pop() || relativePath.trim();
+        await openEntry({ name, path: projectRoot + (projectRoot.endsWith("\\\\") || projectRoot.endsWith("/") ? "" : "/") + relativePath.trim(), is_dir: false });
+      } else {
+        await invoke("create_project_directory", { projectRoot, relativePath: relativePath.trim() });
+        await refreshProjectEntries();
+      }
+      setProjectError(null);
+    } catch (error) { setProjectError("Não foi possível criar: " + String(error)); }
+  }
+
+  async function runCurrentFile() {
+    if (!projectRoot || !openedPath || runningFile) return;
+    const extension = openedPath.split(".").pop()?.toLowerCase() || "";
+    const supported = ["py","js","mjs","cjs","java","go","rs","php","rb","c","cpp","cc","cxx"];
+    if (!supported.includes(extension)) { setProjectError("Este tipo de arquivo ainda não possui executor integrado."); return; }
+    const approved = window.confirm("Autorizar a execução deste arquivo?\\n\\n" + openedPath + "\\n\\nO código poderá ler e alterar arquivos do projeto e acessar recursos disponíveis ao seu usuário. Execute apenas código confiável.");
+    if (!approved) return;
+    try {
+      if (fileDirty) await saveCurrentFile();
+      setRunningFile(true);
+      setRunOutput(null);
+      const result = await invoke<{ file: string; language: string; exit_code: number; stdout: string; stderr: string; timed_out: boolean }>("run_project_file", { projectRoot, filePath: openedPath, approved: true });
+      setRunOutput(result);
+      setBottomPanel("Output");
+    } catch (error) { setProjectError("Falha ao executar arquivo: " + String(error)); }
+    finally { setRunningFile(false); }
+  }
+
   async function saveCurrentFile() {
     if (!projectRoot || !openedPath || !fileDirty || fileSaving) return;
     setFileSaving(true);
@@ -363,7 +406,7 @@ function App() {
         </nav>
 
         <aside className="sidebar">
-          <div className="sidebar-heading"><span>{activeNav === "explorer" ? "EXPLORER" : activeNav.toUpperCase()}</span><button className="icon-button" title="Nova ação"><Plus size={15}/></button></div>
+          <div className="sidebar-heading"><span>{activeNav === "explorer" ? "EXPLORER" : activeNav.toUpperCase()}</span>{activeNav === "explorer" && projectRoot ? <div className="sidebar-actions"><button className="icon-button" title="Novo arquivo" onClick={() => void createProjectItem("file")}><FilePlus2 size={14}/></button><button className="icon-button" title="Nova pasta" onClick={() => void createProjectItem("directory")}><FolderPlus size={14}/></button></div> : <button className="icon-button" title="Nova ação"><Plus size={15}/></button>}</div>
           {activeNav === "explorer" ? (
             <>
               <div className="project-heading"><ChevronDown size={14}/><Folder size={15} className="folder-icon"/> {projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "KARDECAGENT"}</div>
@@ -456,11 +499,11 @@ function App() {
             </div>
           ) : (
             <>
-              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <button className="save-file-button" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving}><Save size={13}/>{fileSaving ? "Salvando..." : "Salvar"}</button>}</div>
+              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button" onClick={runCurrentFile} disabled={runningFile}><Play size={13}/>{runningFile ? "Executando..." : "Executar"}</button><button className="save-file-button" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving}><Save size={13}/>{fileSaving ? "Salvando..." : "Salvar"}</button></>}</div>
               <div className="editor">
                 {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap"><div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div><div className="code-surface"><pre className="syntax-highlight" aria-hidden="true">{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
-              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content"><Clock3 size={14}/><span>Eventos do runtime aparecerão aqui, sem polling contínuo.</span></div></div>
+              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
             </>
           )}
         </section>
