@@ -111,6 +111,22 @@ function App() {
 
   useEffect(() => {
     let active = true;
+    const output = listen<string>("terminal-output", event => {
+      if (active) setTerminalOutput(items => [...items, event.payload].slice(-1000));
+    });
+    const exited = listen("terminal-exited", () => {
+      if (active) { setTerminalReady(false); setTerminalOutput(items => [...items, "[Processo do terminal encerrado.]"]); }
+    });
+    return () => {
+      active = false;
+      output.then(stop => stop());
+      exited.then(stop => stop());
+      void invoke("stop_integrated_terminal").catch(() => undefined);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     const unlisten = listen<Record<string, any>>("runtime-message", event => {
       if (!active) return;
       const message = event.payload;
