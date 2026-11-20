@@ -192,7 +192,11 @@ class AgentExecutor:
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
             return json.dumps({"ok": True, "path": args["path"], "method": "full_file"})
-        if action.tool == "create_directory":\n            self._check_scope(root, [args["path"]], scope)\n            fs.create_directory(args["path"])\n            return json.dumps({"ok": True, "path": args["path"], "kind": "directory"})\n        if action.tool == "apply_patch":
+        if action.tool == "create_directory":
+            self._check_scope(root, [args["path"]], scope)
+            fs.create_directory(args["path"])
+            return json.dumps({"ok": True, "path": args["path"], "kind": "directory"})
+        if action.tool == "apply_patch":
             patch_paths = self._patch_paths(args["patch"])
             self._check_scope(root, patch_paths, scope)
             result = apply_unified_patch(root, args["patch"])
