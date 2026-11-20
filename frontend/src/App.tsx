@@ -371,7 +371,8 @@ function App() {
         projectPath: projectRoot, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
         llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
       });
-      armCoreStartupTimeout();\n      await refreshCoreDiagnostics();
+      armCoreStartupTimeout();
+      await refreshCoreDiagnostics();
     } catch (error) {
       setRuntimeStatus("offline");
       setRuntimeError(String(error));
@@ -806,7 +807,11 @@ function App() {
                   <label>Cor de destaque<select value={settings.accentColor} onChange={event => setSettings(current => ({ ...current, accentColor: event.target.value as StudioSettings["accentColor"] }))}><option value="violet">Violeta</option><option value="cyan">Ciano</option><option value="blue">Azul</option><option value="green">Verde</option></select></label>
                   <label>Fonte da interface<select value={settings.uiFontFamily} onChange={event => setSettings(current => ({ ...current, uiFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Inter</option><option>Segoe UI</option><option>Arial</option><option>Roboto</option><option>system-ui</option></select></label>
                   <label>Escala da interface: {settings.uiFontSize}px<input type="range" min={11} max={16} value={settings.uiFontSize} onChange={event => setSettings(current => ({ ...current, uiFontSize: Number(event.target.value) }))}/></label>
-                  <div className="settings-preview"><strong>KardecAgent Studio</strong><p>Prévia da tipografia e do tema selecionado.</p><span className="settings-accent-preview">Destaque da interface</span></div>\n                  <div className="settings-section-title"><Wifi size={16}/><strong>Biblioteca Google Fonts</strong></div>\n                  <label>Link da fonte no Google Fonts<input value={googleFontUrl} onChange={event => setGoogleFontUrl(event.target.value)} placeholder="https://fonts.google.com/specimen/Shantell+Sans"/></label>\n                  <p className="settings-help">A IDE baixa os arquivos WOFF2 do Google Fonts e os guarda localmente neste computador para uso sem depender de uma conexão em cada inicialização.</p>\n                  <div className="settings-actions"><button className="settings-secondary" disabled={googleFontBusy} onClick={() => void importGoogleFont()}><Plus size={14}/>{googleFontBusy ? "Baixando fonte..." : "Baixar e importar fonte"}</button></div>\n                  {googleFontStatus && <div className="settings-help" role="status">{googleFontStatus}</div>}
+                  <div className="settings-preview"><strong>KardecAgent Studio</strong><p>Prévia da tipografia e do tema selecionado.</p><span className="settings-accent-preview">Destaque da interface</span></div>
+                  <div className="settings-section-title"><Wifi size={16}/><strong>Biblioteca Google Fonts</strong></div>\n                  <label>Link da fonte no Google Fonts<input value={googleFontUrl} onChange={event => setGoogleFontUrl(event.target.value)} placeholder="https://fonts.google.com/specimen/Shantell+Sans"/></label>
+                  <p className="settings-help">A IDE baixa os arquivos WOFF2 do Google Fonts e os guarda localmente neste computador para uso sem depender de uma conexão em cada inicialização.</p>
+                  <div className="settings-actions"><button className="settings-secondary" disabled={googleFontBusy} onClick={() => void importGoogleFont()}><Plus size={14}/>{googleFontBusy ? "Baixando fonte..." : "Baixar e importar fonte"}</button></div>
+                  {googleFontStatus && <div className="settings-help" role="status">{googleFontStatus}</div>}
                 </div>
               </>}
               {settingsSection === "terminal" && <>
