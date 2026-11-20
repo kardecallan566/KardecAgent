@@ -308,7 +308,7 @@ body { min-width:900px; }
 .settings-page-heading p,.settings-help { color:#9690a2; font-size:11px; line-height:1.6; margin:6px 0 0; }
 .settings-section { border-bottom:1px solid #302b3b; }
 .settings-section:last-child { border-bottom:0; }
-.settings-section select { width:100%; padding:10px 11px; border:1px solid #3a3544; border-radius:6px; background:#111118; color:#e2ddeb; font:12px inherit; }
+.settings-section select { width:100%; padding:10px 11px; border:1px solid #3a3544; border-radius:6px; background:#111118; color:#e2ddeb; font:inherit; }
 .settings-section input[type="range"] { padding:0; accent-color:#8b72e8; }
 .settings-preview { padding:15px; border:1px solid #3a3544; border-radius:7px; background:#111118; color:#d9d5e2; font-family:ui-monospace,monospace; line-height:1.7; }
 .settings-preview p { margin:5px 0; color:#9a94a7; font-size:11px; }
