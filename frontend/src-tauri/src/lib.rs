@@ -28,8 +28,12 @@ fn configure_hidden_process(_command: &mut Command) {}
 
 const MAX_RUNTIME_LINE_BYTES: usize = 256 * 1024 + 1;
 const MAX_RUNTIME_LOG_BYTES: usize = 8 * 1024;
-fn resolve_python_command() -> Result<(std::ffi::OsString, Vec<String>), String> {
-    let explicit = std::env::var_os("KARDECAGENT_PYTHON");
+fn resolve_python_command(python_override: Option<&str>) -> Result<(std::ffi::OsString, Vec<String>), String> {
+    let explicit = python_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::ffi::OsString::from)
+        .or_else(|| std::env::var_os("KARDECAGENT_PYTHON"));
     let candidates: Vec<(std::ffi::OsString, Vec<String>)> = if let Some(path) = explicit {
         vec![(path, Vec::new())]
     } else if cfg!(windows) {
@@ -97,18 +101,58 @@ fn read_bounded_line<R: BufRead>(reader: &mut R, limit: usize) -> std::io::Resul
 
 struct RuntimeProcess {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
+    python_executable: String,
+    project_root: String,
+    exited: bool,
 }
 
 impl Drop for RuntimeProcess {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if !self.exited {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
 #[derive(Default)]
-struct RuntimeState(Mutex<Option<RuntimeProcess>>);
+struct RuntimeState {
+    process: Mutex<Option<RuntimeProcess>>,
+    last_exit_code: Mutex<Option<i32>>,
+}
+
+#[derive(Serialize)]
+struct RuntimeDiagnostics {
+    running: bool,
+    pid: Option<u32>,
+    python_executable: Option<String>,
+    project_root: Option<String>,
+    last_exit_code: Option<i32>,
+}
+
+#[tauri::command]
+fn runtime_diagnostics(state: State<'_, RuntimeState>) -> Result<RuntimeDiagnostics, String> {
+    let mut process_slot = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    let mut last_exit = state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())?;
+    if let Some(process) = process_slot.as_mut() {
+        if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao verificar o processo Python: {e}"))? {
+            let code = status.code().unwrap_or(-1);
+            process.exited = true;
+            *last_exit = Some(code);
+            process_slot.take();
+        } else {
+            return Ok(RuntimeDiagnostics {
+                running: true,
+                pid: Some(process.child.id()),
+                python_executable: Some(process.python_executable.clone()),
+                project_root: Some(process.project_root.clone()),
+                last_exit_code: *last_exit,
+            });
+        }
+    }
+    Ok(RuntimeDiagnostics { running: false, pid: None, python_executable: None, project_root: None, last_exit_code: *last_exit })
+}
 
 fn resolve_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
     let root = Path::new(project_root)
@@ -274,8 +318,8 @@ except Exception as exc:
     print(json.dumps({"error":str(exc)}))
     sys.exit(2)
 "#;
-    let (python, prefix) = resolve_python_command()?;
-    let mut command = Command::new(python);
+    let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
+    let mut command = Command::new(&python);
     configure_hidden_process(&mut command);
     let output = command.args(&prefix).args(["-c", script])
         .current_dir(&root).env("KARDECAGENT_RUN_ROOT", &root).env("KARDECAGENT_RUN_FILE", &path)
@@ -302,6 +346,7 @@ fn start_runtime(
     ollama_base_url: String,
     llm_model: String,
     llm_timeout_seconds: f64,
+    python_executable: Option<String>,
 ) -> Result<(), String> {
     let root = Path::new(&project_path)
         .canonicalize()
@@ -310,16 +355,22 @@ fn start_runtime(
         return Err("O caminho do projeto não é uma pasta.".into());
     }
 
-    let mut runtime = state.0.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
-    if runtime.is_some() {
-        return Err("O runtime já está iniciado.".into());
+    let mut runtime = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    if let Some(existing) = runtime.as_mut() {
+        if let Some(status) = existing.child.try_wait().map_err(|e| format!("Falha ao verificar o Core: {e}"))? {
+            existing.exited = true;
+            *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = Some(status.code().unwrap_or(-1));
+            runtime.take();
+        } else {
+            return Err(format!("O Core já está em execução (PID {}).", existing.child.id()));
+        }
     }
 
     let base = ollama_base_url.trim().trim_end_matches('/');
     if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 { return Err("Endereço Ollama inválido.".into()); }
     if llm_model.trim().is_empty() || llm_model.len() > 200 { return Err("Modelo Ollama inválido.".into()); }
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
-    let (python, python_prefix) = resolve_python_command()?;
+    let (python, python_prefix) = resolve_python_command(python_executable.as_deref())?;
     let mut command = Command::new(python);
     configure_hidden_process(&mut command);
     command
@@ -386,7 +437,15 @@ fn start_runtime(
         }
     });
 
-    *runtime = Some(RuntimeProcess { child, stdin });
+    let python_label = python.to_string_lossy().into_owned();
+    *runtime = Some(RuntimeProcess {
+        child,
+        stdin: Some(stdin),
+        python_executable: python_label,
+        project_root: root.to_string_lossy().into_owned(),
+        exited: false,
+    });
+    *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = None;
     Ok(())
 }
 
@@ -404,6 +463,7 @@ fn test_ollama_connection(
     ollama_base_url: String,
     llm_model: String,
     llm_timeout_seconds: f64,
+    python_executable: Option<String>,
 ) -> Result<OllamaTestResult, String> {
     let base = ollama_base_url.trim().trim_end_matches('/');
     if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 {
@@ -475,17 +535,43 @@ fn send_runtime_command(state: State<'_, RuntimeState>, message: Value) -> Resul
     if encoded.len() > 64 * 1024 {
         return Err("Comando excede o limite de 64 KiB.".into());
     }
-    let mut runtime = state.0.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    let mut runtime = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
     let process = runtime.as_mut().ok_or("Runtime não iniciado.")?;
-    process.stdin.write_all(encoded.as_bytes()).map_err(|e| format!("Falha ao enviar comando ao runtime: {e}"))?;
-    process.stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar comando: {e}"))?;
-    process.stdin.flush().map_err(|e| format!("Falha ao descarregar comando: {e}"))
+    if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao verificar o Core: {e}"))? {
+        let code = status.code().unwrap_or(-1);
+        process.exited = true;
+        *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = Some(code);
+        runtime.take();
+        return Err(format!("O processo Python encerrou antes de receber o comando (código de saída: {code})."));
+    }
+    let stdin = process.stdin.as_mut().ok_or("Entrada do Core indisponível.")?;
+    stdin.write_all(encoded.as_bytes()).map_err(|e| format!("Falha ao enviar comando ao runtime: {e}"))?;
+    stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar comando: {e}"))?;
+    stdin.flush().map_err(|e| format!("Falha ao descarregar comando: {e}"))
 }
 
 #[tauri::command]
 fn stop_runtime(state: State<'_, RuntimeState>) -> Result<(), String> {
-    let mut runtime = state.0.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
-    runtime.take();
+    let process = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?.take();
+    let Some(mut process) = process else { return Ok(()); };
+
+    // EOF is the protocol's graceful shutdown signal. Do not kill Python while it can exit normally.
+    process.stdin.take();
+    let mut exit_code = None;
+    for _ in 0..30 {
+        if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao aguardar o Core: {e}"))? {
+            exit_code = Some(status.code().unwrap_or(-1));
+            break;
+        }
+        thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if exit_code.is_none() {
+        let _ = process.child.kill();
+        let status = process.child.wait().map_err(|e| format!("Falha ao finalizar o Core: {e}"))?;
+        exit_code = Some(status.code().unwrap_or(-1));
+    }
+    process.exited = true;
+    *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = exit_code;
     Ok(())
 }
 
@@ -572,6 +658,7 @@ pub fn run() {
             create_project_directory,
             run_project_file,
             start_runtime,
+            runtime_diagnostics,
             test_ollama_connection,
             send_runtime_command,
             stop_runtime,
