@@ -50,6 +50,9 @@ def test_ollama_client_chat_uses_native_api(monkeypatch):
     assert calls["kwargs"]["json"]["model"] == "qwen2.5-coder:3b"
     assert calls["kwargs"]["json"]["stream"] is False
     assert calls["kwargs"]["json"]["options"]["temperature"] == 0.0
+    assert calls["kwargs"]["json"]["keep_alive"] == "2m"
+    assert calls["kwargs"]["json"]["options"]["num_ctx"] == 4096
+    assert calls["kwargs"]["json"]["options"]["num_predict"] == 1024
 
 
 def test_ollama_client_list_models(monkeypatch):
