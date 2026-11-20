@@ -149,6 +149,13 @@ function App() {
 
 
   useEffect(() => {
+    if (!importedGoogleFontNames().includes("Shantell Sans")) {
+      setGoogleFontUrl("https://fonts.google.com/specimen/Shantell+Sans");
+      void importGoogleFont();
+    }
+  }, []);
+
+  useEffect(() => {
     const savedFonts = (() => { try { return JSON.parse(localStorage.getItem("kardecagent.studio.googleFonts") || "{}") as Record<string, string>; } catch { return {}; } })();
     const style = document.createElement("style");
     style.id = "kardecagent-google-fonts";
@@ -786,6 +793,8 @@ function App() {
                   <div className="settings-section-title"><Wifi size={16}/><strong>Conexão com Ollama</strong></div>
                   <label>Endereço do servidor<input value={settings.ollamaUrl} onChange={event => setSettings(current => ({ ...current, ollamaUrl: event.target.value }))} placeholder="http://127.0.0.1:11434"/></label>
                   <label>Modelo local<input value={settings.model} onChange={event => setSettings(current => ({ ...current, model: event.target.value }))} placeholder="qwen2.5-coder:3b"/></label>
+                  <p className="settings-help">Perfil econômico ativo: contexto de 4.096 tokens, geração limitada e descarregamento automático do modelo após dois minutos sem uso. O Core Python permanece ativo enquanto a IDE estiver aberta.</p>
+                  <div className="settings-actions"><button className="settings-secondary" onClick={() => setSettings(current => ({ ...current, model: "qwen2.5-coder:1.5b" }))}>Selecionar modelo ultra-leve (1.5B)</button></div>
                   <label>Tempo limite de resposta (segundos)<input type="number" min={10} max={900} value={settings.timeout} onChange={event => setSettings(current => ({ ...current, timeout: Math.max(10, Math.min(900, Number(event.target.value) || 180)) }))}/></label>
                   <div className="settings-actions"><button className="settings-secondary" disabled={ollamaTesting} onClick={async () => {
                     setOllamaTesting(true); setOllamaTest(null);
