@@ -249,7 +249,8 @@ function App() {
       streamClosed.then(stop => stop());
       stderr.then(stop => stop());
       protocolError.then(stop => stop());
-      void invoke("stop_runtime").catch(() => undefined);
+      // Listener lifecycle is independent from the Core process lifecycle.
+      // The runtime is stopped explicitly when changing workspace or exiting the app.
     };
   }, []);
 
