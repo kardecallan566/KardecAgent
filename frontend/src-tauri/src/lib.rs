@@ -319,6 +319,7 @@ fn start_runtime(
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
     let (python, python_prefix) = resolve_python_command()?;
     let mut command = Command::new(python);
+    configure_hidden_process(&mut command);
     command
         .args(&python_prefix)
         .args(["-m", "kardecagent.cli", "studio", "--project"])
@@ -440,6 +441,7 @@ except Exception as exc:
     sys.exit(2)
 "#;
     let mut command = Command::new(python);
+    configure_hidden_process(&mut command);
     configure_hidden_process(&mut command);
     let output = command
         .args(&prefix)
