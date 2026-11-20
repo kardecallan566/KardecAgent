@@ -39,7 +39,10 @@ fn resolve_python_command() -> Result<(std::ffi::OsString, Vec<String>), String>
     };
     let mut diagnostics = Vec::new();
     for (program, prefix) in candidates {
-        let mut probe = Command::new(&program);\n        probe.args(&prefix).args(["-c", "import kardecagent, kardecagent.cli"]);\n        configure_hidden_process(&mut probe);\n        match probe.output() {
+        let mut probe = Command::new(&program);
+        probe.args(&prefix).args(["-c", "import kardecagent, kardecagent.cli"]);
+        configure_hidden_process(&mut probe);
+        match probe.output() {
             Ok(output) if output.status.success() => return Ok((program, prefix)),
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -558,7 +561,10 @@ pub fn run() {
             start_runtime,
             test_ollama_connection,
             send_runtime_command,
-            stop_runtime
+            stop_runtime,
+            start_integrated_terminal,
+            write_integrated_terminal,
+            stop_integrated_terminal
         ])
         .run(tauri::generate_context!())
         .expect("failed to run KardecAgent Studio");
