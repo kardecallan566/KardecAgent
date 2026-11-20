@@ -341,3 +341,13 @@ body { min-width:900px; }
 .app-shell[data-theme="light"] .code-editor,.app-shell[data-theme="light"] .syntax-highlight { color:#263449; }
 .app-shell[data-theme="light"] .statusbar { color:#fff; }
 @media(max-width:760px) { .settings-dialog-wide { width:98vw; } .settings-layout { grid-template-columns:145px minmax(0,1fr); } .settings-nav { padding:10px 7px; } .settings-page { padding:14px; } }
+
+
+/* Workspace actions remain available after opening a project */
+.titlebar-actions{display:flex;align-items:center;gap:6px;margin-left:auto;white-space:nowrap}
+.titlebar-actions button{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid #343744;border-radius:5px;background:#20232b;color:#c8cbd5;font-size:10px;transition:background .15s ease,border-color .15s ease}
+.titlebar-actions button:hover:not(:disabled){background:#302b40;border-color:#67558f;color:#f0eafa}
+.titlebar-actions button:disabled{opacity:.38;cursor:not-allowed}
+.titlebar-actions button:last-child{border-color:#51436c;background:#292238;color:#d0c1f5}
+.titlebar-actions svg{flex:0 0 auto}
+@media(max-width:1120px){.titlebar{gap:12px;padding:0 9px}.titlebar-actions button{padding:5px 6px;font-size:9px}.workspace-label{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
