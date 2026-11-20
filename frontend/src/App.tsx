@@ -7,12 +7,12 @@ import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
   ListTodo, Plus, Search, ShieldCheck, Workflow, Save,
-  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus
+  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
-type StudioSettings = { ollamaUrl: string; model: string; timeout: number };
-const DEFAULT_SETTINGS: StudioSettings = { ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180 };
+type StudioSettings = { ollamaUrl: string; model: string; timeout: number; editorFontSize: number; tabSize: number; wordWrap: boolean; shell: "powershell" | "cmd" };
+const DEFAULT_SETTINGS: StudioSettings = { ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, editorFontSize: 13, tabSize: 2, wordWrap: false, shell: "powershell" };
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 
 function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void }) {
@@ -76,7 +76,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<StudioSettings>(() => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") }; } catch { return DEFAULT_SETTINGS; } });
   const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[] } | null>(null);
-  const [ollamaTesting, setOllamaTesting] = useState(false);
+  const [ollamaTesting, setOllamaTesting] = useState(false);\n  const [terminalReady, setTerminalReady] = useState(false);\n  const [terminalInput, setTerminalInput] = useState("");\n  const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState("App.tsx");
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
@@ -233,6 +233,29 @@ function App() {
       void invoke("stop_runtime").catch(() => undefined);
     };
   }, []);
+
+
+  async function startTerminal() {
+    if (!projectRoot) { setProjectError("Abra um projeto antes de iniciar o terminal."); return; }
+    try {
+      await invoke("start_integrated_terminal", { projectPath: projectRoot, shellName: settings.shell });
+      setTerminalReady(true);
+      setTerminalOutput(items => [...items, "[Terminal iniciado em " + projectRoot + "]"]);
+      setBottomPanel("Terminal");
+    } catch (error) { setProjectError("Não foi possível iniciar o terminal: " + String(error)); }
+  }
+  async function sendTerminalCommand() {
+    const command = terminalInput;
+    if (!command.trim() || !terminalReady) return;
+    setTerminalOutput(items => [...items, (settings.shell === "cmd" ? ">" : "PS>") + " " + command]);
+    setTerminalInput("");
+    try { await invoke("write_integrated_terminal", { input: command }); }
+    catch (error) { setTerminalOutput(items => [...items, "Erro: " + String(error)]); }
+  }
+  async function stopTerminal() {
+    try { await invoke("stop_integrated_terminal"); } catch { /* terminal may already have exited */ }
+    setTerminalReady(false);
+  }
 
   async function openEntry(entry: ProjectEntry) {
     if (entry.is_dir) return;
@@ -503,9 +526,9 @@ function App() {
             <>
               <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button" onClick={runCurrentFile} disabled={runningFile}><Play size={13}/>{runningFile ? "Executando..." : "Executar"}</button><button className="save-file-button" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving}><Save size={13}/>{fileSaving ? "Salvando..." : "Salvar"}</button></>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap"><div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div><div className="code-surface"><pre className="syntax-highlight" aria-hidden="true">{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap"><div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div><div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontSize: `${settings.editorFontSize}px`, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} style={{ fontSize: `${settings.editorFontSize}px`, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
-              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
+              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Terminal" ? <div className="integrated-terminal"><div className="terminal-toolbar"><span><Terminal size={13}/> {terminalReady ? "Terminal ativo" : "Terminal parado"}</span><div><button onClick={() => void startTerminal()} disabled={terminalReady || !projectRoot}>Novo terminal</button><button onClick={() => void stopTerminal()} disabled={!terminalReady}><Square size={11}/> Encerrar</button></div></div><div className="terminal-screen">{terminalOutput.map((line,index) => <div key={index}>{line}</div>)}</div><form className="terminal-command" onSubmit={event => { event.preventDefault(); void sendTerminalCommand(); }}><span>{settings.shell === "cmd" ? ">" : "PS>"}</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} placeholder={terminalReady ? "Digite um comando e pressione Enter..." : "Inicie um terminal para executar comandos"} disabled={!terminalReady}/><button type="submit" disabled={!terminalReady || !terminalInput.trim()}><Send size={13}/></button></form></div> : bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
             </>
           )}
         </section>
@@ -571,6 +594,14 @@ function App() {
               finally { setOllamaTesting(false); }
             }}><Wifi size={14}/>{ollamaTesting ? "Testando modelo..." : "Testar conexão e modelo"}</button></div>
             {ollamaTest && <div className={ollamaTest.ok ? "ollama-test-result success" : "ollama-test-result error"}>{ollamaTest.ok ? <CheckCircle size={15}/> : <AlertCircle size={15}/>}<div><strong>{ollamaTest.ok ? "Ollama respondeu corretamente" : "Falha na conexão"}</strong><p>{ollamaTest.message}</p>{ollamaTest.version && <small>Ollama {ollamaTest.version} · Modelo {settings.model}</small>}{ollamaTest.models && <small>Modelos instalados: {ollamaTest.models.join(", ") || "nenhum"}</small>}</div></div>}
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-title"><FileCode2 size={16}/><strong>Editor e terminal</strong></div>
+            <label>Tamanho da fonte do editor (px)<input type="number" min={10} max={24} value={settings.editorFontSize} onChange={event => setSettings(current => ({ ...current, editorFontSize: Math.max(10, Math.min(24, Number(event.target.value) || 13)) }))}/></label>
+            <label>Espaços por tabulação<input type="number" min={2} max={8} value={settings.tabSize} onChange={event => setSettings(current => ({ ...current, tabSize: Math.max(2, Math.min(8, Number(event.target.value) || 2)) }))}/></label>
+            <label>Terminal padrão<select value={settings.shell} onChange={event => setSettings(current => ({ ...current, shell: event.target.value as "powershell" | "cmd" }))}><option value="powershell">PowerShell</option><option value="cmd">Prompt de Comando (CMD)</option></select></label>
+            <label className="settings-checkbox"><input type="checkbox" checked={settings.wordWrap} onChange={event => setSettings(current => ({ ...current, wordWrap: event.target.checked }))}/> Quebra automática de linha no editor</label>
           </div>
           <div className="settings-footer"><span>As alterações são aplicadas ao próximo início do core.</span><button className="settings-primary" onClick={() => {
             localStorage.setItem("kardecagent.studio.settings", JSON.stringify(settings)); setOllamaTest(null); setSettingsOpen(false);
