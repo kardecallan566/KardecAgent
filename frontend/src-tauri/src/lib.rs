@@ -275,7 +275,9 @@ except Exception as exc:
     sys.exit(2)
 "#;
     let (python, prefix) = resolve_python_command()?;
-    let mut command = Command::new(python);\n    configure_hidden_process(&mut command);\n    let output = command.args(&prefix).args(["-c", script])
+    let mut command = Command::new(python);
+    configure_hidden_process(&mut command);
+    let output = command.args(&prefix).args(["-c", script])
         .current_dir(&root).env("KARDECAGENT_RUN_ROOT", &root).env("KARDECAGENT_RUN_FILE", &path)
         .output().map_err(|e| format!("Não foi possível iniciar execução: {e}"))?;
     let parsed: Value = serde_json::from_slice(&output.stdout)
@@ -442,7 +444,6 @@ except Exception as exc:
 "#;
     let mut command = Command::new(python);
     configure_hidden_process(&mut command);
-    configure_hidden_process(&mut command);
     let output = command
         .args(&prefix)
         .args(["-c", script])
@@ -553,7 +554,8 @@ fn stop_integrated_terminal(state: State<'_, TerminalState>) -> Result<(), Strin
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(RuntimeState::default())\n        .manage(TerminalState::default())
+        .manage(RuntimeState::default())
+        .manage(TerminalState::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_project_entries,
