@@ -371,7 +371,7 @@ fn start_runtime(
     if llm_model.trim().is_empty() || llm_model.len() > 200 { return Err("Modelo Ollama inválido.".into()); }
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
     let (python, python_prefix) = resolve_python_command(python_executable.as_deref())?;
-    let mut command = Command::new(python);
+    let mut command = Command::new(&python);
     configure_hidden_process(&mut command);
     command
         .args(&python_prefix)
