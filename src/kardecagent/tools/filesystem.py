@@ -15,3 +15,9 @@ class ProjectFilesystem:
     def list_files(self,limit:int=500)->list[str]:
         from ..project.context import project_snapshot
         return project_snapshot(self.root,limit)
+
+    def create_directory(self, relative_path: str) -> None:
+        path = self.safe_path(relative_path)
+        if path == self.root:
+            raise ValueError("Cannot create the project root again.")
+        path.mkdir(parents=True, exist_ok=False)

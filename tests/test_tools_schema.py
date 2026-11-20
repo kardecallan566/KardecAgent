@@ -68,3 +68,13 @@ def test_finish_requires_completion_evidence():
 def test_finish_accepts_completion_evidence():
     action = parse_tool_call('{"tool":"finish","arguments":{"reason":"ok","criteria_evidence":["tests passed"]}}')
     assert action.arguments["criteria_evidence"] == ["tests passed"]
+
+def test_create_directory_requires_plan_step():
+    with pytest.raises(ToolCallError, match="plan_step is required"):
+        parse_tool_call('{"tool":"create_directory","arguments":{"path":"src"}}')
+
+
+def test_create_directory_tool_is_valid():
+    action = parse_tool_call('{"tool":"create_directory","arguments":{"path":"src/components"},"plan_step":1}')
+    assert action.tool == "create_directory"
+    assert action.arguments["path"] == "src/components"
