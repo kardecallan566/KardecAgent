@@ -77,7 +77,9 @@ function App() {
   const [settings, setSettings] = useState<StudioSettings>(() => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") }; } catch { return DEFAULT_SETTINGS; } });
   const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[] } | null>(null);
   const [ollamaTesting, setOllamaTesting] = useState(false);
-  const [terminalReady, setTerminalReady] = useState(false);\n  const [terminalInput, setTerminalInput] = useState("");\n  const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
+  const [terminalReady, setTerminalReady] = useState(false);
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState("App.tsx");
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
