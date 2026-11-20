@@ -448,7 +448,7 @@ function App() {
     try {
       const url = new URL(googleFontUrl.trim());
       if (url.hostname !== "fonts.google.com") throw new Error("Use um link de fonts.google.com.");
-      const match = url.pathname.match(/\\/specimen\\/([^/]+)/);
+      const match = url.pathname.match(/\/specimen\/([^/]+)/);
       const family = decodeURIComponent((match?.[1] || "").replace(/\\+/g, " ")).trim();
       if (!family || family.length > 80) throw new Error("Não foi possível identificar a família da fonte no link.");
       const cssUrl = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(family).replace(/%20/g, "+") + ":wght@300..800&display=swap";
