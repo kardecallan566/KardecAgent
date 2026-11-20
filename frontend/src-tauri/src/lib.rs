@@ -318,7 +318,7 @@ except Exception as exc:
     print(json.dumps({"error":str(exc)}))
     sys.exit(2)
 "#;
-    let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
+    let (python, prefix) = resolve_python_command(None)?;
     let mut command = Command::new(&python);
     configure_hidden_process(&mut command);
     let output = command.args(&prefix).args(["-c", script])
