@@ -127,6 +127,11 @@ function App() {
   const runtimeListenersReady = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
+    try { localStorage.setItem("kardecagent.studio.settings", JSON.stringify(settings)); }
+    catch (error) { console.warn("Não foi possível salvar as preferências do Studio", error); }
+  }, [settings]);
+
+  useEffect(() => {
     let active = true;
     const output = listen<string>("terminal-output", event => {
       if (active) setTerminalOutput(items => [...items, event.payload].slice(-1000));
@@ -387,7 +392,17 @@ function App() {
           await refreshCoreDiagnostics();
         }
       } else {
-        await refreshCoreDiagnostics();
+        const diagnostics = await invoke<CoreDiagnostics>("runtime_diagnostics");
+        setCoreDiagnostics(diagnostics);
+        if (settings.autoStartCore && !diagnostics.running) {
+          setRuntimeStatus("connecting");
+          await invoke("start_runtime", {
+            projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
+            llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
+          });
+        } else {
+          setRuntimeStatus(diagnostics.running ? "online" : "offline");
+        }
       }
     } catch (error) {
       setProjectError(String(error));
