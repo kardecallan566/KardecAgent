@@ -284,6 +284,8 @@ function App() {
     });
     const streamClosed = listen("runtime-stream-closed", () => {
       if (active) {
+        if (startupTimer.current) window.clearTimeout(startupTimer.current);
+        startupTimer.current = null;
         void invoke<CoreDiagnostics>("runtime_diagnostics").then(diagnostics => {
           setCoreDiagnostics(diagnostics);
           if (diagnostics.running) return;
@@ -399,6 +401,8 @@ function App() {
       });
       await refreshCoreDiagnostics();
     } catch (error) {
+      if (startupTimer.current) window.clearTimeout(startupTimer.current);
+      startupTimer.current = null;
       setRuntimeStatus("offline");
       setRuntimeError(String(error));
     }
@@ -446,6 +450,8 @@ function App() {
         });
       } else setRuntimeStatus("offline");
     } catch (error) {
+      if (startupTimer.current) window.clearTimeout(startupTimer.current);
+      startupTimer.current = null;
       setProjectError(String(error)); setRuntimeStatus("offline"); setRuntimeError(String(error));
     }
   }
