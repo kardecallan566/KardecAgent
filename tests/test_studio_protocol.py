@@ -120,7 +120,7 @@ def test_run_stdio_switches_workspace_without_restarting_agent(monkeypatch, tmp_
     monkeypatch.setattr(
         studio_protocol.sys,
         "stdin",
-        io.StringIO("".join(json.dumps(item) + "\\n" for item in commands)),
+        io.StringIO("".join(json.dumps(item) + "\n" for item in commands)),
     )
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
