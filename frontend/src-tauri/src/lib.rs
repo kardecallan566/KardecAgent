@@ -17,6 +17,15 @@ struct ProjectEntry {
     is_dir: bool,
 }
 
+
+#[cfg(windows)]
+fn configure_hidden_process(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x08000000);
+}
+#[cfg(not(windows))]
+fn configure_hidden_process(_command: &mut Command) {}
+
 const MAX_RUNTIME_LINE_BYTES: usize = 256 * 1024 + 1;
 const MAX_RUNTIME_LOG_BYTES: usize = 8 * 1024;
 fn resolve_python_command() -> Result<(std::ffi::OsString, Vec<String>), String> {
@@ -30,7 +39,7 @@ fn resolve_python_command() -> Result<(std::ffi::OsString, Vec<String>), String>
     };
     let mut diagnostics = Vec::new();
     for (program, prefix) in candidates {
-        match Command::new(&program).args(&prefix).args(["-c", "import kardecagent, kardecagent.cli"]).output() {
+        let mut probe = Command::new(&program);\n        probe.args(&prefix).args(["-c", "import kardecagent, kardecagent.cli"]);\n        configure_hidden_process(&mut probe);\n        match probe.output() {
             Ok(output) if output.status.success() => return Ok((program, prefix)),
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -263,7 +272,7 @@ except Exception as exc:
     sys.exit(2)
 "#;
     let (python, prefix) = resolve_python_command()?;
-    let output = Command::new(python).args(&prefix).args(["-c", script])
+    let mut command = Command::new(python);\n    configure_hidden_process(&mut command);\n    let output = command.args(&prefix).args(["-c", script])
         .current_dir(&root).env("KARDECAGENT_RUN_ROOT", &root).env("KARDECAGENT_RUN_FILE", &path)
         .output().map_err(|e| format!("Não foi possível iniciar execução: {e}"))?;
     let parsed: Value = serde_json::from_slice(&output.stdout)
@@ -472,10 +481,68 @@ fn stop_runtime(state: State<'_, RuntimeState>) -> Result<(), String> {
     Ok(())
 }
 
+
+struct TerminalProcess { child: Child, stdin: ChildStdin }
+impl Drop for TerminalProcess {
+    fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); }
+}
+#[derive(Default)]
+struct TerminalState(Mutex<Option<TerminalProcess>>);
+
+#[tauri::command]
+fn start_integrated_terminal(app: tauri::AppHandle, state: State<'_, TerminalState>, project_path: String) -> Result<(), String> {
+    let root = Path::new(&project_path).canonicalize().map_err(|e| format!("Pasta do terminal inválida: {e}"))?;
+    if !root.is_dir() { return Err("A pasta selecionada não é um diretório.".into()); }
+    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    if terminal.is_some() { return Err("O terminal já está em execução.".into()); }
+    #[cfg(windows)]
+    let mut command = { let mut c = Command::new("powershell.exe"); c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]); c };
+    #[cfg(not(windows))]
+    let mut command = { let mut c = Command::new("bash"); c.args(["--noprofile", "--norc"]); c };
+    configure_hidden_process(&mut command);
+    let mut child = command.current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().map_err(|e| format!("Não foi possível iniciar o terminal integrado: {e}"))?;
+    let stdin = child.stdin.take().ok_or("Falha ao abrir entrada do terminal.")?;
+    let stdout = child.stdout.take().ok_or("Falha ao abrir saída do terminal.")?;
+    let stderr = child.stderr.take().ok_or("Falha ao abrir erros do terminal.")?;
+    let out_app = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            match line { Ok(line) => { let _ = out_app.emit("terminal-output", line); }, Err(error) => { let _ = out_app.emit("terminal-output", format!("Erro de leitura: {error}")); break; } }
+        }
+        let _ = out_app.emit("terminal-exited", ());
+    });
+    let err_app = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() { match line { Ok(line) => { let _ = err_app.emit("terminal-output", line); }, Err(_) => break } }
+    });
+    *terminal = Some(TerminalProcess { child, stdin });
+    Ok(())
+}
+
+#[tauri::command]
+fn write_integrated_terminal(state: State<'_, TerminalState>, input: String) -> Result<(), String> {
+    if input.len() > 16 * 1024 { return Err("Comando excede 16 KiB.".into()); }
+    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    let process = terminal.as_mut().ok_or("Terminal não iniciado.")?;
+    process.stdin.write_all(input.as_bytes()).map_err(|e| format!("Falha ao enviar comando: {e}"))?;
+    process.stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar comando: {e}"))?;
+    process.stdin.flush().map_err(|e| format!("Falha ao descarregar comando: {e}"))
+}
+
+#[tauri::command]
+fn stop_integrated_terminal(state: State<'_, TerminalState>) -> Result<(), String> {
+    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    terminal.take();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(RuntimeState::default())
+        .manage(RuntimeState::default())\n        .manage(TerminalState::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_project_entries,
