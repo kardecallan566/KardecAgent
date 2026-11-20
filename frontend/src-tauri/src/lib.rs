@@ -475,7 +475,7 @@ fn test_ollama_connection(
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) {
         return Err("O timeout deve estar entre 10 e 900 segundos.".into());
     }
-    let (python, prefix) = resolve_python_command()?;
+    let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
     let script = r#"
 import json, os, sys
 import httpx
