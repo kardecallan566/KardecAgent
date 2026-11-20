@@ -449,13 +449,13 @@ function App() {
       const url = new URL(googleFontUrl.trim());
       if (url.hostname !== "fonts.google.com") throw new Error("Use um link de fonts.google.com.");
       const match = url.pathname.match(/\/specimen\/([^/]+)/);
-      const family = decodeURIComponent((match?.[1] || "").replace(/\\+/g, " ")).trim();
+      const family = decodeURIComponent((match?.[1] || "").replace(/\+/g, " ")).trim();
       if (!family || family.length > 80) throw new Error("Não foi possível identificar a família da fonte no link.");
       const cssUrl = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(family).replace(/%20/g, "+") + ":wght@300..800&display=swap";
       const cssResponse = await fetch(cssUrl);
       if (!cssResponse.ok) throw new Error("Google Fonts respondeu com HTTP " + cssResponse.status + ".");
       let css = await cssResponse.text();
-      const urls = [...new Set([...css.matchAll(/url\\((https:\\/\\/[^)]+)\\)/g)].map(match => match[1]))];
+      const urls = [...new Set([...css.matchAll(/url\((https:\/\/[^)]+)\)/g)].map(match => match[1]))];
       if (!urls.length) throw new Error("O Google Fonts não retornou arquivos WOFF2 para esta fonte.");
       for (const fontUrl of urls) {
         const response = await fetch(fontUrl);
