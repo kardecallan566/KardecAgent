@@ -36,7 +36,11 @@
         ],
         "installerIcon": "icons/icon.ico",
         "headerImage": "windows/installer-header.bmp",
-        "sidebarImage": "windows/installer-sidebar.bmp"
+        "sidebarImage": "windows/installer-sidebar.bmp",
+        "customLanguageFiles": {
+          "PortugueseBR": "windows/PortugueseBR.nsh",
+          "English": "windows/English.nsh"
+        }
       }
     },
     "targets": "all",
