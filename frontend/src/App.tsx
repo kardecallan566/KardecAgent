@@ -173,7 +173,8 @@ function App() {
         }
       }
       if (message.type === "runtime.ready") {
-        if (startupTimer.current) window.clearTimeout(startupTimer.current);\n        startupTimer.current = null;
+        if (startupTimer.current) window.clearTimeout(startupTimer.current);
+        startupTimer.current = null;
         setRuntimeStatus("online");
         setRuntimeLimits(message.limits || null);
         setRuntimeError(null);
@@ -368,11 +369,11 @@ function App() {
       setRuntimeError(null);
       await invoke("stop_runtime");
       await runtimeListenersReady.current;
+      armCoreStartupTimeout();
       await invoke("start_runtime", {
         projectPath: projectRoot, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
         llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
       });
-      armCoreStartupTimeout();
       await refreshCoreDiagnostics();
     } catch (error) {
       setRuntimeStatus("offline");
@@ -409,16 +410,16 @@ function App() {
       const diagnostics = await invoke<CoreDiagnostics>("runtime_diagnostics");
       setCoreDiagnostics(diagnostics);
       if (diagnostics.running) {
-        await invoke("switch_runtime_workspace", { projectPath: selected });
         setRuntimeStatus("connecting"); armCoreStartupTimeout();
+        await invoke("switch_runtime_workspace", { projectPath: selected });
       } else if (settings.autoStartCore) {
         setRuntimeStatus("connecting");
         await runtimeListenersReady.current;
+        armCoreStartupTimeout();
         await invoke("start_runtime", {
           projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
           llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
         });
-        armCoreStartupTimeout();
       } else setRuntimeStatus("offline");
     } catch (error) {
       setProjectError(String(error)); setRuntimeStatus("offline"); setRuntimeError(String(error));
