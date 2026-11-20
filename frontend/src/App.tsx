@@ -126,10 +126,6 @@ function App() {
   const approvalCommandId = useRef<string | null>(null);
   const runtimeListenersReady = useRef<Promise<void>>(Promise.resolve());
 
-  useEffect(() => {
-    try { localStorage.setItem("kardecagent.studio.settings", JSON.stringify(settings)); }
-    catch (error) { console.warn("Não foi possível salvar as preferências do Studio", error); }
-  }, [settings]);
 
   useEffect(() => {
     let active = true;
