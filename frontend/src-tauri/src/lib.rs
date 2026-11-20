@@ -529,6 +529,43 @@ except Exception as exc:
 }
 
 #[tauri::command]
+fn switch_runtime_workspace(state: State<'_, RuntimeState>, project_path: String) -> Result<(), String> {
+    let root = Path::new(&project_path)
+        .canonicalize()
+        .map_err(|e| format!("Projeto inválido: {e}"))?;
+    if !root.is_dir() {
+        return Err("O caminho do projeto não é uma pasta.".into());
+    }
+    let mut runtime = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    let process = runtime.as_mut().ok_or("Core não iniciado.")?;
+    if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao verificar o Core: {e}"))? {
+        let code = status.code().unwrap_or(-1);
+        process.exited = true;
+        *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = Some(code);
+        runtime.take();
+        return Err(format!("O Core encerrou antes da troca de projeto (código {code})."));
+    }
+    let command_id = format!(
+        "workspace-switch-{}-{}",
+        process.child.id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()
+    );
+    let message = serde_json::json!({
+        "type": "workspace.change",
+        "schema_version": 1,
+        "command_id": command_id,
+        "payload": { "project_root": root.to_string_lossy() }
+    });
+    let encoded = serde_json::to_vec(&message).map_err(|e| format!("Falha ao preparar troca de projeto: {e}"))?;
+    let stdin = process.stdin.as_mut().ok_or("Entrada do Core indisponível.")?;
+    stdin.write_all(&encoded).map_err(|e| format!("Falha ao enviar novo workspace ao Core: {e}"))?;
+    stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar troca de workspace: {e}"))?;
+    stdin.flush().map_err(|e| format!("Falha ao confirmar troca de workspace: {e}"))?;
+    process.project_root = root.to_string_lossy().into_owned();
+    Ok(())
+}
+
+#[tauri::command]
 fn send_runtime_command(state: State<'_, RuntimeState>, message: Value) -> Result<(), String> {
     let encoded = serde_json::to_string(&message)
         .map_err(|e| format!("Comando inválido: {e}"))?;
@@ -660,6 +697,7 @@ pub fn run() {
             start_runtime,
             runtime_diagnostics,
             test_ollama_connection,
+            switch_runtime_workspace,
             send_runtime_command,
             stop_runtime,
             start_integrated_terminal,
