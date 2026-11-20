@@ -170,6 +170,9 @@ fn start_runtime(
     app: tauri::AppHandle,
     state: State<'_, RuntimeState>,
     project_path: String,
+    ollama_base_url: String,
+    llm_model: String,
+    llm_timeout_seconds: f64,
 ) -> Result<(), String> {
     let root = Path::new(&project_path)
         .canonicalize()
@@ -183,6 +186,10 @@ fn start_runtime(
         return Err("O runtime já está iniciado.".into());
     }
 
+    let base = ollama_base_url.trim().trim_end_matches('/');
+    if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 { return Err("Endereço Ollama inválido.".into()); }
+    if llm_model.trim().is_empty() || llm_model.len() > 200 { return Err("Modelo Ollama inválido.".into()); }
+    if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
     let (python, python_prefix) = resolve_python_command()?;
     let mut command = Command::new(python);
     command
@@ -192,6 +199,9 @@ fn start_runtime(
         .current_dir(&root)
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONUNBUFFERED", "1")
+        .env("KARDECAGENT_OLLAMA_BASE_URL", base)
+        .env("KARDECAGENT_LLM_MODEL", llm_model.trim())
+        .env("KARDECAGENT_LLM_TIMEOUT", llm_timeout_seconds.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -250,6 +260,82 @@ fn start_runtime(
     Ok(())
 }
 
+
+#[derive(Serialize)]
+struct OllamaTestResult {
+    version: String,
+    models: Vec<String>,
+    model: String,
+    response: String,
+}
+
+#[tauri::command]
+fn test_ollama_connection(
+    ollama_base_url: String,
+    llm_model: String,
+    llm_timeout_seconds: f64,
+) -> Result<OllamaTestResult, String> {
+    let base = ollama_base_url.trim().trim_end_matches('/');
+    if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 {
+        return Err("Informe um endereço HTTP(S) válido para o Ollama.".into());
+    }
+    if llm_model.trim().is_empty() || llm_model.len() > 200 {
+        return Err("Informe o nome de um modelo Ollama válido.".into());
+    }
+    if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) {
+        return Err("O timeout deve estar entre 10 e 900 segundos.".into());
+    }
+    let (python, prefix) = resolve_python_command()?;
+    let script = r#"
+import json, os, sys
+import httpx
+base = os.environ["KARDECAGENT_OLLAMA_BASE_URL"].rstrip("/")
+model = os.environ["KARDECAGENT_LLM_MODEL"]
+timeout = float(os.environ["KARDECAGENT_LLM_TIMEOUT"])
+try:
+    version_response = httpx.get(base + "/api/version", timeout=timeout)
+    version_response.raise_for_status()
+    version = version_response.json().get("version", "unknown")
+    tags_response = httpx.get(base + "/api/tags", timeout=timeout)
+    tags_response.raise_for_status()
+    models = tags_response.json().get("models", [])
+    names = [item.get("name", "") for item in models if isinstance(item, dict)]
+    if model not in names and model + ":latest" not in names:
+        raise RuntimeError("Modelo não instalado: " + model + ". Modelos disponíveis: " + (", ".join(names) or "(nenhum)"))
+    response = httpx.post(base + "/api/chat", json={"model": model, "messages": [{"role":"system","content":"Reply with exactly: KARDECAGENT_OK"},{"role":"user","content":"Health check."}],"stream":False,"options":{"temperature":0.0,"num_predict":32}}, timeout=timeout)
+    response.raise_for_status()
+    answer = (response.json().get("message") or {}).get("content", "")
+    if not isinstance(answer, str) or "KARDECAGENT_OK" not in answer:
+        raise RuntimeError("O modelo respondeu, mas não passou no teste de inferência.")
+    print(json.dumps({"ok":True,"version":version,"models":names,"model":model,"response":"Teste de inferência concluído: KARDECAGENT_OK"}))
+except Exception as exc:
+    print(json.dumps({"ok":False,"error":str(exc)}))
+    sys.exit(2)
+"#;
+    let output = Command::new(python)
+        .args(&prefix)
+        .args(["-c", script])
+        .env("KARDECAGENT_OLLAMA_BASE_URL", base)
+        .env("KARDECAGENT_LLM_MODEL", llm_model.trim())
+        .env("KARDECAGENT_LLM_TIMEOUT", llm_timeout_seconds.to_string())
+        .output()
+        .map_err(|error| format!("Falha ao executar o teste do Ollama: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let result: Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| format!("Resposta inválida do teste Ollama: {}", String::from_utf8_lossy(&output.stderr)))?;
+    if !output.status.success() {
+        return Err(result.get("error").and_then(Value::as_str).unwrap_or("Falha no teste do Ollama.").to_string());
+    }
+    let models = result.get("models").and_then(Value::as_array).ok_or("Lista de modelos inválida.")?
+        .iter().filter_map(Value::as_str).map(str::to_string).collect();
+    Ok(OllamaTestResult {
+        version: result.get("version").and_then(Value::as_str).unwrap_or("unknown").to_string(),
+        models,
+        model: result.get("model").and_then(Value::as_str).unwrap_or("").to_string(),
+        response: result.get("response").and_then(Value::as_str).unwrap_or("OK").to_string(),
+    })
+}
+
 #[tauri::command]
 fn send_runtime_command(state: State<'_, RuntimeState>, message: Value) -> Result<(), String> {
     let encoded = serde_json::to_string(&message)
@@ -281,6 +367,7 @@ pub fn run() {
             read_project_file,
             write_project_file,
             start_runtime,
+            test_ollama_connection,
             send_runtime_command,
             stop_runtime
         ])
