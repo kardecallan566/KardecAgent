@@ -515,6 +515,8 @@ fn start_integrated_terminal(app: tauri::AppHandle, state: State<'_, TerminalSta
         _ => return Err("Shell não permitido. Escolha PowerShell ou CMD.".into()),
     };
     #[cfg(not(windows))]
+    let _ = shell_name;
+    #[cfg(not(windows))]
     let mut command = { let mut c = Command::new("bash"); c.args(["--noprofile", "--norc"]); c };
     configure_hidden_process(&mut command);
     let mut child = command.current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
