@@ -125,7 +125,6 @@ function App() {
   const seenEventIds = useRef(new Set<string>());
   const approvalCommandId = useRef<string | null>(null);
   const runtimeListenersReady = useRef<Promise<void>>(Promise.resolve());
-  const intentionalRuntimeStop = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -236,23 +235,26 @@ function App() {
       }
     });
     const streamClosed = listen("runtime-stream-closed", () => {
-      if (intentionalRuntimeStop.current) {
-        intentionalRuntimeStop.current = false;
-        void invoke<CoreDiagnostics>("runtime_diagnostics").then(setCoreDiagnostics).catch(() => undefined);
-        return;
-      }
       if (active) {
-        setRuntimeStatus("offline");
-        void invoke<CoreDiagnostics>("runtime_diagnostics").then(setCoreDiagnostics).catch(error => setCoreDiagnosticsError(String(error)));
-        setRuntimeBusy(false);
-        setRuntimeSubtasks([]);
-        setRuntimePlanSteps([]);
-        setActiveRuntimeSubtask(null);
-        setActiveRuntimeStep(null);
-        setPendingApproval(null);
-        setApprovalSubmitting(false);
-        approvalCommandId.current = null;
-        setRuntimeError(current => current || "O processo Python encerrou a conexão.");
+        void invoke<CoreDiagnostics>("runtime_diagnostics").then(diagnostics => {
+          setCoreDiagnostics(diagnostics);
+          if (diagnostics.running) return;
+          setRuntimeStatus("offline");
+          setRuntimeBusy(false);
+          setRuntimeSubtasks([]);
+          setRuntimePlanSteps([]);
+          setActiveRuntimeSubtask(null);
+          setActiveRuntimeStep(null);
+          setPendingApproval(null);
+          setApprovalSubmitting(false);
+          approvalCommandId.current = null;
+          setRuntimeError(current => current || (diagnostics.last_exit_code === null
+            ? "O processo Python encerrou a conexão."
+            : "O processo Python encerrou com código " + diagnostics.last_exit_code + "."));
+        }).catch(error => {
+          setRuntimeStatus("offline");
+          setRuntimeError("Não foi possível consultar o estado do Core: " + String(error));
+        });
       }
     });
     const stderr = listen<string>("runtime-stderr", event => {
@@ -327,7 +329,6 @@ function App() {
     try {
       setRuntimeStatus("connecting");
       setRuntimeError(null);
-      intentionalRuntimeStop.current = true;
       await invoke("stop_runtime");
       await runtimeListenersReady.current;
       await invoke("start_runtime", {
@@ -336,7 +337,6 @@ function App() {
       });
       await refreshCoreDiagnostics();
     } catch (error) {
-      intentionalRuntimeStop.current = false;
       setRuntimeStatus("offline");
       setRuntimeError(String(error));
     }
@@ -375,7 +375,6 @@ function App() {
       setRuntimeStatus("connecting");
       setRuntimeError(null);
       if (projectRoot !== selected) {
-        intentionalRuntimeStop.current = true;
         await invoke("stop_runtime").catch(() => undefined);
         await runtimeListenersReady.current;
         await invoke("start_runtime", {
