@@ -151,7 +151,7 @@ function App() {
   useEffect(() => {
     if (!importedGoogleFontNames().includes("Shantell Sans")) {
       setGoogleFontUrl("https://fonts.google.com/specimen/Shantell+Sans");
-      void importGoogleFont();
+      void importGoogleFont(false);
     }
   }, []);
 
@@ -481,7 +481,7 @@ function App() {
     } catch (error) { setProjectError("Não foi possível criar o projeto: " + String(error)); }
   }
 
-  async function importGoogleFont() {
+  async function importGoogleFont(applyToCurrent = true) {
     if (googleFontBusy) return;
     setGoogleFontBusy(true); setGoogleFontStatus(null);
     try {
@@ -508,7 +508,7 @@ function App() {
       saved[family] = css;
       localStorage.setItem("kardecagent.studio.googleFonts", JSON.stringify(saved));
       setGoogleFontRevision(value => value + 1);
-      setSettings(current => ({ ...current, uiFontFamily: family, editorFontFamily: family }));
+      if (applyToCurrent) setSettings(current => ({ ...current, uiFontFamily: family, editorFontFamily: family }));
       setGoogleFontStatus(family + " foi baixada e adicionada à biblioteca local de fontes.");
     } catch (error) { setGoogleFontStatus(String(error)); }
     finally { setGoogleFontBusy(false); }
