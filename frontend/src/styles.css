@@ -276,3 +276,13 @@ body { min-width:900px; }
 .ollama-test-result p { margin:5px 0; color:#c9c0d0; line-height:1.5; overflow-wrap:anywhere; }
 .ollama-test-result small { display:block; margin-top:4px; color:#a49aaa; overflow-wrap:anywhere; }
 .settings-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:15px 24px; border-top:1px solid #302b3b; color:#888294; font-size:10px; }
+
+.sidebar-actions { display:flex; align-items:center; gap:4px; }
+.sidebar-actions .icon-button { width:26px; height:26px; display:grid; place-items:center; color:#8d91a0; border-radius:5px; }
+.sidebar-actions .icon-button:hover { color:#d8caff; background:#292438; }
+.save-file-button { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.run-output { width:100%; min-width:0; overflow:auto; color:#c9c4d3; font-size:11px; }
+.run-output-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; color:#aaa2bb; }
+.run-output-header strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.run-success { color:#8ed0ae; }.run-failure { color:#e9aab4; }
+.run-output pre { max-height:260px; overflow:auto; margin:0; padding:10px; border:1px solid #302b3b; border-radius:6px; background:#101016; color:#d8d4e2; white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.55 ui-monospace,monospace; }
