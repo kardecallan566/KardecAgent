@@ -10,13 +10,15 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{
-      "title": "KardecAgent Studio",
-      "width": 1440,
-      "height": 900,
-      "minWidth": 1000,
-      "minHeight": 650
-    }],
+    "windows": [
+      {
+        "title": "KardecAgent Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 650
+      }
+    ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
@@ -27,11 +29,21 @@
     "windows": {
       "allowDowngrades": false,
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "languages": [
+          "PortugueseBR",
+          "English"
+        ],
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "windows/installer-header.bmp",
+        "sidebarImage": "windows/installer-sidebar.bmp"
       }
     },
     "targets": "all",
-    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "Local-first agent development workspace"
   }
