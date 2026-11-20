@@ -85,7 +85,9 @@ function App() {
   const [openedPath, setOpenedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [fileDirty, setFileDirty] = useState(false);
-  const [fileSaving, setFileSaving] = useState(false);\n  const [runningFile, setRunningFile] = useState(false);\n  const [runOutput, setRunOutput] = useState<{ file: string; language: string; exit_code: number; stdout: string; stderr: string; timed_out: boolean } | null>(null);
+  const [fileSaving, setFileSaving] = useState(false);
+  const [runningFile, setRunningFile] = useState(false);
+  const [runOutput, setRunOutput] = useState<{ file: string; language: string; exit_code: number; stdout: string; stderr: string; timed_out: boolean } | null>(null);
   const [openTabs, setOpenTabs] = useState<Array<{ path: string; name: string; content: string; dirty: boolean }>>([]);
   const [instructionDraft, setInstructionDraft] = useState("");
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
