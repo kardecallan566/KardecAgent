@@ -21,9 +21,9 @@ type SettingsSection = "core" | "editor" | "appearance" | "terminal" | "diagnost
 type CoreDiagnostics = { running: boolean; pid: number | null; python_executable: string | null; project_root: string | null; last_exit_code: number | null };
 const DEFAULT_SETTINGS: StudioSettings = {
   ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "", autoStartCore: true,
-  editorFontSize: 13, editorFontFamily: "Cascadia Code", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
+  editorFontSize: 13, editorFontFamily: "Shantell Sans", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
   shell: "powershell", terminalFontSize: 12,
-  uiTheme: "dark", uiFontFamily: "Inter", uiFontSize: 13, accentColor: "violet"
+  uiTheme: "dark", uiFontFamily: "Shantell Sans", uiFontSize: 13, accentColor: "violet"
 };
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 
@@ -89,6 +89,11 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("core");
   const [settings, setSettings] = useState<StudioSettings>(() => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") }; } catch { return DEFAULT_SETTINGS; } });
   const [coreDiagnostics, setCoreDiagnostics] = useState<CoreDiagnostics | null>(null);
+  const startupTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const [googleFontUrl, setGoogleFontUrl] = useState("https://fonts.google.com/specimen/Shantell+Sans");
+  const [googleFontStatus, setGoogleFontStatus] = useState<string | null>(null);
+  const [googleFontBusy, setGoogleFontBusy] = useState(false);
+  const [googleFontRevision, setGoogleFontRevision] = useState(0);
   const [coreDiagnosticsError, setCoreDiagnosticsError] = useState<string | null>(null);
   const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[] } | null>(null);
   const [ollamaTesting, setOllamaTesting] = useState(false);
@@ -128,6 +133,17 @@ function App() {
 
 
   useEffect(() => {
+    const savedFonts = (() => { try { return JSON.parse(localStorage.getItem("kardecagent.studio.googleFonts") || "{}") as Record<string, string>; } catch { return {}; } })();
+    const style = document.createElement("style");
+    style.id = "kardecagent-google-fonts";
+    style.textContent = Object.values(savedFonts).join("\\n");
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, [googleFontRevision]);
+
+  useEffect(() => () => { if (startupTimer.current) window.clearTimeout(startupTimer.current); }, []);
+
+  useEffect(() => {
     let active = true;
     const output = listen<string>("terminal-output", event => {
       if (active) setTerminalOutput(items => [...items, event.payload].slice(-1000));
@@ -156,7 +172,7 @@ function App() {
           if (oldest) seenEventIds.current.delete(oldest);
         }
       }
-      if (message.type === "runtime.ready") {
+      if (message.type === "runtime.ready") {\n        if (startupTimer.current) window.clearTimeout(startupTimer.current);\n        startupTimer.current = null;
         setRuntimeStatus("online");
         setRuntimeLimits(message.limits || null);
         setRuntimeError(null);
@@ -324,6 +340,19 @@ function App() {
     }
   }
 
+  function armCoreStartupTimeout() {
+    if (startupTimer.current) window.clearTimeout(startupTimer.current);
+    startupTimer.current = window.setTimeout(() => {
+      void invoke<CoreDiagnostics>("runtime_diagnostics").then(diagnostics => {
+        setCoreDiagnostics(diagnostics);
+        if (!diagnostics.running || runtimeStatus !== "online") {
+          setRuntimeStatus("offline");
+          setRuntimeError("O Core não confirmou a inicialização em 20 segundos. Verifique o Python, o pacote KardecAgent e os logs em Diagnóstico.");
+        }
+      }).catch(error => { setRuntimeStatus("offline"); setRuntimeError("Tempo limite ao iniciar o Core: " + String(error)); });
+    }, 20000);
+  }
+
   async function restartCore() {
     if (!projectRoot) { setRuntimeError("Abra um projeto antes de iniciar o Core."); return; }
     if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de reiniciar o Core."); return; }
@@ -336,77 +365,115 @@ function App() {
         projectPath: projectRoot, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
         llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
       });
-      await refreshCoreDiagnostics();
+      armCoreStartupTimeout();\n      await refreshCoreDiagnostics();
     } catch (error) {
       setRuntimeStatus("offline");
       setRuntimeError(String(error));
+    }
+  }
+
+  async function saveAllFiles() {
+    if (!projectRoot) return;
+    const dirtyTabs = openTabs.filter(tab => tab.dirty);
+    if (!dirtyTabs.length) return;
+    try {
+      for (const tab of dirtyTabs) await invoke("write_project_file", { projectRoot, filePath: tab.path, content: tab.path === openedPath ? fileContent : tab.content });
+      setOpenTabs(tabs => tabs.map(tab => ({ ...tab, dirty: false, content: tab.path === openedPath ? fileContent : tab.content })));
+      setFileDirty(false); setProjectError(null);
+      setRuntimeEvents(items => [...items, { id: crypto.randomUUID(), type: "files.saved", message: dirtyTabs.length + " arquivo(s) salvo(s)." }].slice(-100));
+    } catch (error) { setProjectError("Falha ao salvar os arquivos: " + String(error)); }
+  }
+
+  async function activateProject(selected: string) {
+    if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace."); return; }
+    if (projectRoot && projectRoot !== selected && openTabs.some(tab => tab.dirty)) {
+      const discard = window.confirm("Existem alterações não salvas. Deseja descartar essas alterações e abrir outro projeto? (Use Salvar tudo antes, se quiser preservá-las.)");
+      if (!discard) return;
+    }
+    try {
+      const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
+      setProjectRoot(selected); setProjectEntries(entries); setProjectError(null);
+      setOpenedPath(null); setSelectedFile(""); setFileContent(""); setFileDirty(false); setOpenTabs([]); setRunOutput(null);
+      setRuntimeEvents([]); setRuntimeTasks([]); setRuntimeSubtasks([]); setRuntimePlanSteps([]);
+      setActiveRuntimeSubtask(null); setActiveRuntimeStep(null); setRuntimeLimits(null);
+      setRuntimeBusy(false); setPendingApproval(null); setApprovalSubmitting(false);
+      seenEventIds.current.clear(); approvalCommandId.current = null; setRuntimeError(null);
+      const diagnostics = await invoke<CoreDiagnostics>("runtime_diagnostics");
+      setCoreDiagnostics(diagnostics);
+      if (diagnostics.running) {
+        await invoke("switch_runtime_workspace", { projectPath: selected });
+        setRuntimeStatus("connecting"); armCoreStartupTimeout();
+      } else if (settings.autoStartCore) {
+        setRuntimeStatus("connecting");
+        await runtimeListenersReady.current;
+        await invoke("start_runtime", {
+          projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
+          llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
+        });
+        armCoreStartupTimeout();
+      } else setRuntimeStatus("offline");
+    } catch (error) {
+      setProjectError(String(error)); setRuntimeStatus("offline"); setRuntimeError(String(error));
     }
   }
 
   async function openProject() {
-    if (runtimeBusy) {
-      setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace.");
-      return;
-    }
     let selected: string | string[] | null;
-    try {
-      selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
-    } catch (error) {
-      setProjectError("Não foi possível abrir o seletor de pastas: " + String(error));
-      return;
-    }
-    if (typeof selected !== "string") return;
-    try {
-      const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
-      setProjectRoot(selected);
-      setProjectEntries(entries);
-      setProjectError(null);
-      setRuntimeEvents([]);
-      setRuntimeTasks([]);
-      setRuntimeSubtasks([]);
-      setRuntimePlanSteps([]);
-      setActiveRuntimeSubtask(null);
-      setActiveRuntimeStep(null);
-      setRuntimeLimits(null);
-      setRuntimeBusy(false);
-      setPendingApproval(null);
-      setApprovalSubmitting(false);
-      seenEventIds.current.clear();
-      approvalCommandId.current = null;
-      setRuntimeStatus("connecting");
-      setRuntimeError(null);
-      if (projectRoot !== selected) {
-        await invoke("stop_runtime").catch(() => undefined);
-        await runtimeListenersReady.current;
-        if (settings.autoStartCore) {
-          await invoke("start_runtime", {
-            projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
-            llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
-          });
-        } else {
-          setRuntimeStatus("offline");
-          await refreshCoreDiagnostics();
-        }
-      } else {
-        const diagnostics = await invoke<CoreDiagnostics>("runtime_diagnostics");
-        setCoreDiagnostics(diagnostics);
-        if (settings.autoStartCore && !diagnostics.running) {
-          setRuntimeStatus("connecting");
-          await invoke("start_runtime", {
-            projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
-            llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
-          });
-        } else {
-          setRuntimeStatus(diagnostics.running ? "online" : "offline");
-        }
-      }
-    } catch (error) {
-      setProjectError(String(error));
-      setRuntimeStatus("offline");
-      setRuntimeError(String(error));
-    }
+    try { selected = await open({ directory: true, multiple: false, title: "Abrir projeto existente" }); }
+    catch (error) { setProjectError("Não foi possível abrir o seletor de pastas: " + String(error)); return; }
+    if (typeof selected === "string") await activateProject(selected);
   }
 
+  async function createNewProject() {
+    let parent: string | string[] | null;
+    try { parent = await open({ directory: true, multiple: false, title: "Escolha onde criar o novo projeto" }); }
+    catch (error) { setProjectError("Não foi possível escolher a pasta de destino: " + String(error)); return; }
+    if (typeof parent !== "string") return;
+    const name = window.prompt("Nome da nova pasta do projeto:");
+    if (!name?.trim()) return;
+    const folderName = name.trim();
+    if (folderName === "." || folderName === ".." || /[\\\\/<>:"|?*]/.test(folderName)) {
+      setProjectError("Informe um nome de pasta válido, sem barras ou caracteres reservados."); return;
+    }
+    try {
+      await invoke("create_project_directory", { projectRoot: parent, relativePath: folderName });
+      const separator = parent.endsWith("/") || parent.endsWith("\\\\") ? "" : "/";
+      await activateProject(parent + separator + folderName);
+    } catch (error) { setProjectError("Não foi possível criar o projeto: " + String(error)); }
+  }
+
+  async function importGoogleFont() {
+    if (googleFontBusy) return;
+    setGoogleFontBusy(true); setGoogleFontStatus(null);
+    try {
+      const url = new URL(googleFontUrl.trim());
+      if (url.hostname !== "fonts.google.com") throw new Error("Use um link de fonts.google.com.");
+      const match = url.pathname.match(/\\/specimen\\/([^/]+)/);
+      const family = decodeURIComponent((match?.[1] || "").replace(/\\+/g, " ")).trim();
+      if (!family || family.length > 80) throw new Error("Não foi possível identificar a família da fonte no link.");
+      const cssUrl = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(family).replace(/%20/g, "+") + ":wght@300..800&display=swap";
+      const cssResponse = await fetch(cssUrl);
+      if (!cssResponse.ok) throw new Error("Google Fonts respondeu com HTTP " + cssResponse.status + ".");
+      let css = await cssResponse.text();
+      const urls = [...new Set([...css.matchAll(/url\\((https:\\/\\/[^)]+)\\)/g)].map(match => match[1]))];
+      if (!urls.length) throw new Error("O Google Fonts não retornou arquivos WOFF2 para esta fonte.");
+      for (const fontUrl of urls) {
+        const response = await fetch(fontUrl);
+        if (!response.ok) throw new Error("Falha ao baixar um arquivo da fonte (HTTP " + response.status + ").");
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        css = css.split(fontUrl).join("data:font/woff2;base64," + btoa(binary));
+      }
+      const saved = (() => { try { return JSON.parse(localStorage.getItem("kardecagent.studio.googleFonts") || "{}") as Record<string, string>; } catch { return {}; } })();
+      saved[family] = css;
+      localStorage.setItem("kardecagent.studio.googleFonts", JSON.stringify(saved));
+      setGoogleFontRevision(value => value + 1);
+      setSettings(current => ({ ...current, uiFontFamily: family, editorFontFamily: family }));
+      setGoogleFontStatus(family + " foi baixada e adicionada à biblioteca local de fontes.");
+    } catch (error) { setGoogleFontStatus(String(error)); }
+    finally { setGoogleFontBusy(false); }
+  }
 
   async function refreshProjectEntries() {
     if (!projectRoot) return;
@@ -511,8 +578,8 @@ function App() {
     <main className="app-shell" data-theme={settings.uiTheme} data-accent={settings.accentColor} style={{ fontFamily: settings.uiFontFamily, fontSize: settings.uiFontSize + "px" }}>
       <header className="titlebar">
         <div className="brand"><div className="brand-mark"><Zap size={15} /></div><span>KARDEC<span className="brand-light">AGENT</span></span></div>
-        <span className="workspace-label">Studio <span className="muted">/</span> Workspace</span>
-        <div className="titlebar-right"><span className="connection"><span /> {runtimeStatus === "online" ? "Core conectado" : runtimeStatus === "connecting" ? "Conectando ao core..." : "Core desconectado"}</span><span className="avatar">KA</span></div>
+        <span className="workspace-label">Studio <span className="muted">/</span> {projectRoot ? projectRoot.split(/[\\\\/]/).filter(Boolean).pop() : "Workspace"}</span>
+        <div className="titlebar-actions"><button onClick={() => void openProject()} title="Abrir outro projeto"><FolderOpen size={14}/> Abrir</button><button onClick={() => void createNewProject()} title="Criar novo projeto"><FolderPlus size={14}/> Novo projeto</button><button onClick={() => void saveAllFiles()} disabled={!projectRoot || !openTabs.some(tab => tab.dirty)} title="Salvar todos os arquivos"><Save size={14}/> Salvar tudo</button></div><div className="titlebar-right"><span className="connection"><span /> {runtimeStatus === "online" ? "Core conectado" : runtimeStatus === "connecting" ? "Conectando ao core..." : "Core desconectado"}</span><span className="avatar">KA</span></div>
       </header>
 
       <div className="work-area">
@@ -717,7 +784,7 @@ function App() {
               {settingsSection === "editor" && <>
                 <div className="settings-page-heading"><strong>Editor de código</strong><p>Personalize a leitura e a edição dos arquivos.</p></div>
                 <div className="settings-section">
-                  <label>Família da fonte<select value={settings.editorFontFamily} onChange={event => setSettings(current => ({ ...current, editorFontFamily: event.target.value }))}><option>Cascadia Code</option><option>JetBrains Mono</option><option>Fira Code</option><option>Consolas</option><option>Courier New</option><option>ui-monospace</option></select></label>
+                  <label>Família da fonte<select value={settings.editorFontFamily} onChange={event => setSettings(current => ({ ...current, editorFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Cascadia Code</option><option>JetBrains Mono</option><option>Fira Code</option><option>Consolas</option><option>Courier New</option><option>ui-monospace</option></select></label>
                   <label>Tamanho da fonte: {settings.editorFontSize}px<input type="range" min={10} max={24} value={settings.editorFontSize} onChange={event => setSettings(current => ({ ...current, editorFontSize: Number(event.target.value) }))}/></label>
                   <label>Altura da linha: {settings.lineHeight.toFixed(1)}<input type="range" min={1.2} max={2.2} step={0.1} value={settings.lineHeight} onChange={event => setSettings(current => ({ ...current, lineHeight: Number(event.target.value) }))}/></label>
                   <label>Espaços por tabulação<select value={settings.tabSize} onChange={event => setSettings(current => ({ ...current, tabSize: Number(event.target.value) }))}><option value={2}>2 espaços</option><option value={4}>4 espaços</option><option value={8}>8 espaços</option></select></label>
@@ -731,9 +798,9 @@ function App() {
                 <div className="settings-section">
                   <label>Tema da IDE<select value={settings.uiTheme} onChange={event => setSettings(current => ({ ...current, uiTheme: event.target.value as StudioSettings["uiTheme"] }))}><option value="dark">Kardec Dark</option><option value="midnight">Midnight Blue</option><option value="light">Claro</option></select></label>
                   <label>Cor de destaque<select value={settings.accentColor} onChange={event => setSettings(current => ({ ...current, accentColor: event.target.value as StudioSettings["accentColor"] }))}><option value="violet">Violeta</option><option value="cyan">Ciano</option><option value="blue">Azul</option><option value="green">Verde</option></select></label>
-                  <label>Fonte da interface<select value={settings.uiFontFamily} onChange={event => setSettings(current => ({ ...current, uiFontFamily: event.target.value }))}><option>Inter</option><option>Segoe UI</option><option>Arial</option><option>Roboto</option><option>system-ui</option></select></label>
+                  <label>Fonte da interface<select value={settings.uiFontFamily} onChange={event => setSettings(current => ({ ...current, uiFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Inter</option><option>Segoe UI</option><option>Arial</option><option>Roboto</option><option>system-ui</option></select></label>
                   <label>Escala da interface: {settings.uiFontSize}px<input type="range" min={11} max={16} value={settings.uiFontSize} onChange={event => setSettings(current => ({ ...current, uiFontSize: Number(event.target.value) }))}/></label>
-                  <div className="settings-preview"><strong>KardecAgent Studio</strong><p>Prévia da tipografia e do tema selecionado.</p><span className="settings-accent-preview">Destaque da interface</span></div>
+                  <div className="settings-preview"><strong>KardecAgent Studio</strong><p>Prévia da tipografia e do tema selecionado.</p><span className="settings-accent-preview">Destaque da interface</span></div>\n                  <div className="settings-section-title"><Wifi size={16}/><strong>Biblioteca Google Fonts</strong></div>\n                  <label>Link da fonte no Google Fonts<input value={googleFontUrl} onChange={event => setGoogleFontUrl(event.target.value)} placeholder="https://fonts.google.com/specimen/Shantell+Sans"/></label>\n                  <p className="settings-help">A IDE baixa os arquivos WOFF2 do Google Fonts e os guarda localmente neste computador para uso sem depender de uma conexão em cada inicialização.</p>\n                  <div className="settings-actions"><button className="settings-secondary" disabled={googleFontBusy} onClick={() => void importGoogleFont()}><Plus size={14}/>{googleFontBusy ? "Baixando fonte..." : "Baixar e importar fonte"}</button></div>\n                  {googleFontStatus && <div className="settings-help" role="status">{googleFontStatus}</div>}
                 </div>
               </>}
               {settingsSection === "terminal" && <>
