@@ -77,7 +77,7 @@ def parse_tool_call(content: str) -> ToolCall:
 def tool_instructions() -> str:
     return (
         'Return ONLY JSON with tool, arguments and optional plan_step. '
-        'plan_step is required for write_file, apply_patch, run_command, run_checks and complete_step. '
+        'plan_step is required for write_file, create_directory, apply_patch, run_command, run_checks and complete_step. '
         'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, fetch_web_page, '
         'write_file, create_directory, apply_patch, run_command, run_checks, git_status, git_diff, git_log, '
         'complete_step, request_plan_change, finish. finish requires criteria_evidence for every completion criterion. '
