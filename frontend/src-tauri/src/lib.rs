@@ -492,7 +492,7 @@ try:
     names = [item.get("name", "") for item in models if isinstance(item, dict)]
     if model not in names and model + ":latest" not in names:
         raise RuntimeError("Modelo não instalado: " + model + ". Modelos disponíveis: " + (", ".join(names) or "(nenhum)"))
-    response = httpx.post(base + "/api/chat", json={"model": model, "messages": [{"role":"system","content":"Reply with exactly: KARDECAGENT_OK"},{"role":"user","content":"Health check."}],"stream":False,"options":{"temperature":0.0,"num_predict":32}}, timeout=timeout)
+    response = httpx.post(base + "/api/chat", json={"model": model, "messages": [{"role":"system","content":"Reply with exactly: KARDECAGENT_OK"},{"role":"user","content":"Health check."}],"stream":False,"keep_alive":"2m","options":{"temperature":0.0,"num_ctx":4096,"num_predict":32}}, timeout=timeout)
     response.raise_for_status()
     answer = (response.json().get("message") or {}).get("content", "")
     if not isinstance(answer, str) or "KARDECAGENT_OK" not in answer:
