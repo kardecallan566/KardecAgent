@@ -68,6 +68,13 @@ function highlightSource(source: string, extension: string) {
   return nodes.length ? nodes : source;
 }
 
+function importedGoogleFontNames(): string[] {
+  try {
+    const fonts = JSON.parse(localStorage.getItem("kardecagent.studio.googleFonts") || "{}");
+    return fonts && typeof fonts === "object" ? Object.keys(fonts) : [];
+  } catch { return []; }
+}
+
 function taskStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     pending: "Pendente",
@@ -87,7 +94,16 @@ function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("explorer");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("core");
-  const [settings, setSettings] = useState<StudioSettings>(() => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") }; } catch { return DEFAULT_SETTINGS; } });
+  const [settings, setSettings] = useState<StudioSettings>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}");
+      return {
+        ...DEFAULT_SETTINGS, ...saved,
+        uiFontFamily: saved.uiFontFamily === "Inter" ? "Shantell Sans" : saved.uiFontFamily || DEFAULT_SETTINGS.uiFontFamily,
+        editorFontFamily: saved.editorFontFamily === "Cascadia Code" ? "Shantell Sans" : saved.editorFontFamily || DEFAULT_SETTINGS.editorFontFamily
+      };
+    } catch { return DEFAULT_SETTINGS; }
+  });
   const [coreDiagnostics, setCoreDiagnostics] = useState<CoreDiagnostics | null>(null);
   const startupTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const [googleFontUrl, setGoogleFontUrl] = useState("https://fonts.google.com/specimen/Shantell+Sans");
@@ -394,6 +410,7 @@ function App() {
   }
 
   async function activateProject(selected: string) {
+    if (projectRoot === selected) return;
     if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace."); return; }
     if (projectRoot && projectRoot !== selected && openTabs.some(tab => tab.dirty)) {
       const discard = window.confirm("Existem alterações não salvas. Deseja descartar essas alterações e abrir outro projeto? (Use Salvar tudo antes, se quiser preservá-las.)");
@@ -446,7 +463,7 @@ function App() {
     }
     try {
       await invoke("create_project_directory", { projectRoot: parent, relativePath: folderName });
-      const separator = parent.endsWith("/") || parent.endsWith("\\\\") ? "" : "/";
+      const separator = parent.endsWith("/") || parent.endsWith("\\") ? "" : "/";
       await activateProject(parent + separator + folderName);
     } catch (error) { setProjectError("Não foi possível criar o projeto: " + String(error)); }
   }
@@ -793,7 +810,7 @@ function App() {
               {settingsSection === "editor" && <>
                 <div className="settings-page-heading"><strong>Editor de código</strong><p>Personalize a leitura e a edição dos arquivos.</p></div>
                 <div className="settings-section">
-                  <label>Família da fonte<select value={settings.editorFontFamily} onChange={event => setSettings(current => ({ ...current, editorFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Cascadia Code</option><option>JetBrains Mono</option><option>Fira Code</option><option>Consolas</option><option>Courier New</option><option>ui-monospace</option></select></label>
+                  <label>Família da fonte<select value={settings.editorFontFamily} onChange={event => setSettings(current => ({ ...current, editorFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Cascadia Code</option><option>JetBrains Mono</option><option>Fira Code</option><option>Consolas</option><option>Courier New</option><option>ui-monospace</option>{importedGoogleFontNames().map(family => <option key={family}>{family}</option>)}</select></label>
                   <label>Tamanho da fonte: {settings.editorFontSize}px<input type="range" min={10} max={24} value={settings.editorFontSize} onChange={event => setSettings(current => ({ ...current, editorFontSize: Number(event.target.value) }))}/></label>
                   <label>Altura da linha: {settings.lineHeight.toFixed(1)}<input type="range" min={1.2} max={2.2} step={0.1} value={settings.lineHeight} onChange={event => setSettings(current => ({ ...current, lineHeight: Number(event.target.value) }))}/></label>
                   <label>Espaços por tabulação<select value={settings.tabSize} onChange={event => setSettings(current => ({ ...current, tabSize: Number(event.target.value) }))}><option value={2}>2 espaços</option><option value={4}>4 espaços</option><option value={8}>8 espaços</option></select></label>
@@ -807,7 +824,7 @@ function App() {
                 <div className="settings-section">
                   <label>Tema da IDE<select value={settings.uiTheme} onChange={event => setSettings(current => ({ ...current, uiTheme: event.target.value as StudioSettings["uiTheme"] }))}><option value="dark">Kardec Dark</option><option value="midnight">Midnight Blue</option><option value="light">Claro</option></select></label>
                   <label>Cor de destaque<select value={settings.accentColor} onChange={event => setSettings(current => ({ ...current, accentColor: event.target.value as StudioSettings["accentColor"] }))}><option value="violet">Violeta</option><option value="cyan">Ciano</option><option value="blue">Azul</option><option value="green">Verde</option></select></label>
-                  <label>Fonte da interface<select value={settings.uiFontFamily} onChange={event => setSettings(current => ({ ...current, uiFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Inter</option><option>Segoe UI</option><option>Arial</option><option>Roboto</option><option>system-ui</option></select></label>
+                  <label>Fonte da interface<select value={settings.uiFontFamily} onChange={event => setSettings(current => ({ ...current, uiFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Inter</option><option>Segoe UI</option><option>Arial</option><option>Roboto</option><option>system-ui</option>{importedGoogleFontNames().map(family => <option key={family}>{family}</option>)}</select></label>
                   <label>Escala da interface: {settings.uiFontSize}px<input type="range" min={11} max={16} value={settings.uiFontSize} onChange={event => setSettings(current => ({ ...current, uiFontSize: Number(event.target.value) }))}/></label>
                   <div className="settings-preview"><strong>KardecAgent Studio</strong><p>Prévia da tipografia e do tema selecionado.</p><span className="settings-accent-preview">Destaque da interface</span></div>
                   <div className="settings-section-title"><Wifi size={16}/><strong>Biblioteca Google Fonts</strong></div>
