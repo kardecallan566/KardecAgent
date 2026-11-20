@@ -136,7 +136,7 @@ function App() {
     const savedFonts = (() => { try { return JSON.parse(localStorage.getItem("kardecagent.studio.googleFonts") || "{}") as Record<string, string>; } catch { return {}; } })();
     const style = document.createElement("style");
     style.id = "kardecagent-google-fonts";
-    style.textContent = Object.values(savedFonts).join("\\n");
+    style.textContent = Object.values(savedFonts).join("\n");
     document.head.appendChild(style);
     return () => style.remove();
   }, [googleFontRevision]);
