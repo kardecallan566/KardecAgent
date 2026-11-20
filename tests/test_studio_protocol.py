@@ -106,6 +106,40 @@ def test_run_stdio_restores_persisted_task_history_without_resuming(monkeypatch,
     assert "interrompida" in terminal["payload"]["message"].lower()
 
 
+def test_run_stdio_switches_workspace_without_restarting_agent(monkeypatch, tmp_path):
+    other_root = tmp_path / "other-project"
+    other_root.mkdir()
+    commands = [
+        {
+            "type": "workspace.change",
+            "schema_version": 1,
+            "command_id": "workspace-switch-1",
+            "payload": {"project_root": str(other_root)},
+        }
+    ]
+    monkeypatch.setattr(
+        studio_protocol.sys,
+        "stdin",
+        io.StringIO("".join(json.dumps(item) + "\\n" for item in commands)),
+    )
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4,
+            max_command_output_chars=1200,
+            llm_timeout_seconds=30.0,
+            command_timeout_seconds=15.0,
+        )
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    changed = next(item for item in messages if item["type"] == "workspace.changed")
+    assert changed["command_id"] == "workspace-switch-1"
+    assert changed["project_root"] == str(other_root.resolve())
+
+
 def test_run_stdio_resumes_a_persisted_task_and_streams_new_events(monkeypatch, tmp_path):
     persisted_state = SimpleNamespace(
         task="resume this task",
