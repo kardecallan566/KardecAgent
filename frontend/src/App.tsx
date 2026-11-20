@@ -623,8 +623,10 @@ function App() {
             <label className="settings-checkbox"><input type="checkbox" checked={settings.wordWrap} onChange={event => setSettings(current => ({ ...current, wordWrap: event.target.checked }))}/> Quebra automática de linha no editor</label>
           </div>
           <div className="settings-footer"><span>As alterações são aplicadas ao próximo início do core.</span><button className="settings-primary" onClick={() => {
+            const previous = JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}");
+            const connectionChanged = previous.ollamaUrl !== settings.ollamaUrl || previous.model !== settings.model || previous.timeout !== settings.timeout;
             localStorage.setItem("kardecagent.studio.settings", JSON.stringify(settings)); setOllamaTest(null); setSettingsOpen(false);
-            if (projectRoot && !runtimeBusy) void (async () => { try { setRuntimeStatus("connecting"); setRuntimeError(null); await invoke("stop_runtime"); await invoke("start_runtime", { projectPath: projectRoot, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model, llmTimeoutSeconds: settings.timeout }); } catch (error) { setRuntimeStatus("offline"); setRuntimeError(String(error)); } })();
+            if (projectRoot && connectionChanged && !runtimeBusy) void (async () => { try { setRuntimeStatus("connecting"); setRuntimeError(null); await invoke("stop_runtime"); await invoke("start_runtime", { projectPath: projectRoot, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model, llmTimeoutSeconds: settings.timeout }); } catch (error) { setRuntimeStatus("offline"); setRuntimeError(String(error)); } })();
           }}><RefreshCw size={14}/> Salvar e aplicar</button></div>
         </section>
       </div>}
