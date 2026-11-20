@@ -12,7 +12,7 @@ import {
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
 type StudioSettings = {
-  ollamaUrl: string; model: string; timeout: number; pythonPath: string;
+  ollamaUrl: string; model: string; timeout: number; pythonPath: string; autoStartCore: boolean;
   editorFontSize: number; editorFontFamily: string; lineHeight: number; tabSize: number; wordWrap: boolean; showLineNumbers: boolean;
   shell: "powershell" | "cmd"; terminalFontSize: number;
   uiTheme: "dark" | "midnight" | "light"; uiFontFamily: string; uiFontSize: number; accentColor: "violet" | "cyan" | "blue" | "green";
@@ -20,7 +20,7 @@ type StudioSettings = {
 type SettingsSection = "core" | "editor" | "appearance" | "terminal" | "diagnostics";
 type CoreDiagnostics = { running: boolean; pid: number | null; python_executable: string | null; project_root: string | null; last_exit_code: number | null };
 const DEFAULT_SETTINGS: StudioSettings = {
-  ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "",
+  ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "", autoStartCore: true,
   editorFontSize: 13, editorFontFamily: "Cascadia Code", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
   shell: "powershell", terminalFontSize: 12,
   uiTheme: "dark", uiFontFamily: "Inter", uiFontSize: 13, accentColor: "violet"
@@ -377,10 +377,15 @@ function App() {
       if (projectRoot !== selected) {
         await invoke("stop_runtime").catch(() => undefined);
         await runtimeListenersReady.current;
-        await invoke("start_runtime", {
-          projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
-          llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
-        });
+        if (settings.autoStartCore) {
+          await invoke("start_runtime", {
+            projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
+            llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
+          });
+        } else {
+          setRuntimeStatus("offline");
+          await refreshCoreDiagnostics();
+        }
       } else {
         await refreshCoreDiagnostics();
       }
@@ -693,6 +698,7 @@ function App() {
                 </div>
                 <div className="settings-section">
                   <div className="settings-section-title"><RefreshCw size={16}/><strong>Controle do Core</strong></div>
+                  <label className="settings-checkbox"><input type="checkbox" checked={settings.autoStartCore} onChange={event => setSettings(current => ({ ...current, autoStartCore: event.target.checked }))}/> Iniciar o Core automaticamente ao abrir um projeto</label>
                   <p className="settings-help">O Core roda em um processo Python separado. Você pode consultar o processo ou reiniciá-lo sem fechar a IDE.</p>
                   <div className="settings-actions"><button className="settings-secondary" onClick={() => void refreshCoreDiagnostics()}>Verificar processo</button><button className="settings-primary" disabled={!projectRoot || runtimeBusy} onClick={() => void restartCore()}>Reiniciar Core</button></div>
                 </div>
@@ -744,10 +750,14 @@ function App() {
           <footer className="settings-footer"><span>As preferências são salvas localmente neste computador.</span><button className="settings-primary" onClick={() => {
             const previous = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") };
             const connectionChanged = previous.ollamaUrl !== settings.ollamaUrl || previous.model !== settings.model || previous.timeout !== settings.timeout || previous.pythonPath !== settings.pythonPath;
+            const startupChanged = previous.autoStartCore !== settings.autoStartCore;
             localStorage.setItem("kardecagent.studio.settings", JSON.stringify(settings));
             setOllamaTest(null);
             setSettingsOpen(false);
-            if (projectRoot && connectionChanged && !runtimeBusy) void restartCore();
+            if (projectRoot && !runtimeBusy && (connectionChanged || startupChanged)) {
+              if (settings.autoStartCore) void restartCore();
+              else void (async () => { try { await invoke("stop_runtime"); setRuntimeStatus("offline"); await refreshCoreDiagnostics(); } catch (error) { setRuntimeError(String(error)); } })();
+            }
           }}><CheckCircle2 size={14}/> Salvar preferências</button></footer>
         </section>
       </div>}
