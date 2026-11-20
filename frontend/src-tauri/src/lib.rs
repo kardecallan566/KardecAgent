@@ -439,7 +439,9 @@ except Exception as exc:
     print(json.dumps({"ok":False,"error":str(exc)}))
     sys.exit(2)
 "#;
-    let output = Command::new(python)
+    let mut command = Command::new(python);
+    configure_hidden_process(&mut command);
+    let output = command
         .args(&prefix)
         .args(["-c", script])
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
