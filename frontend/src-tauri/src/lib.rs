@@ -502,7 +502,12 @@ fn start_integrated_terminal(app: tauri::AppHandle, state: State<'_, TerminalSta
     let root = Path::new(&project_path).canonicalize().map_err(|e| format!("Pasta do terminal inválida: {e}"))?;
     if !root.is_dir() { return Err("A pasta selecionada não é um diretório.".into()); }
     let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
-    if terminal.is_some() { return Err("O terminal já está em execução.".into()); }
+    if let Some(existing) = terminal.as_mut() {
+        match existing.child.try_wait().map_err(|e| format!("Falha ao verificar terminal: {e}"))? {
+            Some(_) => { terminal.take(); }
+            None => return Err("O terminal já está em execução.".into()),
+        }
+    }
     #[cfg(windows)]
     let mut command = match shell_name.as_str() {
         "cmd" => { let mut c = Command::new("cmd.exe"); c.args(["/Q"]); c },
