@@ -562,6 +562,7 @@ function App() {
     try {
       await invoke("write_project_file", { projectRoot, filePath: openedPath, content: fileContent });
       setFileDirty(false);
+      setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: fileContent, dirty: false } : tab));
       setRuntimeEvents(items => [...items, { id: crypto.randomUUID(), type: "file.saved", message: "Arquivo salvo: " + openedPath }].slice(-100));
       setProjectError(null);
     } catch (error) { setProjectError("Falha ao salvar arquivo: " + String(error)); }
