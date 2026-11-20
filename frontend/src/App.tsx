@@ -176,6 +176,12 @@ function App() {
         setRuntimeStatus("online");
         setRuntimeLimits(message.limits || null);
         setRuntimeError(null);
+      } else if (message.type === "workspace.changed") {
+        if (startupTimer.current) window.clearTimeout(startupTimer.current);
+        startupTimer.current = null;
+        setRuntimeStatus("online");
+        setRuntimeError(null);
+        void refreshCoreDiagnostics();
       } else if (message.type === "approval.requested") {
         setRuntimeTasks(items => items.map(task => (message.execution_id ? task.executionId === message.execution_id : task.id === message.task_id) ? { ...task, status: "Aguardando aprovação" } : task));
         setPendingApproval({ approvalId: message.payload.approval_id, kind: message.payload.kind, summary: message.payload.summary, risk: message.payload.risk });
