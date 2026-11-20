@@ -228,7 +228,7 @@ root = os.environ["KARDECAGENT_RUN_ROOT"]
 source = os.environ["KARDECAGENT_RUN_FILE"]
 ext = os.path.splitext(source)[1].lower()
 commands = {
- ".py": ["python", source], ".js": ["node", source], ".mjs": ["node", source], ".cjs": ["node", source],
+ ".py": [sys.executable, source], ".js": ["node", source], ".mjs": ["node", source], ".cjs": ["node", source],
  ".java": ["java", source], ".go": ["go", "run", source], ".php": ["php", source], ".rb": ["ruby", source],
 }
 try:
