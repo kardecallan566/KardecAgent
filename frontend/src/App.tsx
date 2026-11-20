@@ -172,7 +172,8 @@ function App() {
           if (oldest) seenEventIds.current.delete(oldest);
         }
       }
-      if (message.type === "runtime.ready") {\n        if (startupTimer.current) window.clearTimeout(startupTimer.current);\n        startupTimer.current = null;
+      if (message.type === "runtime.ready") {
+        if (startupTimer.current) window.clearTimeout(startupTimer.current);\n        startupTimer.current = null;
         setRuntimeStatus("online");
         setRuntimeLimits(message.limits || null);
         setRuntimeError(null);
@@ -808,7 +809,8 @@ function App() {
                   <label>Fonte da interface<select value={settings.uiFontFamily} onChange={event => setSettings(current => ({ ...current, uiFontFamily: event.target.value }))}><option>Shantell Sans</option><option>Inter</option><option>Segoe UI</option><option>Arial</option><option>Roboto</option><option>system-ui</option></select></label>
                   <label>Escala da interface: {settings.uiFontSize}px<input type="range" min={11} max={16} value={settings.uiFontSize} onChange={event => setSettings(current => ({ ...current, uiFontSize: Number(event.target.value) }))}/></label>
                   <div className="settings-preview"><strong>KardecAgent Studio</strong><p>Prévia da tipografia e do tema selecionado.</p><span className="settings-accent-preview">Destaque da interface</span></div>
-                  <div className="settings-section-title"><Wifi size={16}/><strong>Biblioteca Google Fonts</strong></div>\n                  <label>Link da fonte no Google Fonts<input value={googleFontUrl} onChange={event => setGoogleFontUrl(event.target.value)} placeholder="https://fonts.google.com/specimen/Shantell+Sans"/></label>
+                  <div className="settings-section-title"><Wifi size={16}/><strong>Biblioteca Google Fonts</strong></div>
+                  <label>Link da fonte no Google Fonts<input value={googleFontUrl} onChange={event => setGoogleFontUrl(event.target.value)} placeholder="https://fonts.google.com/specimen/Shantell+Sans"/></label>
                   <p className="settings-help">A IDE baixa os arquivos WOFF2 do Google Fonts e os guarda localmente neste computador para uso sem depender de uma conexão em cada inicialização.</p>
                   <div className="settings-actions"><button className="settings-secondary" disabled={googleFontBusy} onClick={() => void importGoogleFont()}><Plus size={14}/>{googleFontBusy ? "Baixando fonte..." : "Baixar e importar fonte"}</button></div>
                   {googleFontStatus && <div className="settings-help" role="status">{googleFontStatus}</div>}
