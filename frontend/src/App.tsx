@@ -18,7 +18,7 @@ type StudioSettings = {
   uiTheme: "dark" | "midnight" | "light"; uiFontFamily: string; uiFontSize: number; accentColor: "violet" | "cyan" | "blue" | "green";
 };
 type SettingsSection = "core" | "editor" | "appearance" | "terminal" | "diagnostics";
-type CoreDiagnostics = { running: boolean; pid: number | null; python_executable: string | null; project_root: string | null; last_exit_code: number | null };
+type CoreDiagnostics = { running: boolean; pid: number | null; python_executable: string | null; launch_mode: string | null; project_root: string | null; last_exit_code: number | null };
 const DEFAULT_SETTINGS: StudioSettings = {
   ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "", autoStartCore: true,
   editorFontSize: 13, editorFontFamily: "Shantell Sans", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
@@ -380,10 +380,10 @@ function App() {
         setCoreDiagnostics(diagnostics);
         if (!diagnostics.running || runtimeStatus !== "online") {
           setRuntimeStatus("offline");
-          setRuntimeError("O Core não confirmou a inicialização em 20 segundos. Verifique o Python, o pacote KardecAgent e os logs em Diagnóstico.");
+          setRuntimeError("O Core não respondeu ao handshake em 45 segundos. Consulte os logs e o modo de inicialização em Configurações → Diagnóstico.");
         }
       }).catch(error => { setRuntimeStatus("offline"); setRuntimeError("Tempo limite ao iniciar o Core: " + String(error)); });
-    }, 20000);
+    }, 45000);
   }
 
   async function restartCore() {
@@ -812,9 +812,10 @@ function App() {
                   {ollamaTest && <div className={ollamaTest.ok ? "ollama-test-result success" : "ollama-test-result error"}>{ollamaTest.ok ? <CheckCircle size={15}/> : <AlertCircle size={15}/>}<div><strong>{ollamaTest.ok ? "Ollama respondeu corretamente" : "Falha na conexão"}</strong><p>{ollamaTest.message}</p>{ollamaTest.version && <small>Ollama {ollamaTest.version} · Modelo {settings.model}</small>}{ollamaTest.models && <small>Modelos instalados: {ollamaTest.models.join(", ") || "nenhum"}</small>}</div></div>}
                 </div>
                 <div className="settings-section">
-                  <div className="settings-section-title"><Bot size={16}/><strong>Ambiente Python</strong></div>
-                  <label>Executável Python (opcional)<input value={settings.pythonPath} onChange={event => setSettings(current => ({ ...current, pythonPath: event.target.value }))} placeholder="Automático — ou C:\Python312\python.exe"/></label>
-                  <p className="settings-help">Deixe vazio para detecção automática. Informe o caminho completo caso o Studio esteja usando outra instalação do Python.</p>
+                  <div className="settings-section-title"><Bot size={16}/><strong>Ambiente do Core</strong></div>
+                  <p className="settings-help">O instalador do Studio inclui o Core Python integrado. Você não precisa instalar Python nem executar comandos manualmente. O campo abaixo é apenas para desenvolvedores que desejam substituir o Core integrado.</p>
+                  <label>Python manual (opcional)<input value={settings.pythonPath} onChange={event => setSettings(current => ({ ...current, pythonPath: event.target.value }))} placeholder="Automático — ou C:\Python312\python.exe"/></label>
+                  <p className="settings-help">Deixe vazio para usar o Core integrado. Informe um python.exe apenas para desenvolvimento ou diagnóstico avançado.</p>
                 </div>
                 <div className="settings-section">
                   <div className="settings-section-title"><RefreshCw size={16}/><strong>Controle do Core</strong></div>
@@ -863,7 +864,8 @@ function App() {
                 <div className="settings-section">
                   <div className="diagnostic-row"><span>Estado</span><strong>{coreDiagnostics?.running ? "Em execução" : "Desconectado"}</strong></div>
                   <div className="diagnostic-row"><span>PID</span><strong>{coreDiagnostics?.pid ?? "—"}</strong></div>
-                  <div className="diagnostic-row"><span>Python</span><strong>{coreDiagnostics?.python_executable || settings.pythonPath || "Detecção automática"}</strong></div>
+                  <div className="diagnostic-row"><span>Modo de inicialização</span><strong>{coreDiagnostics?.launch_mode === "bundled" ? "Core integrado ao Studio" : coreDiagnostics?.launch_mode === "python" ? "Python externo" : "Não iniciado"}</strong></div>
+                  <div className="diagnostic-row"><span>Executável</span><strong>{coreDiagnostics?.python_executable || settings.pythonPath || "Core ainda não iniciado"}</strong></div>
                   <div className="diagnostic-row"><span>Workspace</span><strong>{coreDiagnostics?.project_root || projectRoot || "Nenhum"}</strong></div>
                   <div className="diagnostic-row"><span>Último código de saída</span><strong>{coreDiagnostics?.last_exit_code ?? "Sem encerramento registrado"}</strong></div>
                   {coreDiagnosticsError && <div className="ollama-test-result error"><AlertCircle size={15}/><p>{coreDiagnosticsError}</p></div>}
