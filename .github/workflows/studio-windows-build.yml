@@ -30,13 +30,27 @@ jobs:
   windows-installer:
     name: Build Windows installer
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: frontend
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Set up Python for the bundled Core
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Package and smoke-test the standalone Python Core
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .. pyinstaller
+          python -m PyInstaller --noconfirm --clean --onefile --name kardecagent-core --paths ../src --collect-all kardecagent --collect-all httpx --copy-metadata kardecagent --distpath src-tauri/core-dist --workpath ../.pyinstaller-work --specpath ../.pyinstaller-spec ../scripts/studio_core_entry.py
+          python ../scripts/smoke_studio_core.py src-tauri/core-dist/kardecagent-core.exe
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
