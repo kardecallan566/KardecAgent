@@ -8,7 +8,7 @@ use std::{
     sync::Mutex,
     thread,
 };
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 #[derive(Serialize)]
 struct ProjectEntry {
@@ -103,6 +103,7 @@ struct RuntimeProcess {
     child: Child,
     stdin: Option<ChildStdin>,
     python_executable: String,
+    launch_mode: String,
     project_root: String,
     exited: bool,
 }
@@ -127,6 +128,7 @@ struct RuntimeDiagnostics {
     running: bool,
     pid: Option<u32>,
     python_executable: Option<String>,
+    launch_mode: Option<String>,
     project_root: Option<String>,
     last_exit_code: Option<i32>,
 }
@@ -146,12 +148,13 @@ fn runtime_diagnostics(state: State<'_, RuntimeState>) -> Result<RuntimeDiagnost
                 running: true,
                 pid: Some(process.child.id()),
                 python_executable: Some(process.python_executable.clone()),
+                launch_mode: Some(process.launch_mode.clone()),
                 project_root: Some(process.project_root.clone()),
                 last_exit_code: *last_exit,
             });
         }
     }
-    Ok(RuntimeDiagnostics { running: false, pid: None, python_executable: None, project_root: None, last_exit_code: *last_exit })
+    Ok(RuntimeDiagnostics { running: false, pid: None, python_executable: None, launch_mode: None, project_root: None, last_exit_code: *last_exit })
 }
 
 fn resolve_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
@@ -370,14 +373,30 @@ fn start_runtime(
     if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 { return Err("Endereço Ollama inválido.".into()); }
     if llm_model.trim().is_empty() || llm_model.len() > 200 { return Err("Modelo Ollama inválido.".into()); }
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
-    let (python, python_prefix) = resolve_python_command(python_executable.as_deref())?;
-    let mut command = Command::new(&python);
+    let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
+        || std::env::var_os("KARDECAGENT_PYTHON").is_some();
+    let bundled_core = if has_python_override {
+        None
+    } else {
+        app.path().resolve("core/kardecagent-core.exe", tauri::path::BaseDirectory::Resource).ok().filter(|path| path.is_file())
+    };
+    let (executable, launch_prefix, launch_mode) = if let Some(core_path) = bundled_core {
+        (core_path.into_os_string(), Vec::new(), "bundled".to_string())
+    } else {
+        let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
+        (python, prefix, "python".to_string())
+    };
+    let mut launch_args = launch_prefix;
+    if launch_mode == "bundled" {
+        launch_args.extend(["studio".into(), "--project".into()]);
+    } else {
+        launch_args.extend(["-m".into(), "kardecagent.cli".into(), "studio".into(), "--project".into()]);
+    }
+    let mut command = Command::new(&executable);
     configure_hidden_process(&mut command);
     command
-        .args(&python_prefix)
-        .args(["-m", "kardecagent.cli", "studio", "--project"])
-        .arg(&root)
-        .current_dir(&root)
+        .args(&launch_args)
+        .arg(&root)        .current_dir(&root)
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONUNBUFFERED", "1")
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
@@ -437,11 +456,12 @@ fn start_runtime(
         }
     });
 
-    let python_label = python.to_string_lossy().into_owned();
+    let executable_label = executable.to_string_lossy().into_owned();
     *runtime = Some(RuntimeProcess {
         child,
         stdin: Some(stdin),
-        python_executable: python_label,
+        python_executable: executable_label,
+        launch_mode,
         project_root: root.to_string_lossy().into_owned(),
         exited: false,
     });
