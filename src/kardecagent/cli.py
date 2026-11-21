@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
 from .agent import AgentLoop
@@ -36,6 +37,7 @@ def build_parser():
     doctor.add_argument("--project", required=True)
     doctor.add_argument("--model", default=None, help="LLM model name to check.")
     doctor.add_argument("--provider", default=None, choices=("ollama", "openai-compatible", "local"), help="LLM provider to check.")
+    health = subs.add_parser("ollama-health", help="Check the configured local Ollama server and model.")
     tasks = subs.add_parser("tasks", help="List persisted tasks for a project.")
     tasks.add_argument("--project", required=True)
     studio = subs.add_parser("studio", help="Run the JSONL desktop Studio runtime.")
@@ -412,6 +414,35 @@ def main() -> int:
         updates["llm_timeout_seconds"] = timeout_override
     if updates:
         settings = Settings(**{**settings.__dict__, **updates})
+
+    if args.command == "ollama-health":
+        client = OllamaClient(
+            base_url=settings.ollama_base_url,
+            model=settings.llm_model,
+            timeout=settings.llm_timeout_seconds,
+        )
+        version = client.server_version()
+        models = client.list_models()
+        model_names = [
+            item.get("name", "")
+            for item in models
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        ]
+        if settings.llm_model not in model_names and settings.llm_model + ":latest" not in model_names:
+            raise RuntimeError(
+                "Modelo não instalado: " + settings.llm_model
+                + ". Modelos disponíveis: " + (", ".join(model_names) or "(nenhum)")
+            )
+        response = client.health_check()
+        if "KARDECAGENT_OK" not in response.content:
+            raise RuntimeError("O modelo respondeu, mas não passou no teste de inferência.")
+        print(json.dumps({
+            "version": version,
+            "models": model_names,
+            "model": settings.llm_model,
+            "response": response.content.strip(),
+        }, ensure_ascii=False))
+        return 0
 
     if args.command == "doctor":
         root = resolve_project_root(args.project)
