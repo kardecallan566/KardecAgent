@@ -38,3 +38,10 @@ models/
 
 tmp/
 temp/
+
+# Bundled desktop Core build outputs
+.pyinstaller-work/
+.pyinstaller-spec/
+frontend/src-tauri/core-dist/*.exe
+frontend/src-tauri/core-dist/*.dll
+frontend/src-tauri/core-dist/*.pyd
