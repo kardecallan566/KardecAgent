@@ -49,6 +49,9 @@
       "icons/icon.png"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "Local-first agent development workspace"
+    "shortDescription": "Local-first agent development workspace",
+    "resources": {
+      "core-dist/kardecagent-core.exe": "core/kardecagent-core.exe"
+    }
   }
 }
