@@ -50,8 +50,8 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Local-first agent development workspace",
-    "resources": {
-      "core-dist/kardecagent-core.exe": "core/kardecagent-core.exe"
-    }
+    "resources": [
+      "core-dist/*"
+    ]
   }
 }
