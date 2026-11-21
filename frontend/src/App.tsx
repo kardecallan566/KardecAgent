@@ -699,16 +699,16 @@ function App() {
               </section>
               <div className="manager-flow">
                 <div><span>01</span><strong>Receber</strong><small>O agente interpreta se é conversa, dúvida ou pedido de ação.</small></div>
-                <div><span>02</span><strong>Planejar</strong><small>O core Python cria um plano e solicita sua aprovação antes de executar.</small></div>
-                <div><span>03</span><strong>Distribuir</strong><small>O runtime atual executa as subtarefas sequencialmente; concorrência segura será adicionada depois.</small></div>
-                <div><span>04</span><strong>Entregar</strong><small>Resultados, alterações e bloqueios ficam visíveis nesta área.</small></div>
+                <div><span>02</span><strong>Planejar</strong><small>Somente pedidos de ação geram um plano para sua aprovação.</small></div>
+                <div><span>03</span><strong>Distribuir</strong><small>Após a aprovação, o agente executa as etapas; dúvidas seguem direto pelo chat.</small></div>
+                <div><span>04</span><strong>Entregar</strong><small>Respostas aparecem no chat; tarefas mostram progresso, resultados e bloqueios.</small></div>
               </div>
               {runtimeError && <div className="manager-runtime-error" role="alert">{runtimeError}</div>}
               <section className="manager-event-list">
                 <div className="process-section-title"><strong>Atividade do gestor</strong><span>{filteredEvents.length}/{runtimeEvents.length} eventos</span></div><input className="event-search" aria-label="Filtrar eventos" placeholder="Filtrar por tipo ou mensagem..." value={eventSearch} onChange={event => setEventSearch(event.target.value)} />
                 {runtimeEvents.length === 0 ? <p className="manager-no-events">As instruções recebidas e as atualizações do core aparecerão aqui.</p> : filteredEvents.slice().reverse().map(item => <div className="manager-event" key={item.id}><span>{item.type}</span><p>{item.message}</p></div>)}
               </section>
-              <div className="manager-inbox-note"><ShieldCheck size={15}/> Nenhuma instrução será executada sem passar pelas regras de aprovação do core.</div>
+              <div className="manager-inbox-note"><ShieldCheck size={15}/> Conversas são somente leitura; alterações no projeto exigem aprovação do plano.</div>
             </div>
           ) : activeNav === "tasks" ? (
             <div className="process-dashboard">
