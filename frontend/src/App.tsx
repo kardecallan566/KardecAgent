@@ -275,6 +275,13 @@ function App() {
         const acceptedId = pendingInstructionCommandId.current;
         pendingInstructionCommandId.current = null;
         setChatMessages(items => items.map(item => item.commandId === acceptedId ? { ...item, status: "sent" } : item));
+      } else if (message.type === "assistant.response") {
+        const responseText = message.payload?.message || "Não consegui formular uma resposta para essa mensagem.";
+        const responseId = "chat-" + (message.command_id || crypto.randomUUID());
+        setChatMessages(items => [...items, { id: responseId, role: "assistant" as const, text: responseText }].slice(-100));
+        setRuntimeBusy(false);
+        setRuntimeError(null);
+        setRuntimeEvents(items => [...items, { id: responseId, type: message.intent === "clarify" ? "intent.clarification" : "chat.response", message: responseText }].slice(-100));
       } else if (message.type === "command.accepted" && message.command_id === approvalCommandId.current) {
         approvalCommandId.current = null;
         setApprovalSubmitting(false);
@@ -685,13 +692,13 @@ function App() {
         <section className="center-pane">
           {activeNav === "agent" ? (
             <div className="manager-inbox">
-              <div className="process-toolbar"><div><span className="eyebrow">CENTRAL DE COMANDO</span><h2>Gestor de tarefas</h2><p>Envie uma instrução em linguagem natural. O gestor será responsável por planejar, decompor e distribuir o trabalho aos agentes.</p></div><span className="runtime-offline">{runtimeStatus === "online" ? "CORE ONLINE" : runtimeStatus === "connecting" ? "CONECTANDO" : "CORE OFFLINE"}</span></div>
+              <div className="process-toolbar"><div><span className="eyebrow">CENTRAL DE COMANDO</span><h2>Gestor de tarefas</h2><p>Converse, tire dúvidas sobre o projeto ou solicite mudanças. O agente identifica a intenção e só cria um plano quando você pede uma ação.</p></div><span className="runtime-offline">{runtimeStatus === "online" ? "CORE ONLINE" : runtimeStatus === "connecting" ? "CONECTANDO" : "CORE OFFLINE"}</span></div>
               <section className="manager-inbox-card">
                 <div className="manager-inbox-icon"><Bot size={22}/></div>
                 <div><strong>{runtimeTasks.length ? `${runtimeTasks.length} tarefa(s) recebida(s) nesta sessão` : "Aguardando a primeira instrução"}</strong><p>As solicitações aparecem com seu estado e os eventos reais enviados pelo gestor Python. O histórico desta sessão é mantido limitado em memória.</p></div>
               </section>
               <div className="manager-flow">
-                <div><span>01</span><strong>Receber</strong><small>O gestor recebe seu objetivo e o contexto do projeto.</small></div>
+                <div><span>01</span><strong>Receber</strong><small>O agente interpreta se é conversa, dúvida ou pedido de ação.</small></div>
                 <div><span>02</span><strong>Planejar</strong><small>O core Python cria um plano e solicita sua aprovação antes de executar.</small></div>
                 <div><span>03</span><strong>Distribuir</strong><small>O runtime atual executa as subtarefas sequencialmente; concorrência segura será adicionada depois.</small></div>
                 <div><span>04</span><strong>Entregar</strong><small>Resultados, alterações e bloqueios ficam visíveis nesta área.</small></div>
