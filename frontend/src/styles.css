@@ -351,3 +351,39 @@ body { min-width:900px; }
 .titlebar-actions button:last-child{border-color:#51436c;background:#292238;color:#d0c1f5}
 .titlebar-actions svg{flex:0 0 auto}
 @media(max-width:1120px){.titlebar{gap:12px;padding:0 9px}.titlebar-actions button{padding:5px 6px;font-size:9px}.workspace-label{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+
+
+/* Settings dialog: keep the header/footer fixed and isolate the inner scroll area. */
+.settings-backdrop { overflow:hidden; overscroll-behavior:none; }
+.settings-dialog-wide {
+  display:flex;
+  flex-direction:column;
+  height:min(820px,92vh);
+  max-height:92vh;
+  overflow:hidden;
+}
+.settings-dialog-wide > .settings-header,
+.settings-dialog-wide > .settings-footer { flex:0 0 auto; }
+.settings-dialog-wide > .settings-layout {
+  flex:1 1 auto;
+  min-height:0;
+  max-height:none;
+  overflow:hidden;
+}
+.settings-dialog-wide .settings-nav {
+  min-height:0;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+.settings-dialog-wide .settings-page {
+  min-height:0;
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  -webkit-overflow-scrolling:touch;
+}
+.settings-dialog-wide > .settings-footer { position:relative; bottom:auto; }
+@media(max-width:760px) {
+  .settings-dialog-wide { height:94vh; max-height:94vh; }
+}
