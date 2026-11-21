@@ -587,12 +587,7 @@ fn switch_runtime_workspace(state: State<'_, RuntimeState>, project_path: String
 }
 
 #[tauri::command]
-fn send_runtime_command(state: State<'_, RuntimeState>, message: Value) -> Result<(), String> {
-    let encoded = serde_json::to_string(&message)
-        .map_err(|e| format!("Comando inválido: {e}"))?;
-    if encoded.len() > 64 * 1024 {
-        return Err("Comando excede o limite de 64 KiB.".into());
-    }
+fn send_runtime_command(state: State<'_, RuntimeState>, mut message: Value) -> Result<(), String> {
     let mut runtime = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
     let process = runtime.as_mut().ok_or("Runtime não iniciado.")?;
     if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao verificar o Core: {e}"))? {
@@ -601,6 +596,20 @@ fn send_runtime_command(state: State<'_, RuntimeState>, message: Value) -> Resul
         *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = Some(code);
         runtime.take();
         return Err(format!("O processo Python encerrou antes de receber o comando (código de saída: {code})."));
+    }
+    // The runtime owns one canonical workspace. Do not trust a raw frontend path here:
+    // Windows may represent the same directory differently (case, junctions, long paths).
+    // Inject the exact workspace associated with this live process for task commands.
+    if matches!(message.get("type").and_then(Value::as_str), Some("task.submit") | Some("task.resume")) {
+        let payload = message.get_mut("payload")
+            .and_then(Value::as_object_mut)
+            .ok_or("Payload do comando inválido.")?;
+        payload.insert("project_root".to_string(), Value::String(process.project_root.clone()));
+    }
+    let encoded = serde_json::to_string(&message)
+        .map_err(|e| format!("Comando inválido: {e}"))?;
+    if encoded.len() > 64 * 1024 {
+        return Err("Comando excede o limite de 64 KiB.".into());
     }
     let stdin = process.stdin.as_mut().ok_or("Entrada do Core indisponível.")?;
     stdin.write_all(encoded.as_bytes()).map_err(|e| format!("Falha ao enviar comando ao runtime: {e}"))?;
