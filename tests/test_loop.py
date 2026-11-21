@@ -233,4 +233,4 @@ def test_intent_router_asks_for_clarification_when_request_is_ambiguous(tmp_path
         tmp_path, "Melhore isso."
     )
     assert result["intent"] == "clarify"
-    assert "alterar" in result["response"]
+    assert "arquivos" in result["response"]
