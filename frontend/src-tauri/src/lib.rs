@@ -378,7 +378,7 @@ fn start_runtime(
     let bundled_core = if has_python_override {
         None
     } else {
-        app.path().resolve("core/kardecagent-core.exe", tauri::path::BaseDirectory::Resource).ok().filter(|path| path.is_file())
+        app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource).ok().filter(|path| path.is_file())
     };
     let (executable, launch_prefix, launch_mode) = if let Some(core_path) = bundled_core {
         (core_path.into_os_string(), Vec::new(), "bundled".to_string())
@@ -396,7 +396,8 @@ fn start_runtime(
     configure_hidden_process(&mut command);
     command
         .args(&launch_args)
-        .arg(&root)        .current_dir(&root)
+        .arg(&root)
+        .current_dir(&root)
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONUNBUFFERED", "1")
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
@@ -502,10 +503,10 @@ fn test_ollama_connection(
     let bundled_core = if has_python_override {
         None
     } else {
-        app.path().resolve("core/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
+        app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
             .ok().filter(|path| path.is_file())
     };
-    let (executable, mut args) = if let Some(core_path) = bundled_core {
+    let (executable, args) = if let Some(core_path) = bundled_core {
         (core_path.into_os_string(), vec!["ollama-health".to_string()])
     } else {
         let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
