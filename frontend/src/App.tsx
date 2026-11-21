@@ -129,6 +129,8 @@ function App() {
   const [runOutput, setRunOutput] = useState<{ file: string; language: string; exit_code: number; stdout: string; stderr: string; timed_out: boolean } | null>(null);
   const [openTabs, setOpenTabs] = useState<Array<{ path: string; name: string; content: string; dirty: boolean }>>([]);
   const [instructionDraft, setInstructionDraft] = useState("");
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; commandId?: string; role: "user" | "assistant"; text: string; status?: "sending" | "sent" | "rejected" }>>([]);
+  const pendingInstructionCommandId = useRef<string | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
@@ -264,9 +266,15 @@ function App() {
         setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : message.payload?.recoverable ? "Recuperável" : "Falhou", recoverable: message.type === "task.failed" && Boolean(message.payload?.recoverable) } : task));
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
-        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.result_summary || message.payload.message }].slice(-100));
+        const terminalSummary = message.payload?.result_summary || message.payload?.message || (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
+        setChatMessages(items => [...items, { id: message.event_id || crypto.randomUUID(), role: "assistant", text: terminalSummary }].slice(-100));
+        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: terminalSummary }].slice(-100));
         setPendingApproval(null);
         setApprovalSubmitting(false);
+      } else if (message.type === "command.accepted" && message.command_id === pendingInstructionCommandId.current) {
+        const acceptedId = pendingInstructionCommandId.current;
+        pendingInstructionCommandId.current = null;
+        setChatMessages(items => items.map(item => item.commandId === acceptedId ? { ...item, status: "sent" } : item));
       } else if (message.type === "command.accepted" && message.command_id === approvalCommandId.current) {
         approvalCommandId.current = null;
         setApprovalSubmitting(false);
@@ -279,7 +287,14 @@ function App() {
             setApprovalSubmitting(false);
           } else setRuntimeBusy(false);
         }
-        setRuntimeError(message.message || message.reason || "Falha de comunicação com o runtime.");
+        const rejection = message.message || message.reason || "Falha de comunicação com o runtime.";
+        if (message.type === "command.rejected" && message.command_id === pendingInstructionCommandId.current) {
+          const rejectedId = pendingInstructionCommandId.current;
+          pendingInstructionCommandId.current = null;
+          setChatMessages(items => items.map(item => item.commandId === rejectedId ? { ...item, status: "rejected", text: item.text + "\n\nNão enviada pelo Core: " + rejection } : item));
+          setRuntimeBusy(false);
+        }
+        setRuntimeError(rejection);
       }
     });
     const streamClosed = listen("runtime-stream-closed", () => {
@@ -431,7 +446,7 @@ function App() {
       const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
       setProjectRoot(selected); setProjectEntries(entries); setProjectError(null);
       setOpenedPath(null); setSelectedFile(""); setFileContent(""); setFileDirty(false); setOpenTabs([]); setRunOutput(null);
-      setRuntimeEvents([]); setRuntimeTasks([]); setRuntimeSubtasks([]); setRuntimePlanSteps([]);
+      setRuntimeEvents([]); setRuntimeTasks([]); setRuntimeSubtasks([]); setRuntimePlanSteps([]); setChatMessages([]); pendingInstructionCommandId.current = null;
       setActiveRuntimeSubtask(null); setActiveRuntimeStep(null); setRuntimeLimits(null);
       setRuntimeBusy(false); setPendingApproval(null); setApprovalSubmitting(false);
       seenEventIds.current.clear(); approvalCommandId.current = null; setRuntimeError(null);
@@ -570,16 +585,26 @@ function App() {
   }
 
   async function submitInstruction() {
-    if (!projectRoot || !instructionDraft.trim() || runtimeStatus !== "online") return;
+    const instruction = instructionDraft.trim();
+    if (!projectRoot || !instruction || runtimeStatus !== "online" || runtimeBusy) return;
+    const commandId = crypto.randomUUID();
+    pendingInstructionCommandId.current = commandId;
+    setChatMessages(items => [...items, { id: commandId, commandId, role: "user", text: instruction, status: "sending" }].slice(-100));
+    setRuntimeBusy(true);
+    setRuntimeError(null);
     try {
       await invoke("send_runtime_command", { message: {
-        type: "task.submit", schema_version: 1, command_id: crypto.randomUUID(),
-        payload: { instruction: instructionDraft.trim(), project_root: projectRoot }
+        type: "task.submit", schema_version: 1, command_id: commandId,
+        payload: { instruction, project_root: projectRoot }
       }});
-      setRuntimeBusy(true);
       setInstructionDraft("");
-      setRuntimeError(null);
-    } catch (error) { setRuntimeError(String(error)); }
+    } catch (error) {
+      pendingInstructionCommandId.current = null;
+      setRuntimeBusy(false);
+      const reason = String(error);
+      setChatMessages(items => items.map(item => item.commandId === commandId ? { ...item, status: "rejected", text: item.text + "\n\nFalha ao enviar: " + reason } : item));
+      setRuntimeError(reason);
+    }
   }
 
   async function resumeTask(task: { id: string; title: string }) {
@@ -764,6 +789,12 @@ function App() {
             </div>
           ) : <>
             <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">{runtimeStatus === "online" ? "● Online" : runtimeStatus === "connecting" ? "● Conectando" : "● Offline"}</span></div>
+            {chatMessages.length > 0 && <div className="agent-chat-history" aria-live="polite">
+              {chatMessages.map(message => <article className={`agent-chat-message role-${message.role} ${message.status || ""}`} key={message.id}>
+                <span>{message.role === "user" ? "Você" : "KardecAgent"}{message.status === "sending" ? " · enviando" : message.status === "sent" ? " · recebida" : message.status === "rejected" ? " · não enviada" : ""}</span>
+                <p>{message.text}</p>
+              </article>)}
+            </div>}
             {pendingApproval ? <div className="approval-prompt">
               <div className="approval-prompt-head"><ShieldCheck size={18}/><strong>{pendingApproval.kind === "high_risk" ? "Aprovação adicional de alto risco" : "Aprovar plano de execução"}</strong></div>
               <span className="approval-risk">RISCO: {pendingApproval.risk.toUpperCase()}</span>
