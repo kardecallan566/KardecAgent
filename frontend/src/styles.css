@@ -387,3 +387,8 @@ body { min-width:900px; }
 @media(max-width:760px) {
   .settings-dialog-wide { height:94vh; max-height:94vh; }
 }
+
+
+.diagnostic-logs { display:grid; gap:7px; margin-top:14px; padding:12px; border:1px solid #393344; border-radius:7px; background:#111118; }
+.diagnostic-logs > strong { color:#c9bedf; font-size:11px; }
+.diagnostic-logs pre { max-height:100px; overflow:auto; margin:0; color:#b9b2c5; font:10px/1.5 ui-monospace,SFMono-Regular,monospace; white-space:pre-wrap; overflow-wrap:anywhere; overscroll-behavior:contain; }
