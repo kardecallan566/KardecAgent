@@ -800,7 +800,7 @@ function App() {
               <span className="approval-risk">RISCO: {pendingApproval.risk.toUpperCase()}</span>
               <pre>{pendingApproval.summary}</pre>
               <div className="approval-actions"><button onClick={() => respondToApproval("reject")} className="approval-reject" disabled={approvalSubmitting}>Rejeitar</button><button onClick={() => respondToApproval("approve")} className="approval-accept" disabled={approvalSubmitting}>{approvalSubmitting ? "Enviando..." : "Aprovar execução"}</button></div>
-            </div> : <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div>}
+            </div> : chatMessages.length === 0 ? <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div> : null}
             <div className="agent-composer">
               <label htmlFor="manager-instruction">Instrução para o gestor</label>
               <textarea id="manager-instruction" value={instructionDraft} onChange={event => setInstructionDraft(event.target.value.slice(0, 8000))} placeholder="Ex.: Analise o projeto, proponha um plano e implemente a autenticação..." rows={4} maxLength={8000}/>
