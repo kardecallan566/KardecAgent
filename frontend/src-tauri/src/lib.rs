@@ -375,15 +375,19 @@ fn start_runtime(
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
     let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
         || std::env::var_os("KARDECAGENT_PYTHON").is_some();
-    let bundled_core = if has_python_override {
-        None
+    let preferred_python = if has_python_override {
+        resolve_python_command(python_executable.as_deref()).ok()
     } else {
-        app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource).ok().filter(|path| path.is_file())
+        None
     };
-    let (executable, launch_prefix, launch_mode) = if let Some(core_path) = bundled_core {
+    let bundled_core = app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
+        .ok().filter(|path| path.is_file());
+    let (executable, launch_prefix, launch_mode) = if let Some((python, prefix)) = preferred_python {
+        (python, prefix, "python".to_string())
+    } else if let Some(core_path) = bundled_core {
         (core_path.into_os_string(), Vec::new(), "bundled".to_string())
     } else {
-        let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
+        let (python, prefix) = resolve_python_command(None)?;
         (python, prefix, "python".to_string())
     };
     let mut launch_args = launch_prefix;
@@ -500,16 +504,21 @@ fn test_ollama_connection(
 
     let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
         || std::env::var_os("KARDECAGENT_PYTHON").is_some();
-    let bundled_core = if has_python_override {
-        None
+    let preferred_python = if has_python_override {
+        resolve_python_command(python_executable.as_deref()).ok()
     } else {
-        app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
-            .ok().filter(|path| path.is_file())
+        None
     };
-    let (executable, args) = if let Some(core_path) = bundled_core {
+    let bundled_core = app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
+        .ok().filter(|path| path.is_file());
+    let (executable, args) = if let Some((python, prefix)) = preferred_python {
+        let mut args = prefix;
+        args.extend(["-m".into(), "kardecagent.cli".into(), "ollama-health".into()]);
+        (python, args)
+    } else if let Some(core_path) = bundled_core {
         (core_path.into_os_string(), vec!["ollama-health".to_string()])
     } else {
-        let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
+        let (python, prefix) = resolve_python_command(None)?;
         let mut args = prefix;
         args.extend(["-m".into(), "kardecagent.cli".into(), "ollama-health".into()]);
         (python, args)
