@@ -800,7 +800,7 @@ function App() {
                   <div className="settings-section-title"><Wifi size={16}/><strong>Conexão com Ollama</strong></div>
                   <label>Endereço do servidor<input value={settings.ollamaUrl} onChange={event => setSettings(current => ({ ...current, ollamaUrl: event.target.value }))} placeholder="http://127.0.0.1:11434"/></label>
                   <label>Modelo local<input value={settings.model} onChange={event => setSettings(current => ({ ...current, model: event.target.value }))} placeholder="qwen2.5-coder:3b"/></label>
-                  <p className="settings-help">Perfil econômico ativo: contexto de 4.096 tokens, geração limitada e descarregamento automático do modelo após dois minutos sem uso. O Core Python permanece ativo enquanto a IDE estiver aberta.</p>
+                  <p className="settings-help">Perfil econômico ativo: contexto de 4.096 tokens, geração limitada e descarregamento do modelo após dois minutos sem uso. O Core é iniciado automaticamente pelo Studio; para gerar respostas, mantenha o Ollama ativo e instale o modelo selecionado.</p>
                   <div className="settings-actions"><button className="settings-secondary" onClick={() => setSettings(current => ({ ...current, model: "qwen2.5-coder:1.5b" }))}>Selecionar modelo ultra-leve (1.5B)</button></div>
                   <label>Tempo limite de resposta (segundos)<input type="number" min={10} max={900} value={settings.timeout} onChange={event => setSettings(current => ({ ...current, timeout: Math.max(10, Math.min(900, Number(event.target.value) || 180)) }))}/></label>
                   <div className="settings-actions"><button className="settings-secondary" disabled={ollamaTesting} onClick={async () => {
@@ -869,6 +869,8 @@ function App() {
                   <div className="diagnostic-row"><span>Workspace</span><strong>{coreDiagnostics?.project_root || projectRoot || "Nenhum"}</strong></div>
                   <div className="diagnostic-row"><span>Último código de saída</span><strong>{coreDiagnostics?.last_exit_code ?? "Sem encerramento registrado"}</strong></div>
                   {coreDiagnosticsError && <div className="ollama-test-result error"><AlertCircle size={15}/><p>{coreDiagnosticsError}</p></div>}
+                  {runtimeError && <div className="ollama-test-result error"><AlertCircle size={15}/><p>{runtimeError}</p></div>}
+                  {runtimeEvents.some(item => item.type === "runtime.log") && <div className="diagnostic-logs"><strong>Últimos registros do Core</strong>{runtimeEvents.filter(item => item.type === "runtime.log").slice(-8).map(item => <pre key={item.id}>{item.message}</pre>)}</div>}
                   <div className="settings-actions"><button className="settings-secondary" onClick={() => void refreshCoreDiagnostics()}>Atualizar diagnóstico</button><button className="settings-primary" disabled={!projectRoot || runtimeBusy} onClick={() => void restartCore()}>Reiniciar Core</button></div>
                 </div>
               </>}
