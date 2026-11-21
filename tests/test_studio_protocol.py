@@ -225,7 +225,7 @@ def test_run_stdio_routes_chat_without_creating_or_running_a_task(monkeypatch, t
         "command_id": "chat-command",
         "payload": {"instruction": "Oi, o que esse projeto faz?", "project_root": str(tmp_path)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
