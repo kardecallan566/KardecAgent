@@ -216,3 +216,48 @@ def test_run_stdio_rejects_resume_for_unknown_persisted_task(monkeypatch, tmp_pa
     assert rejected["type"] == "command.rejected"
     assert "not found" in rejected["reason"].lower()
     assert not any(item["type"] == "task.created" for item in messages)
+
+
+def test_run_stdio_routes_chat_without_creating_or_running_a_task(monkeypatch, tmp_path):
+    command = {
+        "type": "task.submit",
+        "schema_version": 1,
+        "command_id": "chat-command",
+        "payload": {"instruction": "Oi, o que esse projeto faz?", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4,
+            max_command_output_chars=1200,
+            llm_timeout_seconds=30.0,
+            command_timeout_seconds=15.0,
+        )
+
+        def __init__(self):
+            self.run_calls = 0
+
+        def interpret_message(self, root, instruction):
+            assert root == tmp_path.resolve()
+            assert instruction == "Oi, o que esse projeto faz?"
+            return {"intent": "chat", "response": "Olá! Posso explicar o projeto.", "reason": "Greeting and question."}
+
+        def run(self, *args, **kwargs):
+            self.run_calls += 1
+            raise AssertionError("chat must never enter task execution")
+
+    fake_agent = FakeAgent()
+    assert studio_protocol.run_stdio(tmp_path, fake_agent) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    accepted = next(item for item in messages if item.get("type") == "command.accepted")
+    reply = next(item for item in messages if item.get("type") == "assistant.response")
+
+    assert accepted["command_id"] == "chat-command"
+    assert accepted["intent"] == "chat"
+    assert reply["payload"]["message"] == "Olá! Posso explicar o projeto."
+    assert fake_agent.run_calls == 0
+    assert not any(item["type"] == "task.created" for item in messages)
+    assert not any(item["type"] == "approval.requested" for item in messages)
