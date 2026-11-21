@@ -416,33 +416,37 @@ def main() -> int:
         settings = Settings(**{**settings.__dict__, **updates})
 
     if args.command == "ollama-health":
-        client = OllamaClient(
-            base_url=settings.ollama_base_url,
-            model=settings.llm_model,
-            timeout=settings.llm_timeout_seconds,
-        )
-        version = client.server_version()
-        models = client.list_models()
-        model_names = [
-            item.get("name", "")
-            for item in models
-            if isinstance(item, dict) and isinstance(item.get("name"), str)
-        ]
-        if settings.llm_model not in model_names and settings.llm_model + ":latest" not in model_names:
-            raise RuntimeError(
-                "Modelo não instalado: " + settings.llm_model
-                + ". Modelos disponíveis: " + (", ".join(model_names) or "(nenhum)")
+        try:
+            client = OllamaClient(
+                base_url=settings.ollama_base_url,
+                model=settings.llm_model,
+                timeout=settings.llm_timeout_seconds,
             )
-        response = client.health_check()
-        if "KARDECAGENT_OK" not in response.content:
-            raise RuntimeError("O modelo respondeu, mas não passou no teste de inferência.")
-        print(json.dumps({
-            "version": version,
-            "models": model_names,
-            "model": settings.llm_model,
-            "response": response.content.strip(),
-        }, ensure_ascii=False))
-        return 0
+            version = client.server_version()
+            models = client.list_models()
+            model_names = [
+                item.get("name", "")
+                for item in models
+                if isinstance(item, dict) and isinstance(item.get("name"), str)
+            ]
+            if settings.llm_model not in model_names and settings.llm_model + ":latest" not in model_names:
+                raise RuntimeError(
+                    "Modelo não instalado: " + settings.llm_model
+                    + ". Modelos disponíveis: " + (", ".join(model_names) or "(nenhum)")
+                )
+            response = client.health_check()
+            if "KARDECAGENT_OK" not in response.content:
+                raise RuntimeError("O modelo respondeu, mas não passou no teste de inferência.")
+            print(json.dumps({
+                "version": version,
+                "models": model_names,
+                "model": settings.llm_model,
+                "response": response.content.strip(),
+            }, ensure_ascii=False))
+            return 0
+        except Exception as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return 2
 
     if args.command == "doctor":
         root = resolve_project_root(args.project)
