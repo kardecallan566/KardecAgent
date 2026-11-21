@@ -8,7 +8,7 @@ use std::{
     sync::Mutex,
     thread,
 };
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 #[derive(Serialize)]
 struct ProjectEntry {
@@ -17,10 +17,23 @@ struct ProjectEntry {
     is_dir: bool,
 }
 
+
+#[cfg(windows)]
+fn configure_hidden_process(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x08000000);
+}
+#[cfg(not(windows))]
+fn configure_hidden_process(_command: &mut Command) {}
+
 const MAX_RUNTIME_LINE_BYTES: usize = 256 * 1024 + 1;
 const MAX_RUNTIME_LOG_BYTES: usize = 8 * 1024;
-fn resolve_python_command() -> Result<(std::ffi::OsString, Vec<String>), String> {
-    let explicit = std::env::var_os("KARDECAGENT_PYTHON");
+fn resolve_python_command(python_override: Option<&str>) -> Result<(std::ffi::OsString, Vec<String>), String> {
+    let explicit = python_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::ffi::OsString::from)
+        .or_else(|| std::env::var_os("KARDECAGENT_PYTHON"));
     let candidates: Vec<(std::ffi::OsString, Vec<String>)> = if let Some(path) = explicit {
         vec![(path, Vec::new())]
     } else if cfg!(windows) {
@@ -30,7 +43,10 @@ fn resolve_python_command() -> Result<(std::ffi::OsString, Vec<String>), String>
     };
     let mut diagnostics = Vec::new();
     for (program, prefix) in candidates {
-        match Command::new(&program).args(&prefix).args(["-c", "import kardecagent, kardecagent.cli"]).output() {
+        let mut probe = Command::new(&program);
+        probe.args(&prefix).args(["-c", "import kardecagent, kardecagent.cli"]);
+        configure_hidden_process(&mut probe);
+        match probe.output() {
             Ok(output) if output.status.success() => return Ok((program, prefix)),
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -85,18 +101,61 @@ fn read_bounded_line<R: BufRead>(reader: &mut R, limit: usize) -> std::io::Resul
 
 struct RuntimeProcess {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
+    python_executable: String,
+    launch_mode: String,
+    project_root: String,
+    exited: bool,
 }
 
 impl Drop for RuntimeProcess {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if !self.exited {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
 #[derive(Default)]
-struct RuntimeState(Mutex<Option<RuntimeProcess>>);
+struct RuntimeState {
+    process: Mutex<Option<RuntimeProcess>>,
+    last_exit_code: Mutex<Option<i32>>,
+}
+
+#[derive(Serialize)]
+struct RuntimeDiagnostics {
+    running: bool,
+    pid: Option<u32>,
+    python_executable: Option<String>,
+    launch_mode: Option<String>,
+    project_root: Option<String>,
+    last_exit_code: Option<i32>,
+}
+
+#[tauri::command]
+fn runtime_diagnostics(state: State<'_, RuntimeState>) -> Result<RuntimeDiagnostics, String> {
+    let mut process_slot = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    let mut last_exit = state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())?;
+    if let Some(process) = process_slot.as_mut() {
+        if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao verificar o processo Python: {e}"))? {
+            let code = status.code().unwrap_or(-1);
+            process.exited = true;
+            *last_exit = Some(code);
+            process_slot.take();
+        } else {
+            return Ok(RuntimeDiagnostics {
+                running: true,
+                pid: Some(process.child.id()),
+                python_executable: Some(process.python_executable.clone()),
+                launch_mode: Some(process.launch_mode.clone()),
+                project_root: Some(process.project_root.clone()),
+                last_exit_code: *last_exit,
+            });
+        }
+    }
+    Ok(RuntimeDiagnostics { running: false, pid: None, python_executable: None, launch_mode: None, project_root: None, last_exit_code: *last_exit })
+}
 
 fn resolve_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
     let root = Path::new(project_root)
@@ -262,8 +321,10 @@ except Exception as exc:
     print(json.dumps({"error":str(exc)}))
     sys.exit(2)
 "#;
-    let (python, prefix) = resolve_python_command()?;
-    let output = Command::new(python).args(&prefix).args(["-c", script])
+    let (python, prefix) = resolve_python_command(None)?;
+    let mut command = Command::new(&python);
+    configure_hidden_process(&mut command);
+    let output = command.args(&prefix).args(["-c", script])
         .current_dir(&root).env("KARDECAGENT_RUN_ROOT", &root).env("KARDECAGENT_RUN_FILE", &path)
         .output().map_err(|e| format!("Não foi possível iniciar execução: {e}"))?;
     let parsed: Value = serde_json::from_slice(&output.stdout)
@@ -288,6 +349,7 @@ fn start_runtime(
     ollama_base_url: String,
     llm_model: String,
     llm_timeout_seconds: f64,
+    python_executable: Option<String>,
 ) -> Result<(), String> {
     let root = Path::new(&project_path)
         .canonicalize()
@@ -296,20 +358,48 @@ fn start_runtime(
         return Err("O caminho do projeto não é uma pasta.".into());
     }
 
-    let mut runtime = state.0.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
-    if runtime.is_some() {
-        return Err("O runtime já está iniciado.".into());
+    let mut runtime = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    if let Some(existing) = runtime.as_mut() {
+        if let Some(status) = existing.child.try_wait().map_err(|e| format!("Falha ao verificar o Core: {e}"))? {
+            existing.exited = true;
+            *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = Some(status.code().unwrap_or(-1));
+            runtime.take();
+        } else {
+            return Err(format!("O Core já está em execução (PID {}).", existing.child.id()));
+        }
     }
 
     let base = ollama_base_url.trim().trim_end_matches('/');
     if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 { return Err("Endereço Ollama inválido.".into()); }
     if llm_model.trim().is_empty() || llm_model.len() > 200 { return Err("Modelo Ollama inválido.".into()); }
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
-    let (python, python_prefix) = resolve_python_command()?;
-    let mut command = Command::new(python);
+    let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
+        || std::env::var_os("KARDECAGENT_PYTHON").is_some();
+    let preferred_python = if has_python_override {
+        resolve_python_command(python_executable.as_deref()).ok()
+    } else {
+        None
+    };
+    let bundled_core = app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
+        .ok().filter(|path| path.is_file());
+    let (executable, launch_prefix, launch_mode) = if let Some((python, prefix)) = preferred_python {
+        (python, prefix, "python".to_string())
+    } else if let Some(core_path) = bundled_core {
+        (core_path.into_os_string(), Vec::new(), "bundled".to_string())
+    } else {
+        let (python, prefix) = resolve_python_command(None)?;
+        (python, prefix, "python".to_string())
+    };
+    let mut launch_args = launch_prefix;
+    if launch_mode == "bundled" {
+        launch_args.extend(["studio".into(), "--project".into()]);
+    } else {
+        launch_args.extend(["-m".into(), "kardecagent.cli".into(), "studio".into(), "--project".into()]);
+    }
+    let mut command = Command::new(&executable);
+    configure_hidden_process(&mut command);
     command
-        .args(&python_prefix)
-        .args(["-m", "kardecagent.cli", "studio", "--project"])
+        .args(&launch_args)
         .arg(&root)
         .current_dir(&root)
         .env("PYTHONIOENCODING", "utf-8")
@@ -371,7 +461,16 @@ fn start_runtime(
         }
     });
 
-    *runtime = Some(RuntimeProcess { child, stdin });
+    let executable_label = executable.to_string_lossy().into_owned();
+    *runtime = Some(RuntimeProcess {
+        child,
+        stdin: Some(stdin),
+        python_executable: executable_label,
+        launch_mode,
+        project_root: root.to_string_lossy().into_owned(),
+        exited: false,
+    });
+    *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = None;
     Ok(())
 }
 
@@ -386,9 +485,11 @@ struct OllamaTestResult {
 
 #[tauri::command]
 fn test_ollama_connection(
+    app: tauri::AppHandle,
     ollama_base_url: String,
     llm_model: String,
     llm_timeout_seconds: f64,
+    python_executable: Option<String>,
 ) -> Result<OllamaTestResult, String> {
     let base = ollama_base_url.trim().trim_end_matches('/');
     if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 {
@@ -400,44 +501,41 @@ fn test_ollama_connection(
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) {
         return Err("O timeout deve estar entre 10 e 900 segundos.".into());
     }
-    let (python, prefix) = resolve_python_command()?;
-    let script = r#"
-import json, os, sys
-import httpx
-base = os.environ["KARDECAGENT_OLLAMA_BASE_URL"].rstrip("/")
-model = os.environ["KARDECAGENT_LLM_MODEL"]
-timeout = float(os.environ["KARDECAGENT_LLM_TIMEOUT"])
-try:
-    version_response = httpx.get(base + "/api/version", timeout=timeout)
-    version_response.raise_for_status()
-    version = version_response.json().get("version", "unknown")
-    tags_response = httpx.get(base + "/api/tags", timeout=timeout)
-    tags_response.raise_for_status()
-    models = tags_response.json().get("models", [])
-    names = [item.get("name", "") for item in models if isinstance(item, dict)]
-    if model not in names and model + ":latest" not in names:
-        raise RuntimeError("Modelo não instalado: " + model + ". Modelos disponíveis: " + (", ".join(names) or "(nenhum)"))
-    response = httpx.post(base + "/api/chat", json={"model": model, "messages": [{"role":"system","content":"Reply with exactly: KARDECAGENT_OK"},{"role":"user","content":"Health check."}],"stream":False,"options":{"temperature":0.0,"num_predict":32}}, timeout=timeout)
-    response.raise_for_status()
-    answer = (response.json().get("message") or {}).get("content", "")
-    if not isinstance(answer, str) or "KARDECAGENT_OK" not in answer:
-        raise RuntimeError("O modelo respondeu, mas não passou no teste de inferência.")
-    print(json.dumps({"ok":True,"version":version,"models":names,"model":model,"response":"Teste de inferência concluído: KARDECAGENT_OK"}))
-except Exception as exc:
-    print(json.dumps({"ok":False,"error":str(exc)}))
-    sys.exit(2)
-"#;
-    let output = Command::new(python)
-        .args(&prefix)
-        .args(["-c", script])
+
+    let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
+        || std::env::var_os("KARDECAGENT_PYTHON").is_some();
+    let preferred_python = if has_python_override {
+        resolve_python_command(python_executable.as_deref()).ok()
+    } else {
+        None
+    };
+    let bundled_core = app.path().resolve("core-dist/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
+        .ok().filter(|path| path.is_file());
+    let (executable, args) = if let Some((python, prefix)) = preferred_python {
+        let mut args = prefix;
+        args.extend(["-m".into(), "kardecagent.cli".into(), "ollama-health".into()]);
+        (python, args)
+    } else if let Some(core_path) = bundled_core {
+        (core_path.into_os_string(), vec!["ollama-health".to_string()])
+    } else {
+        let (python, prefix) = resolve_python_command(None)?;
+        let mut args = prefix;
+        args.extend(["-m".into(), "kardecagent.cli".into(), "ollama-health".into()]);
+        (python, args)
+    };
+
+    let mut command = Command::new(&executable);
+    configure_hidden_process(&mut command);
+    let output = command
+        .args(&args)
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
         .env("KARDECAGENT_LLM_MODEL", llm_model.trim())
         .env("KARDECAGENT_LLM_TIMEOUT", llm_timeout_seconds.to_string())
         .output()
-        .map_err(|error| format!("Falha ao executar o teste do Ollama: {error}"))?;
+        .map_err(|error| format!("Falha ao executar o diagnóstico do Ollama: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let result: Value = serde_json::from_str(stdout.trim())
-        .map_err(|_| format!("Resposta inválida do teste Ollama: {}", String::from_utf8_lossy(&output.stderr)))?;
+        .map_err(|_| format!("Resposta inválida do diagnóstico do Ollama: {}", String::from_utf8_lossy(&output.stderr)))?;
     if !output.status.success() {
         return Err(result.get("error").and_then(Value::as_str).unwrap_or("Falha no teste do Ollama.").to_string());
     }
@@ -452,23 +550,164 @@ except Exception as exc:
 }
 
 #[tauri::command]
-fn send_runtime_command(state: State<'_, RuntimeState>, message: Value) -> Result<(), String> {
+fn switch_runtime_workspace(state: State<'_, RuntimeState>, project_path: String) -> Result<(), String> {
+    let root = Path::new(&project_path)
+        .canonicalize()
+        .map_err(|e| format!("Projeto inválido: {e}"))?;
+    if !root.is_dir() {
+        return Err("O caminho do projeto não é uma pasta.".into());
+    }
+    let mut runtime = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    let process = runtime.as_mut().ok_or("Core não iniciado.")?;
+    if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao verificar o Core: {e}"))? {
+        let code = status.code().unwrap_or(-1);
+        process.exited = true;
+        *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = Some(code);
+        runtime.take();
+        return Err(format!("O Core encerrou antes da troca de projeto (código {code})."));
+    }
+    let command_id = format!(
+        "workspace-switch-{}-{}",
+        process.child.id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()
+    );
+    let message = serde_json::json!({
+        "type": "workspace.change",
+        "schema_version": 1,
+        "command_id": command_id,
+        "payload": { "project_root": root.to_string_lossy() }
+    });
+    let encoded = serde_json::to_vec(&message).map_err(|e| format!("Falha ao preparar troca de projeto: {e}"))?;
+    let stdin = process.stdin.as_mut().ok_or("Entrada do Core indisponível.")?;
+    stdin.write_all(&encoded).map_err(|e| format!("Falha ao enviar novo workspace ao Core: {e}"))?;
+    stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar troca de workspace: {e}"))?;
+    stdin.flush().map_err(|e| format!("Falha ao confirmar troca de workspace: {e}"))?;
+    process.project_root = root.to_string_lossy().into_owned();
+    Ok(())
+}
+
+#[tauri::command]
+fn send_runtime_command(state: State<'_, RuntimeState>, mut message: Value) -> Result<(), String> {
+    let mut runtime = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+    let process = runtime.as_mut().ok_or("Runtime não iniciado.")?;
+    if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao verificar o Core: {e}"))? {
+        let code = status.code().unwrap_or(-1);
+        process.exited = true;
+        *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = Some(code);
+        runtime.take();
+        return Err(format!("O processo Python encerrou antes de receber o comando (código de saída: {code})."));
+    }
+    // The runtime owns one canonical workspace. Do not trust a raw frontend path here:
+    // Windows may represent the same directory differently (case, junctions, long paths).
+    // Inject the exact workspace associated with this live process for task commands.
+    if matches!(message.get("type").and_then(Value::as_str), Some("task.submit") | Some("task.resume")) {
+        let payload = message.get_mut("payload")
+            .and_then(Value::as_object_mut)
+            .ok_or("Payload do comando inválido.")?;
+        payload.insert("project_root".to_string(), Value::String(process.project_root.clone()));
+    }
     let encoded = serde_json::to_string(&message)
         .map_err(|e| format!("Comando inválido: {e}"))?;
     if encoded.len() > 64 * 1024 {
         return Err("Comando excede o limite de 64 KiB.".into());
     }
-    let mut runtime = state.0.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
-    let process = runtime.as_mut().ok_or("Runtime não iniciado.")?;
-    process.stdin.write_all(encoded.as_bytes()).map_err(|e| format!("Falha ao enviar comando ao runtime: {e}"))?;
+    let stdin = process.stdin.as_mut().ok_or("Entrada do Core indisponível.")?;
+    stdin.write_all(encoded.as_bytes()).map_err(|e| format!("Falha ao enviar comando ao runtime: {e}"))?;
+    stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar comando: {e}"))?;
+    stdin.flush().map_err(|e| format!("Falha ao descarregar comando: {e}"))
+}
+
+#[tauri::command]
+fn stop_runtime(state: State<'_, RuntimeState>) -> Result<(), String> {
+    let process = state.process.lock().map_err(|_| "Runtime lock poisoned".to_string())?.take();
+    let Some(mut process) = process else { return Ok(()); };
+
+    // EOF is the protocol's graceful shutdown signal. Do not kill Python while it can exit normally.
+    process.stdin.take();
+    let mut exit_code = None;
+    for _ in 0..30 {
+        if let Some(status) = process.child.try_wait().map_err(|e| format!("Falha ao aguardar o Core: {e}"))? {
+            exit_code = Some(status.code().unwrap_or(-1));
+            break;
+        }
+        thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if exit_code.is_none() {
+        let _ = process.child.kill();
+        let status = process.child.wait().map_err(|e| format!("Falha ao finalizar o Core: {e}"))?;
+        exit_code = Some(status.code().unwrap_or(-1));
+    }
+    process.exited = true;
+    *state.last_exit_code.lock().map_err(|_| "Runtime diagnostics lock poisoned".to_string())? = exit_code;
+    Ok(())
+}
+
+
+struct TerminalProcess { child: Child, stdin: ChildStdin }
+impl Drop for TerminalProcess {
+    fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); }
+}
+#[derive(Default)]
+struct TerminalState(Mutex<Option<TerminalProcess>>);
+
+#[tauri::command]
+fn start_integrated_terminal(app: tauri::AppHandle, state: State<'_, TerminalState>, project_path: String, shell_name: String) -> Result<(), String> {
+    let root = Path::new(&project_path).canonicalize().map_err(|e| format!("Pasta do terminal inválida: {e}"))?;
+    if !root.is_dir() { return Err("A pasta selecionada não é um diretório.".into()); }
+    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    if let Some(existing) = terminal.as_mut() {
+        match existing.child.try_wait().map_err(|e| format!("Falha ao verificar terminal: {e}"))? {
+            Some(_) => { terminal.take(); }
+            None => return Err("O terminal já está em execução.".into()),
+        }
+    }
+    #[cfg(windows)]
+    let mut command = match shell_name.as_str() {
+        "cmd" => { let mut c = Command::new("cmd.exe"); c.args(["/Q"]); c },
+        "powershell" => { let mut c = Command::new("powershell.exe"); c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]); c },
+        _ => return Err("Shell não permitido. Escolha PowerShell ou CMD.".into()),
+    };
+    #[cfg(not(windows))]
+    let _ = shell_name;
+    #[cfg(not(windows))]
+    let mut command = { let mut c = Command::new("bash"); c.args(["--noprofile", "--norc"]); c };
+    configure_hidden_process(&mut command);
+    let mut child = command.current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().map_err(|e| format!("Não foi possível iniciar o terminal integrado: {e}"))?;
+    let stdin = child.stdin.take().ok_or("Falha ao abrir entrada do terminal.")?;
+    let stdout = child.stdout.take().ok_or("Falha ao abrir saída do terminal.")?;
+    let stderr = child.stderr.take().ok_or("Falha ao abrir erros do terminal.")?;
+    let out_app = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            match line { Ok(line) => { let _ = out_app.emit("terminal-output", line); }, Err(error) => { let _ = out_app.emit("terminal-output", format!("Erro de leitura: {error}")); break; } }
+        }
+        let _ = out_app.emit("terminal-exited", ());
+    });
+    let err_app = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() { match line { Ok(line) => { let _ = err_app.emit("terminal-output", line); }, Err(_) => break } }
+    });
+    *terminal = Some(TerminalProcess { child, stdin });
+    Ok(())
+}
+
+#[tauri::command]
+fn write_integrated_terminal(state: State<'_, TerminalState>, input: String) -> Result<(), String> {
+    if input.len() > 16 * 1024 { return Err("Comando excede 16 KiB.".into()); }
+    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    let process = terminal.as_mut().ok_or("Terminal não iniciado.")?;
+    process.stdin.write_all(input.as_bytes()).map_err(|e| format!("Falha ao enviar comando: {e}"))?;
     process.stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar comando: {e}"))?;
     process.stdin.flush().map_err(|e| format!("Falha ao descarregar comando: {e}"))
 }
 
 #[tauri::command]
-fn stop_runtime(state: State<'_, RuntimeState>) -> Result<(), String> {
-    let mut runtime = state.0.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
-    runtime.take();
+fn stop_integrated_terminal(state: State<'_, TerminalState>) -> Result<(), String> {
+    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    terminal.take();
     Ok(())
 }
 
@@ -476,6 +715,7 @@ fn stop_runtime(state: State<'_, RuntimeState>) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::default())
+        .manage(TerminalState::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_project_entries,
@@ -485,9 +725,14 @@ pub fn run() {
             create_project_directory,
             run_project_file,
             start_runtime,
+            runtime_diagnostics,
             test_ollama_connection,
+            switch_runtime_workspace,
             send_runtime_command,
-            stop_runtime
+            stop_runtime,
+            start_integrated_terminal,
+            write_integrated_terminal,
+            stop_integrated_terminal
         ])
         .run(tauri::generate_context!())
         .expect("failed to run KardecAgent Studio");

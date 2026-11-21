@@ -229,6 +229,36 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
             continue
 
+        if message.get("schema_version") == 1 and message.get("type") == "workspace.change":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            requested_root = payload.get("project_root")
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            try:
+                candidate = Path(requested_root).expanduser().resolve() if isinstance(requested_root, str) else None
+                if candidate is None or not candidate.is_dir():
+                    raise ValueError("project_root must point to an existing directory.")
+            except (OSError, RuntimeError, ValueError) as exc:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": str(exc)})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            root = candidate
+            _write({
+                "type": "workspace.changed",
+                "schema_version": 1,
+                "command_id": command_identifier,
+                "project_root": str(root),
+            })
+            continue
+
         if message.get("schema_version") == 1 and message.get("type") == "task.resume":
             command_identifier = message.get("command_id")
             payload = message.get("payload")
