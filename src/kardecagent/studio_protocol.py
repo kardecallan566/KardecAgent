@@ -425,6 +425,49 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
             del seen_command_ids[next(iter(seen_command_ids))]
 
+        # Intent routing happens before task creation. A normal question or greeting
+        # receives a chat response and never enters planning, approvals, or execution.
+        interpreter = getattr(agent, "interpret_message", None)
+        if callable(interpreter):
+            try:
+                interpretation = interpreter(root, instruction)
+            except Exception as exc:
+                _write({
+                    "type": "command.rejected",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "reason": f"Could not safely interpret the message: {exc}",
+                })
+                continue
+            intent = interpretation.get("intent")
+            if intent in {"chat", "clarify"}:
+                _write({
+                    "type": "command.accepted",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "accepted": True,
+                    "intent": intent,
+                })
+                _write({
+                    "type": "assistant.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "intent": intent,
+                    "payload": {
+                        "message": interpretation.get("response", ""),
+                        "reason": interpretation.get("reason", ""),
+                    },
+                })
+                continue
+            if intent != "task":
+                _write({
+                    "type": "command.rejected",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "reason": "Intent classifier returned an unsupported intent.",
+                })
+                continue
+
         identifier = task_id(instruction, root)
         execution_id = str(uuid.uuid4())
         _write({
