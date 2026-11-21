@@ -199,3 +199,38 @@ def test_finish_requires_evidence_for_every_completion_criterion(tmp_path: Path)
     )
     assert state.status.value == "completed"
     assert any(event.event_type == "completion_criteria_failed" for event in state.events)
+
+
+def test_intent_router_answers_questions_without_starting_a_task(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# Fixture\\nA tiny example project.", encoding="utf-8")
+    llm = FakeLLM([
+        '{"intent":"chat","response":"Este projeto é um exemplo pequeno.","reason":"The user asked for an explanation."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "O que esse projeto faz?"
+    )
+    assert result["intent"] == "chat"
+    assert "exemplo" in result["response"]
+
+
+def test_intent_router_only_marks_explicit_change_requests_as_tasks(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# Fixture", encoding="utf-8")
+    llm = FakeLLM([
+        '{"intent":"task","response":"","reason":"The user explicitly requested implementation."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Crie uma tela de login neste projeto."
+    )
+    assert result["intent"] == "task"
+    assert result["response"] == ""
+
+
+def test_intent_router_asks_for_clarification_when_request_is_ambiguous(tmp_path: Path):
+    llm = FakeLLM([
+        '{"intent":"clarify","response":"Você quer apenas sugestões ou quer que eu altere os arquivos?","reason":"The requested outcome is unclear."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Melhore isso."
+    )
+    assert result["intent"] == "clarify"
+    assert "alterar" in result["response"]
