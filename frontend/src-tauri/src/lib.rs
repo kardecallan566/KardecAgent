@@ -480,6 +480,7 @@ struct OllamaTestResult {
 
 #[tauri::command]
 fn test_ollama_connection(
+    app: tauri::AppHandle,
     ollama_base_url: String,
     llm_model: String,
     llm_timeout_seconds: f64,
@@ -495,46 +496,36 @@ fn test_ollama_connection(
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) {
         return Err("O timeout deve estar entre 10 e 900 segundos.".into());
     }
-    let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
-    let script = r#"
-import json, os, sys
-import httpx
-base = os.environ["KARDECAGENT_OLLAMA_BASE_URL"].rstrip("/")
-model = os.environ["KARDECAGENT_LLM_MODEL"]
-timeout = float(os.environ["KARDECAGENT_LLM_TIMEOUT"])
-try:
-    version_response = httpx.get(base + "/api/version", timeout=timeout)
-    version_response.raise_for_status()
-    version = version_response.json().get("version", "unknown")
-    tags_response = httpx.get(base + "/api/tags", timeout=timeout)
-    tags_response.raise_for_status()
-    models = tags_response.json().get("models", [])
-    names = [item.get("name", "") for item in models if isinstance(item, dict)]
-    if model not in names and model + ":latest" not in names:
-        raise RuntimeError("Modelo não instalado: " + model + ". Modelos disponíveis: " + (", ".join(names) or "(nenhum)"))
-    response = httpx.post(base + "/api/chat", json={"model": model, "messages": [{"role":"system","content":"Reply with exactly: KARDECAGENT_OK"},{"role":"user","content":"Health check."}],"stream":False,"keep_alive":"2m","options":{"temperature":0.0,"num_ctx":4096,"num_predict":32}}, timeout=timeout)
-    response.raise_for_status()
-    answer = (response.json().get("message") or {}).get("content", "")
-    if not isinstance(answer, str) or "KARDECAGENT_OK" not in answer:
-        raise RuntimeError("O modelo respondeu, mas não passou no teste de inferência.")
-    print(json.dumps({"ok":True,"version":version,"models":names,"model":model,"response":"Teste de inferência concluído: KARDECAGENT_OK"}))
-except Exception as exc:
-    print(json.dumps({"ok":False,"error":str(exc)}))
-    sys.exit(2)
-"#;
-    let mut command = Command::new(python);
+
+    let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
+        || std::env::var_os("KARDECAGENT_PYTHON").is_some();
+    let bundled_core = if has_python_override {
+        None
+    } else {
+        app.path().resolve("core/kardecagent-core.exe", tauri::path::BaseDirectory::Resource)
+            .ok().filter(|path| path.is_file())
+    };
+    let (executable, mut args) = if let Some(core_path) = bundled_core {
+        (core_path.into_os_string(), vec!["ollama-health".to_string()])
+    } else {
+        let (python, prefix) = resolve_python_command(python_executable.as_deref())?;
+        let mut args = prefix;
+        args.extend(["-m".into(), "kardecagent.cli".into(), "ollama-health".into()]);
+        (python, args)
+    };
+
+    let mut command = Command::new(&executable);
     configure_hidden_process(&mut command);
     let output = command
-        .args(&prefix)
-        .args(["-c", script])
+        .args(&args)
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
         .env("KARDECAGENT_LLM_MODEL", llm_model.trim())
         .env("KARDECAGENT_LLM_TIMEOUT", llm_timeout_seconds.to_string())
         .output()
-        .map_err(|error| format!("Falha ao executar o teste do Ollama: {error}"))?;
+        .map_err(|error| format!("Falha ao executar o diagnóstico do Ollama: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let result: Value = serde_json::from_str(stdout.trim())
-        .map_err(|_| format!("Resposta inválida do teste Ollama: {}", String::from_utf8_lossy(&output.stderr)))?;
+        .map_err(|_| format!("Resposta inválida do diagnóstico do Ollama: {}", String::from_utf8_lossy(&output.stderr)))?;
     if !output.status.success() {
         return Err(result.get("error").and_then(Value::as_str).unwrap_or("Falha no teste do Ollama.").to_string());
     }
