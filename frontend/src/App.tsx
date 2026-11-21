@@ -267,7 +267,7 @@ function App() {
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
         const terminalSummary = message.payload?.result_summary || message.payload?.message || (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
-        setChatMessages(items => [...items, { id: message.event_id || crypto.randomUUID(), role: "assistant", text: terminalSummary }].slice(-100));
+        setChatMessages(items => [...items, { id: message.event_id || crypto.randomUUID(), role: "assistant" as const, text: terminalSummary }].slice(-100));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: terminalSummary }].slice(-100));
         setPendingApproval(null);
         setApprovalSubmitting(false);
@@ -589,7 +589,7 @@ function App() {
     if (!projectRoot || !instruction || runtimeStatus !== "online" || runtimeBusy) return;
     const commandId = crypto.randomUUID();
     pendingInstructionCommandId.current = commandId;
-    setChatMessages(items => [...items, { id: commandId, commandId, role: "user", text: instruction, status: "sending" }].slice(-100));
+    setChatMessages(items => [...items, { id: commandId, commandId, role: "user" as const, text: instruction, status: "sending" as const }].slice(-100));
     setRuntimeBusy(true);
     setRuntimeError(null);
     try {
