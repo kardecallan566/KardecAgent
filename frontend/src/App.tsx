@@ -959,7 +959,7 @@ function App() {
                 <div className="settings-page-heading"><strong>Memória persistente do agente</strong><p>O KardecAgent guarda preferências explicitamente informadas, decisões e fatos úteis do projeto. Você pode revisar e apagar qualquer registro.</p></div>
                 <div className="settings-section">
                   <div className="diagnostic-row"><span>Registros disponíveis</span><strong>{memoryItems.length}</strong></div>
-                  <p className="settings-help">Memória do projeto fica em .kardecagent/memory.json. Preferências gerais ficam em ~/.kardecagent/memory.json. O histórico recente da conversa é local ao projeto. Credenciais e segredos não devem ser memorizados.</p>
+                  <p className="settings-help">Memória do projeto fica em .kardecagent/memory.json. Preferências gerais ficam na pasta .kardecagent do seu perfil do Windows. O histórico recente da conversa é local ao projeto. Credenciais e segredos não devem ser memorizados.</p>
                   <div className="settings-actions"><button className="settings-secondary" disabled={memoryLoading || runtimeBusy || runtimeStatus !== "online"} onClick={() => void loadMemory()}>{memoryLoading ? "Carregando..." : "Atualizar memória"}</button></div>
                   {memoryError && <div className="ollama-test-result error"><AlertCircle size={15}/><p>{memoryError}</p></div>}
                   {memoryItems.length === 0 && !memoryLoading && <div className="settings-help">Nenhuma memória registrada ainda. Ao longo das conversas, o agente poderá guardar preferências e decisões estáveis que você declarar explicitamente.</div>}
