@@ -589,7 +589,7 @@ function App() {
   async function runCurrentFile() {
     if (!projectRoot || !openedPath || runningFile) return;
     const extension = openedPath.split(".").pop()?.toLowerCase() || "";
-    const supported = ["py","js","mjs","cjs","jsx","ts","mts","cts","tsx","java","go","rs","php","rb","c","cpp","cc","cxx","kt","kts","cs","swift","dart","lua","sh","bash","pl","r","scala","ex","exs","ps1"];
+    const supported = ["py","js","mjs","cjs","jsx","ts","mts","cts","tsx","java","go","rs","php","rb","c","cpp","cc","cxx","kt","kts","swift","dart","lua","sh","bash","pl","r","scala","ex","exs","ps1"];
     if (!supported.includes(extension)) { setProjectError("Este tipo de arquivo ainda não possui executor integrado."); return; }
     const approved = window.confirm("Autorizar a execução deste arquivo?\n\n" + openedPath + "\n\nO código poderá ler e alterar arquivos do projeto e acessar recursos disponíveis ao seu usuário. Execute apenas código confiável.");
     if (!approved) return;
