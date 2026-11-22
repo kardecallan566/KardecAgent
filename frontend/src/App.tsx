@@ -354,12 +354,14 @@ function App() {
   useEffect(() => {
     const lastProject = localStorage.getItem("kardecagent.studio.lastProject");
     if (!lastProject) return;
-    void activateProject(lastProject).then(() => {
+    void (async () => {
+      const restored = await activateProject(lastProject);
+      if (!restored) return;
       setRuntimeEvents(items => [
         ...items,
         { id: crypto.randomUUID(), type: "workspace.restored", message: "Último projeto restaurado: " + lastProject }
       ].slice(-100));
-    });
+    })();
   }, []);
 
   async function startTerminal() {
@@ -453,8 +455,8 @@ function App() {
     } catch (error) { setProjectError("Falha ao salvar os arquivos: " + String(error)); }
   }
 
-  async function activateProject(selected: string) {
-    if (projectRoot === selected) return;
+  async function activateProject(selected: string): Promise<boolean> {
+    if (projectRoot === selected) return true;
     if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace."); return; }
     if (projectRoot && projectRoot !== selected && openTabs.some(tab => tab.dirty)) {
       const discard = window.confirm("Existem alterações não salvas. Deseja descartar essas alterações e abrir outro projeto? (Use Salvar tudo antes, se quiser preservá-las.)");
@@ -483,10 +485,12 @@ function App() {
           llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
         });
       } else setRuntimeStatus("offline");
+      return true;
     } catch (error) {
       if (startupTimer.current) window.clearTimeout(startupTimer.current);
       startupTimer.current = null;
       setProjectError(String(error)); setRuntimeStatus("offline"); setRuntimeError(String(error));
+      return false;
     }
   }
 
