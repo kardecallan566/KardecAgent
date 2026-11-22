@@ -271,6 +271,84 @@ struct ProjectRunResult {
     timed_out: bool,
 }
 
+#[derive(Serialize)]
+struct QualityResult {
+    file: String,
+    language: String,
+    tool: String,
+    available: bool,
+    exit_code: i32,
+    output: String,
+    fixed: bool,
+}
+
+#[tauri::command]
+fn quality_project_file(
+    project_root: String,
+    file_path: String,
+    fix: bool,
+    approved: bool,
+) -> Result<QualityResult, String> {
+    if fix && !approved {
+        return Err("Correção automática não autorizada pelo usuário.".into());
+    }
+    let path = resolve_workspace_path(&project_root, &file_path)?;
+    if !path.is_file() {
+        return Err("Selecione um arquivo válido para analisar.".into());
+    }
+    let root = Path::new(&project_root).canonicalize().map_err(|e| e.to_string())?;
+    let extension = path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase();
+    let relative = path.strip_prefix(&root).map_err(|_| "Arquivo fora do projeto.")?;
+    let relative = relative.to_string_lossy().into_owned();
+    let (language, tool, args): (&str, &str, Vec<String>) = match extension.as_str() {
+        "py" | "pyi" => ("Python", "ruff", if fix { vec!["check".into(), "--fix".into(), relative.clone()] } else { vec!["check".into(), relative.clone()] }),
+        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" => ("JavaScript/TypeScript", "eslint", if fix { vec!["--fix".into(), relative.clone()] } else { vec![relative.clone()] }),
+        "go" => ("Go", "gofmt", if fix { vec!["-w".into(), relative.clone()] } else { vec!["-d".into(), relative.clone()] }),
+        "rs" => ("Rust", "rustfmt", if fix { vec![relative.clone()] } else { vec!["--check".into(), relative.clone()] }),
+        "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => ("C/C++", "clang-format", if fix { vec!["-i".into(), relative.clone()] } else { vec!["--dry-run".into(), "--Werror".into(), relative.clone()] }),
+        "java" => ("Java", "google-java-format", if fix { vec!["-i".into(), relative.clone()] } else { vec!["--dry-run".into(), "--set-exit-if-changed".into(), relative.clone()] }),
+        "php" => ("PHP", if fix { "php-cs-fixer" } else { "php" }, if fix { vec!["fix".into(), relative.clone()] } else { vec!["-l".into(), relative.clone()] }),
+        "rb" => ("Ruby", "rubocop", if fix { vec!["--autocorrect".into(), relative.clone()] } else { vec![relative.clone()] }),
+        "sh" | "bash" => ("Shell", if fix { "shfmt" } else { "shellcheck" }, if fix { vec!["-w".into(), relative.clone()] } else { vec![relative.clone()] }),
+        "html" | "htm" | "css" | "scss" | "json" | "md" | "mdx" | "yaml" | "yml" => ("Web/Config", "prettier", if fix { vec!["--write".into(), relative.clone()] } else { vec!["--check".into(), relative.clone()] }),
+        _ => return Ok(QualityResult {
+            file: file_path, language: "Não identificado".into(), tool: "—".into(),
+            available: false, exit_code: -1,
+            output: "A IDE ainda não possui uma regra de lint/correção configurada para esta extensão.".into(),
+            fixed: false,
+        }),
+    };
+
+    let mut command = Command::new(tool);
+    configure_hidden_process(&mut command);
+    let output = match command.args(&args).current_dir(&root).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(QualityResult {
+                file: file_path, language: language.into(), tool: tool.into(),
+                available: false, exit_code: -1,
+                output: format!("A ferramenta '{}' não está instalada ou não está no PATH. Instale-a no ambiente do projeto e tente novamente.", tool),
+                fixed: false,
+            });
+        }
+        Err(error) => return Err(format!("Não foi possível iniciar {}: {}", tool, error)),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = [stdout.trim(), stderr.trim()].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
+    let success = output.status.success();
+    let message = if combined.is_empty() {
+        if success { if fix { "Correções aplicadas; nenhuma saída adicional." } else { "Nenhum problema encontrado." } }
+        else { "A ferramenta encontrou problemas, mas não retornou detalhes." }
+    } else { "" };
+    Ok(QualityResult {
+        file: file_path, language: language.into(), tool: tool.into(), available: true,
+        exit_code: output.status.code().unwrap_or(-1),
+        output: if combined.is_empty() { message.into() } else { combined },
+        fixed: fix && success,
+    })
+}
+
 #[tauri::command]
 fn run_project_file(project_root: String, file_path: String, approved: bool) -> Result<ProjectRunResult, String> {
     if !approved { return Err("Execução não autorizada pelo usuário.".into()); }
@@ -737,6 +815,7 @@ pub fn run() {
             create_project_file,
             create_project_directory,
             run_project_file,
+            quality_project_file,
             start_runtime,
             runtime_diagnostics,
             test_ollama_connection,
