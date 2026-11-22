@@ -198,10 +198,16 @@ jobs:
           $assets = Get-ChildItem "dist/assets" -Filter "*.js"
           if (!$assets -or $assets.Count -eq 0) { throw "No compiled frontend JavaScript bundle was generated." }
           $bundle = ($assets | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
-          foreach ($marker in @("KardecAgent", "Gestor de tarefas", "Instrução para o gestor", "Configurações do KardecAgent Studio")) {
+          foreach ($marker in @("KardecAgent", "Gestor de tarefas", "Instrução para o gestor", "Configurações do KardecAgent Studio", "Não foi possível iniciar a interface", "Tentar novamente")) {
             if (!$bundle.Contains($marker)) { throw "Compiled UI is missing expected marker: $marker" }
           }
-          Write-Host "Verified Studio UI bundle: $($assets.Count) JavaScript asset(s)"
+          foreach ($languageFile in @("src-tauri/windows/PortugueseBR.nsh", "src-tauri/windows/English.nsh")) {
+            $language = Get-Content $languageFile -Raw
+            foreach ($key in @("choowHowToInstall", "createDesktop", "dontUninstall", "uninstallBeforeInstalling")) {
+              if ($language -notmatch "LangString\s+$key\s") { throw "$languageFile is missing NSIS language key: $key" }
+            }
+          }
+          Write-Host "Verified Studio UI bundle and NSIS maintenance/finish-page translations."
           
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
