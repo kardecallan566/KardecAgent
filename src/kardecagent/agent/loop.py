@@ -71,6 +71,19 @@ class AgentLoop:
         return bool(action.search(normalized))
 
     @staticmethod
+    def _local_datetime_response(message: str) -> str | None:
+        normalized = AgentLoop._normalized_message(message)
+        date_terms = ("que dia e hoje", "qual a data de hoje", "data de hoje", "dia da semana", "que horas sao", "horario atual", "data atual")
+        if not any(term in normalized for term in date_terms):
+            return None
+        now = datetime.now().astimezone()
+        weekdays = ("segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo")
+        months = ("janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro")
+        if "hora" in normalized or "horario" in normalized:
+            return f"Agora são {now:%H:%M} (horário local). Hoje é {now.day} de {months[now.month - 1]} de {now.year}, {weekdays[now.weekday()]}."
+        return f"Hoje é {weekdays[now.weekday()]}, {now.day} de {months[now.month - 1]} de {now.year}."
+
+    @staticmethod
     def _project_brief(root: Path) -> dict:
         profile = detect_project(root)
         files = project_snapshot(root, limit=120)
@@ -137,6 +150,14 @@ class AgentLoop:
         """Classify, answer and learn from a message without entering task execution."""
         root = project_root.resolve()
         store = MemoryStore(root)
+        local_datetime = self._local_datetime_response(message)
+        if local_datetime is not None:
+            try:
+                store.append_conversation(message, local_datetime)
+            except OSError:
+                pass
+            return {"intent": "chat", "response": local_datetime, "reason": "Data e horário obtidos do relógio local do sistema."}
+
         greeting = self._greeting_response(message)
         if greeting is not None:
             brief = self._project_brief(root)
