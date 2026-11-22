@@ -8,8 +8,10 @@ from kardecagent.llm.client import LLMResponse
 class FakeLLM:
     def __init__(self, responses: list[str]) -> None:
         self.responses = iter(responses)
+        self.messages = []
 
     def chat(self, messages: list[dict]) -> LLMResponse:
+        self.messages.append(messages)
         try:
             return LLMResponse(next(self.responses), {})
         except StopIteration:
@@ -265,7 +267,7 @@ def test_intent_router_persists_explicit_memory_updates(tmp_path: Path, monkeypa
 
 
 def test_intent_router_answers_questions_without_starting_a_task(tmp_path: Path):
-    (tmp_path / "README.md").write_text("# Fixture\\nA tiny example project.", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Fixture\nA tiny example project.", encoding="utf-8")
     llm = FakeLLM([
         '{"intent":"chat","response":"Este projeto é um exemplo pequeno.","reason":"The user asked for an explanation."}'
     ])
