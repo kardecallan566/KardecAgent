@@ -9,8 +9,15 @@ on:
       - 'frontend/**'
       - '.github/workflows/studio-windows-build.yml'
   push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
     tags:
       - "studio-v*"
+    paths:
+      - "frontend/**"
+      - ".github/workflows/studio-windows-build.yml"
 
 permissions:
   contents: read
