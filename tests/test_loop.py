@@ -231,6 +231,23 @@ def test_intent_router_answers_simple_greeting_without_calling_the_model(tmp_pat
     assert "Olá!" in result["response"]
 
 
+def test_intent_router_does_not_turn_how_to_questions_into_tasks(tmp_path: Path):
+    llm = FakeLLM([
+        '{"intent":"task","response":"","reason":"The model mistook a how-to question for an action."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Como criar uma tela de login neste projeto?"
+    )
+    assert result["intent"] == "clarify"
+    assert "alterações" in result["response"]
+
+
+def test_intent_router_accepts_a_polite_direct_action_request():
+    assert AgentLoop._has_explicit_action_request("Pode criar uma tela de login?")
+    assert AgentLoop._has_explicit_action_request("Por favor, implemente o tema escuro.")
+    assert not AgentLoop._has_explicit_action_request("Como implementar o tema escuro?")
+
+
 def test_intent_router_downgrades_task_without_explicit_action_verb(tmp_path: Path):
     llm = FakeLLM([
         '{"intent":"task","response":"","reason":"The model guessed a task."}'
