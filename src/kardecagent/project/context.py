@@ -1,6 +1,6 @@
 from pathlib import Path
 
-IGNORED_DIRS = {".git", ".hg", ".svn", ".venv", "venv", "node_modules", "dist", "build", ".next", ".expo", "__pycache__", ".pytest_cache", ".mypy_cache"}
+IGNORED_DIRS = {".git", ".hg", ".svn", ".venv", "venv", "node_modules", "dist", "build", ".next", ".expo", "__pycache__", ".kardecagent", ".pytest_cache", ".mypy_cache"}
 
 def iter_project_files(root: Path):
     for path in root.rglob("*"):

@@ -6,8 +6,11 @@ on:
     branches:
       - main
     paths:
-      - 'frontend/**'
-      - '.github/workflows/studio-windows-build.yml'
+      - "frontend/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "scripts/studio_core_entry.py"
+      - ".github/workflows/studio-windows-build.yml"
   push:
     branches:
       - main
@@ -17,6 +20,9 @@ on:
       - "studio-v*"
     paths:
       - "frontend/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "scripts/studio_core_entry.py"
       - ".github/workflows/studio-windows-build.yml"
 
 permissions:
@@ -30,13 +36,27 @@ jobs:
   windows-installer:
     name: Build Windows installer
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: frontend
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Set up Python for the bundled Core
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Package and smoke-test the standalone Python Core
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .. pyinstaller
+          python -m PyInstaller --noconfirm --clean --onefile --name kardecagent-core --paths ../src --collect-all kardecagent --collect-all httpx --copy-metadata kardecagent --distpath src-tauri/core-dist --workpath ../.pyinstaller-work --specpath ../.pyinstaller-spec ../scripts/studio_core_entry.py
+          python ../scripts/smoke_studio_core.py src-tauri/core-dist/kardecagent-core.exe
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -90,6 +110,83 @@ jobs:
           $writer.Write($png)
           $writer.Dispose()
           Write-Host "Generated $icoPath"
+      - name: Generate KardecAgent installer artwork
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $assetDir = "src-tauri/windows"
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+
+          # Compact NSIS header: 150 x 57 px.
+          $header = New-Object System.Drawing.Bitmap 150, 57
+          $headerGraphics = [System.Drawing.Graphics]::FromImage($header)
+          $headerGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $headerRect = New-Object System.Drawing.Rectangle 0, 0, 150, 57
+          $headerGradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+            $headerRect,
+            [System.Drawing.Color]::FromArgb(15, 23, 42),
+            [System.Drawing.Color]::FromArgb(8, 145, 178),
+            0
+          )
+          $headerGraphics.FillRectangle($headerGradient, $headerRect)
+          $headerFont = New-Object System.Drawing.Font "Segoe UI", 21, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+          $headerSmall = New-Object System.Drawing.Font "Segoe UI", 8, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+          $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+          $cyan = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(103, 232, 249))
+          $headerGraphics.DrawString("K", $headerFont, $cyan, 10, 9)
+          $headerGraphics.DrawString("KARDECAGENT", $headerSmall, $white, 43, 15)
+          $headerGraphics.DrawString("STUDIO", $headerSmall, $cyan, 43, 29)
+          $header.Save((Join-Path $assetDir "installer-header.bmp"), [System.Drawing.Imaging.ImageFormat]::Bmp)
+          $headerGraphics.Dispose()
+          $headerGradient.Dispose()
+          $headerFont.Dispose()
+          $headerSmall.Dispose()
+          $white.Dispose()
+          $cyan.Dispose()
+          $header.Dispose()
+
+          # NSIS welcome/sidebar artwork: 164 x 314 px.
+          $sidebar = New-Object System.Drawing.Bitmap 164, 314
+          $sidebarGraphics = [System.Drawing.Graphics]::FromImage($sidebar)
+          $sidebarGraphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $sidebarRect = New-Object System.Drawing.Rectangle 0, 0, 164, 314
+          $sidebarGradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+            $sidebarRect,
+            [System.Drawing.Color]::FromArgb(10, 18, 35),
+            [System.Drawing.Color]::FromArgb(8, 90, 112),
+            45
+          )
+          $sidebarGraphics.FillRectangle($sidebarGradient, $sidebarRect)
+          $accent = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(30, 103, 232, 249))
+          $sidebarGraphics.FillEllipse($accent, 83, -48, 145, 145)
+          $sidebarGraphics.FillEllipse($accent, -78, 224, 180, 180)
+          $logoFont = New-Object System.Drawing.Font "Segoe UI", 48, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+          $brandFont = New-Object System.Drawing.Font "Segoe UI", 13, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+          $bodyFont = New-Object System.Drawing.Font "Segoe UI", 9, ([System.Drawing.FontStyle]::Regular), ([System.Drawing.GraphicsUnit]::Pixel)
+          $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+          $muted = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(190, 226, 232, 240))
+          $cyan = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(103, 232, 249))
+          $sidebarGraphics.DrawString("K", $logoFont, $cyan, 18, 36)
+          $sidebarGraphics.DrawString("KARDEC", $brandFont, $white, 18, 112)
+          $sidebarGraphics.DrawString("AGENT STUDIO", $brandFont, $cyan, 18, 132)
+          $sidebarGraphics.DrawLine((New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(90, 103, 232, 249), 1)), 18, 165, 145, 165)
+          $sidebarGraphics.DrawString("Seu ambiente local", $bodyFont, $white, 18, 187)
+          $sidebarGraphics.DrawString("de desenvolvimento", $bodyFont, $white, 18, 204)
+          $sidebarGraphics.DrawString("com inteligência artificial.", $bodyFont, $muted, 18, 221)
+          $sidebarGraphics.DrawString("PRIVACIDADE  •  CONTROLE  •  IA", $bodyFont, $cyan, 18, 276)
+          $sidebar.Save((Join-Path $assetDir "installer-sidebar.bmp"), [System.Drawing.Imaging.ImageFormat]::Bmp)
+          $sidebarGraphics.Dispose()
+          $sidebarGradient.Dispose()
+          $accent.Dispose()
+          $logoFont.Dispose()
+          $brandFont.Dispose()
+          $bodyFont.Dispose()
+          $white.Dispose()
+          $muted.Dispose()
+          $cyan.Dispose()
+          $sidebar.Dispose()
+          Write-Host "Generated KardecAgent NSIS artwork in $assetDir"
+
       - name: Build Studio Windows installers
         run: npm run tauri build
 

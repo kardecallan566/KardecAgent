@@ -10,6 +10,7 @@ from .agent.loop import AgentLoop
 from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
+from .agent.memory import MemoryStore
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -132,7 +133,11 @@ def _approval(
 
 
 def run_stdio(project_root: Path, agent: AgentLoop) -> int:
-    """Serve a bounded JSONL command/event stream for the desktop Studio."""
+    """Serve a bounded UTF-8 JSONL command/event stream for the desktop Studio."""
+    for stream in (sys.stdin, sys.stdout):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="strict")
     root = project_root.resolve()
     seen_command_ids: dict[str, None] = {}
     _write({
@@ -227,6 +232,74 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             return 0
         except StudioProtocolError as exc:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
+            continue
+
+        if message.get("schema_version") == 1 and message.get("type") == "workspace.change":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            requested_root = payload.get("project_root")
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            try:
+                candidate = Path(requested_root).expanduser().resolve() if isinstance(requested_root, str) else None
+                if candidate is None or not candidate.is_dir():
+                    raise ValueError("project_root must point to an existing directory.")
+            except (OSError, RuntimeError, ValueError) as exc:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": str(exc)})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            root = candidate
+            _write({
+                "type": "workspace.changed",
+                "schema_version": 1,
+                "command_id": command_identifier,
+                "project_root": str(root),
+            })
+            continue
+
+        if message.get("schema_version") == 1 and message.get("type") in {"memory.list", "memory.forget"}:
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            requested_root = payload.get("project_root")
+            try:
+                workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+            except (OSError, RuntimeError):
+                workspace_matches = False
+            if not workspace_matches:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier,
+                        "reason": "project_root does not match the active runtime workspace."})
+                continue
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier,
+                        "reason": "command_id has already been processed."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            store = MemoryStore(root)
+            if message.get("type") == "memory.forget":
+                identifier = payload.get("memory_id")
+                if not isinstance(identifier, str) or not identifier.strip():
+                    _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier,
+                            "reason": "memory_id is required."})
+                    continue
+                removed = store.forget(identifier)
+                _write({"type": "memory.updated", "schema_version": 1, "command_id": command_identifier,
+                        "payload": {"removed": removed, "items": store.all_items()}})
+            else:
+                _write({"type": "memory.snapshot", "schema_version": 1, "command_id": command_identifier,
+                        "payload": {"items": store.all_items()}})
             continue
 
         if message.get("schema_version") == 1 and message.get("type") == "task.resume":
@@ -324,6 +397,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
 
                 state = agent.resume(root, persisted_state.task, event_callback=forward_resumed_event)
                 summary = state.events[-1].message if state.events else f"Task ended with status {state.status.value}."
+                try:
+                    MemoryStore(root).append_conversation(persisted_state.task, summary)
+                except OSError:
+                    pass
                 completed = state.status.value == "completed"
                 _write({
                     "type": "task.completed" if completed else "task.failed",
@@ -395,6 +472,62 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
             del seen_command_ids[next(iter(seen_command_ids))]
 
+        # Intent routing happens before task creation. A normal question or greeting
+        # receives a chat response and never enters planning, approvals, or execution.
+        interpreter = getattr(agent, "interpret_message", None)
+        if callable(interpreter):
+            try:
+                interpretation = interpreter(root, instruction)
+            except Exception as exc:
+                # Classifier/parser failures are recoverable chat errors, not rejected commands.
+                # Never create a task when intent could not be interpreted safely.
+                _write({
+                    "type": "command.accepted",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "accepted": True,
+                    "intent": "clarify",
+                })
+                _write({
+                    "type": "assistant.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "intent": "clarify",
+                    "payload": {
+                        "message": "Tive uma falha ao interpretar esta mensagem, mas a conversa continua ativa. Tente reformular a pergunta. Nenhuma tarefa ou alteração foi iniciada.",
+                        "reason": f"Recoverable intent parsing error: {exc}",
+                    },
+                })
+                continue
+            intent = interpretation.get("intent")
+            if intent in {"chat", "clarify"}:
+                _write({
+                    "type": "command.accepted",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "accepted": True,
+                    "intent": intent,
+                })
+                _write({
+                    "type": "assistant.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "intent": intent,
+                    "payload": {
+                        "message": interpretation.get("response", ""),
+                        "reason": interpretation.get("reason", ""),
+                    },
+                })
+                continue
+            if intent != "task":
+                _write({
+                    "type": "command.rejected",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "reason": "Intent classifier returned an unsupported intent.",
+                })
+                continue
+
         identifier = task_id(instruction, root)
         execution_id = str(uuid.uuid4())
         _write({
@@ -443,6 +576,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 state.events[-1].message if state.events
                 else f"Task ended with status {state.status.value}."
             )
+            try:
+                MemoryStore(root).append_conversation(instruction, result_summary)
+            except OSError:
+                pass
             _write({
                 "type": "task.completed" if state.status.value == "completed" else "task.failed",
                 "schema_version": 1,

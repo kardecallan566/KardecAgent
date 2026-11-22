@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from kardecagent.agent.loop import AgentLoop
@@ -8,8 +9,10 @@ from kardecagent.llm.client import LLMResponse
 class FakeLLM:
     def __init__(self, responses: list[str]) -> None:
         self.responses = iter(responses)
+        self.messages = []
 
     def chat(self, messages: list[dict]) -> LLMResponse:
+        self.messages.append(messages)
         try:
             return LLMResponse(next(self.responses), {})
         except StopIteration:
@@ -199,3 +202,134 @@ def test_finish_requires_evidence_for_every_completion_criterion(tmp_path: Path)
     )
     assert state.status.value == "completed"
     assert any(event.event_type == "completion_criteria_failed" for event in state.events)
+
+
+def test_intent_router_answers_current_date_without_model_guessing(tmp_path: Path):
+    class ExplodingLLM:
+        def chat(self, messages):
+            raise AssertionError("date and time must come from the local system clock")
+
+    result = AgentLoop(ExplodingLLM(), Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Que dia é hoje?"
+    )
+    assert result["intent"] == "chat"
+    assert "Hoje é" in result["response"]
+    assert any(month in result["response"] for month in (
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    ))
+
+
+def test_intent_router_answers_simple_greeting_without_calling_the_model(tmp_path: Path):
+    class ExplodingLLM:
+        def chat(self, messages):
+            raise AssertionError("a plain greeting must not call the LLM")
+
+    result = AgentLoop(ExplodingLLM(), Settings(max_iterations=2)).interpret_message(
+        tmp_path, "oi"
+    )
+    assert result["intent"] == "chat"
+    assert "Olá!" in result["response"]
+
+
+def test_intent_router_does_not_turn_how_to_questions_into_tasks(tmp_path: Path):
+    llm = FakeLLM([
+        '{"intent":"task","response":"","reason":"The model mistook a how-to question for an action."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Como criar uma tela de login neste projeto?"
+    )
+    assert result["intent"] == "clarify"
+    assert "alterações" in result["response"]
+
+
+def test_intent_router_accepts_a_polite_direct_action_request():
+    assert AgentLoop._has_explicit_action_request("Pode criar uma tela de login?")
+    assert AgentLoop._has_explicit_action_request("Por favor, implemente o tema escuro.")
+    assert not AgentLoop._has_explicit_action_request("Como implementar o tema escuro?")
+
+
+def test_intent_router_downgrades_task_without_explicit_action_verb(tmp_path: Path):
+    llm = FakeLLM([
+        '{"intent":"task","response":"","reason":"The model guessed a task."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Preciso de uma nova tela para o aplicativo."
+    )
+    assert result["intent"] == "clarify"
+    assert "alterações" in result["response"]
+
+
+def test_intent_router_uses_project_files_and_persistent_memory(tmp_path: Path, monkeypatch):
+    (tmp_path / "README.md").write_text(
+        "# Atlas\nA scheduling app for independent music teachers.", encoding="utf-8"
+    )
+    user_memory = tmp_path / "user-memory.json"
+    from kardecagent.agent.memory import MemoryStore
+    MemoryStore(tmp_path, user_path=user_memory).remember(
+        scope="project", category="fact",
+        content="O projeto atende professores independentes de música."
+    )
+    llm = FakeLLM([
+        '{"intent":"chat","response":"O Atlas organiza horários de professores de música.","reason":"README evidence."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "O que esse aplicativo faz?"
+    )
+    assert result["intent"] == "chat"
+    sent_context = json.loads(llm.messages[-1][-1]["content"])
+    assert "A scheduling app for independent music teachers." in sent_context["important_file_contents"][0]["content"]
+    assert sent_context["persistent_memory"][0]["content"].startswith("O projeto atende")
+
+
+def test_intent_router_persists_explicit_memory_updates(tmp_path: Path, monkeypatch):
+    from kardecagent.agent.memory import MemoryStore
+    monkeypatch.setattr(
+        "kardecagent.agent.loop.MemoryStore",
+        lambda root: MemoryStore(root, user_path=tmp_path / "user-memory.json"),
+    )
+    llm = FakeLLM([
+        '{"intent":"chat","response":"Vou considerar isso nas próximas conversas.","reason":"Preference stated.","memory_updates":[{"scope":"user","category":"preference","content":"Prefiro explicações técnicas em português."}]}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Prefiro explicações técnicas em português."
+    )
+    assert result["intent"] == "chat"
+    items = MemoryStore(tmp_path, user_path=tmp_path / "user-memory.json").all_items()
+    assert len(items) == 1
+    assert items[0]["scope"] == "user"
+
+
+def test_intent_router_answers_questions_without_starting_a_task(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# Fixture\nA tiny example project.", encoding="utf-8")
+    llm = FakeLLM([
+        '{"intent":"chat","response":"Este projeto é um exemplo pequeno.","reason":"The user asked for an explanation."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "O que esse projeto faz?"
+    )
+    assert result["intent"] == "chat"
+    assert "exemplo" in result["response"]
+
+
+def test_intent_router_only_marks_explicit_change_requests_as_tasks(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# Fixture", encoding="utf-8")
+    llm = FakeLLM([
+        '{"intent":"task","response":"","reason":"The user explicitly requested implementation."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Crie uma tela de login neste projeto."
+    )
+    assert result["intent"] == "task"
+    assert result["response"] == ""
+
+
+def test_intent_router_asks_for_clarification_when_request_is_ambiguous(tmp_path: Path):
+    llm = FakeLLM([
+        '{"intent":"clarify","response":"Você quer apenas sugestões ou quer que eu altere os arquivos?","reason":"The requested outcome is unclear."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Melhore isso."
+    )
+    assert result["intent"] == "clarify"
+    assert "arquivos" in result["response"]

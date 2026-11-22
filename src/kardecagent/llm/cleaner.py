@@ -42,7 +42,7 @@ def extract_json_payload(content: str) -> Any:
 
     # 1. Direct JSON parse
     try:
-        return json.loads(cleaned)
+        return json.loads(cleaned, strict=False)
     except json.JSONDecodeError:
         pass
 
@@ -69,7 +69,7 @@ def extract_json_payload(content: str) -> Any:
     # First attempt: parse extracted candidates directly
     for candidate in candidates:
         try:
-            return json.loads(candidate)
+            return json.loads(candidate, strict=False)
         except json.JSONDecodeError:
             pass
 
@@ -77,13 +77,13 @@ def extract_json_payload(content: str) -> Any:
     for candidate in candidates:
         try:
             repaired = repair_json_string(candidate)
-            return json.loads(repaired)
+            return json.loads(repaired, strict=False)
         except json.JSONDecodeError:
             pass
 
     # Third attempt: direct parse on repaired full text
     try:
-        return json.loads(repair_json_string(cleaned))
+        return json.loads(repair_json_string(cleaned), strict=False)
     except json.JSONDecodeError:
         pass
 

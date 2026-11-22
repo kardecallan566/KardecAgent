@@ -106,6 +106,40 @@ def test_run_stdio_restores_persisted_task_history_without_resuming(monkeypatch,
     assert "interrompida" in terminal["payload"]["message"].lower()
 
 
+def test_run_stdio_switches_workspace_without_restarting_agent(monkeypatch, tmp_path):
+    other_root = tmp_path / "other-project"
+    other_root.mkdir()
+    commands = [
+        {
+            "type": "workspace.change",
+            "schema_version": 1,
+            "command_id": "workspace-switch-1",
+            "payload": {"project_root": str(other_root)},
+        }
+    ]
+    monkeypatch.setattr(
+        studio_protocol.sys,
+        "stdin",
+        io.StringIO("".join(json.dumps(item) + "\n" for item in commands)),
+    )
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4,
+            max_command_output_chars=1200,
+            llm_timeout_seconds=30.0,
+            command_timeout_seconds=15.0,
+        )
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    changed = next(item for item in messages if item["type"] == "workspace.changed")
+    assert changed["command_id"] == "workspace-switch-1"
+    assert changed["project_root"] == str(other_root.resolve())
+
+
 def test_run_stdio_resumes_a_persisted_task_and_streams_new_events(monkeypatch, tmp_path):
     persisted_state = SimpleNamespace(
         task="resume this task",
@@ -181,4 +215,132 @@ def test_run_stdio_rejects_resume_for_unknown_persisted_task(monkeypatch, tmp_pa
 
     assert rejected["type"] == "command.rejected"
     assert "not found" in rejected["reason"].lower()
+    assert not any(item["type"] == "task.created" for item in messages)
+
+
+def test_run_stdio_memory_snapshot_and_forget_commands(monkeypatch, tmp_path):
+    from kardecagent.agent.memory import MemoryStore
+    user_memory = tmp_path / "user-memory.json"
+    store = MemoryStore(tmp_path, user_path=user_memory)
+    item = store.remember(
+        scope="project", category="decision",
+        content="O projeto utiliza Expo Router para navegação."
+    )
+    assert item is not None
+    monkeypatch.setattr(
+        studio_protocol, "MemoryStore",
+        lambda root: MemoryStore(root, user_path=user_memory),
+    )
+    commands = [
+        {"type": "memory.list", "schema_version": 1, "command_id": "memory-list",
+         "payload": {"project_root": str(tmp_path)}},
+        {"type": "memory.forget", "schema_version": 1, "command_id": "memory-forget",
+         "payload": {"project_root": str(tmp_path), "memory_id": item["id"]}},
+    ]
+    monkeypatch.setattr(
+        studio_protocol.sys, "stdin",
+        io.StringIO("".join(json.dumps(command, ensure_ascii=False) + "\n" for command in commands)),
+    )
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4, max_command_output_chars=1200,
+            llm_timeout_seconds=30.0, command_timeout_seconds=15.0,
+        )
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    snapshot = next(item for item in messages if item["type"] == "memory.snapshot")
+    updated = next(item for item in messages if item["type"] == "memory.updated")
+    assert snapshot["payload"]["items"][0]["id"] == item["id"]
+    assert updated["payload"]["removed"] is True
+    assert updated["payload"]["items"] == []
+
+
+def test_run_stdio_writes_non_ascii_protocol_text_without_escaping(monkeypatch, tmp_path):
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+    studio_protocol._write({"type": "assistant.response", "payload": {"message": "Olá, você está conectado."}})
+    encoded = output.getvalue().encode("utf-8")
+    assert "Olá, você está conectado.".encode("utf-8") in encoded
+    assert "Ol\\u00e1" not in output.getvalue()
+
+
+def test_run_stdio_routes_chat_without_creating_or_running_a_task(monkeypatch, tmp_path):
+    command = {
+        "type": "task.submit",
+        "schema_version": 1,
+        "command_id": "chat-command",
+        "payload": {"instruction": "Oi, o que esse projeto faz?", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4,
+            max_command_output_chars=1200,
+            llm_timeout_seconds=30.0,
+            command_timeout_seconds=15.0,
+        )
+
+        def __init__(self):
+            self.run_calls = 0
+
+        def interpret_message(self, root, instruction):
+            assert root == tmp_path.resolve()
+            assert instruction == "Oi, o que esse projeto faz?"
+            return {"intent": "chat", "response": "Olá! Posso explicar o projeto.", "reason": "Greeting and question."}
+
+        def run(self, *args, **kwargs):
+            self.run_calls += 1
+            raise AssertionError("chat must never enter task execution")
+
+    fake_agent = FakeAgent()
+    assert studio_protocol.run_stdio(tmp_path, fake_agent) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    accepted = next(item for item in messages if item.get("type") == "command.accepted")
+    reply = next(item for item in messages if item.get("type") == "assistant.response")
+
+    assert accepted["command_id"] == "chat-command"
+    assert accepted["intent"] == "chat"
+    assert reply["payload"]["message"] == "Olá! Posso explicar o projeto."
+    assert fake_agent.run_calls == 0
+    assert not any(item["type"] == "task.created" for item in messages)
+    assert not any(item["type"] == "approval.requested" for item in messages)
+
+def test_run_stdio_recovers_classifier_exceptions_as_assistant_responses(monkeypatch, tmp_path):
+    command = {
+        "type": "task.submit",
+        "schema_version": 1,
+        "command_id": "classifier-error",
+        "payload": {"instruction": "Quanto é 5+4?", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + chr(10)))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4, max_command_output_chars=1200,
+            llm_timeout_seconds=30.0, command_timeout_seconds=15.0,
+        )
+
+        def interpret_message(self, root, instruction):
+            raise ValueError("invalid JSON from classifier")
+
+        def run(self, *args, **kwargs):
+            raise AssertionError("an invalid classifier response must never create a task")
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    accepted = next(item for item in messages if item.get("command_id") == "classifier-error")
+    reply = next(item for item in messages if item["type"] == "assistant.response")
+    assert accepted["type"] == "command.accepted"
+    assert accepted["intent"] == "clarify"
+    assert reply["intent"] == "clarify"
+    assert "conversa continua ativa" in reply["payload"]["message"]
     assert not any(item["type"] == "task.created" for item in messages)
