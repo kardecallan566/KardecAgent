@@ -361,7 +361,7 @@ fn run_project_file(project_root: String, file_path: String, approved: bool) -> 
         "ts" | "mts" | "cts" | "tsx" => "TypeScript", "java" => "Java",
         "go" => "Go", "rs" => "Rust", "php" => "PHP", "rb" => "Ruby",
         "c" => "C", "cpp" | "cc" | "cxx" => "C++",
-        "kt" | "kts" => "Kotlin", "cs" => "C#", "swift" => "Swift",
+        "kt" | "kts" => "Kotlin", "swift" => "Swift",
         "dart" => "Dart", "lua" => "Lua", "sh" | "bash" => "Shell",
         "pl" => "Perl", "r" => "R", "scala" => "Scala", "ex" | "exs" => "Elixir",
         "ps1" => "PowerShell",
