@@ -152,13 +152,16 @@ class AgentLoop:
         files = project_snapshot(root, limit=80)
         preferred = [
             "README.md", "readme.md", "package.json", "app.json", "app.config.ts",
+            "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "build.gradle.kts",
+            "composer.json", "Gemfile", "pubspec.yaml", "Package.swift", "CMakeLists.txt",
             "app.config.js", "tsconfig.json", "pyproject.toml", "requirements.txt",
             "index.ts", "index.js", "App.tsx", "App.jsx", "src/App.tsx",
             "src/main.tsx", "src/index.tsx", "app/_layout.tsx", "app/index.tsx",
-            "src/app.tsx",
+            "src/app.tsx", "main.py", "manage.py", "setup.py", "main.go", "src/main.rs",
+            "Program.cs", "src/main/java/Main.java", "index.php", "main.dart", "main.swift",
         ]
         discovered_sources = []
-        for folder in ("app", "src", "pages", "screens", "components"):
+        for folder in ("app", "src", "pages", "screens", "components", "lib", "server", "backend", "frontend", "cmd", "internal", "pkg"):
             base = root / folder
             if not base.is_dir():
                 continue
@@ -166,7 +169,7 @@ class AgentLoop:
                 candidates = [
                     item for item in base.rglob("*")
                     if item.is_file()
-                    and item.suffix.lower() in {".tsx", ".ts", ".jsx", ".js"}
+                    and item.suffix.lower() in {".py", ".pyi", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".rs", ".go", ".java", ".kt", ".kts", ".cs", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".php", ".rb", ".swift", ".dart", ".scala", ".lua", ".sh", ".bash", ".html", ".htm", ".css", ".scss", ".sass", ".less", ".sql", ".vue", ".svelte"}
                     and not any(part in {"node_modules", ".expo", ".next", "__tests__", "tests"} for part in item.parts)
                 ]
             except OSError:
@@ -208,6 +211,7 @@ class AgentLoop:
                 "root": str(root),
                 "kind": profile.kind,
                 "language": profile.language,
+                "languages": list(profile.languages),
                 "framework": profile.framework,
                 "package_manager": profile.package_manager,
                 "commands": profile.commands,
@@ -328,7 +332,7 @@ class AgentLoop:
             "the user clearly asks you to perform an action in the workspace. A question about how to do "
             "something is not permission to do it. clarify for genuinely ambiguous requests. "
             "ANSWER QUALITY: answer the actual question first; be concrete, useful and appropriately detailed. "
-            "Use the supplied project manifest, file excerpts, file tree and memories as evidence. Explain what "
+            "Use the supplied project manifest, detected languages, file excerpts, file tree and memories as evidence. Recognize mixed-language workspaces and do not assume a Node/React backend unless the files prove it. Explain what "
             "the project actually does, mention relevant real filenames/dependencies/scripts, and distinguish "
             "verified facts from reasonable inferences. Do not invent product purpose, features, users, APIs, "
             "or files. If the supplied evidence is insufficient, say exactly what is missing and ask one "
