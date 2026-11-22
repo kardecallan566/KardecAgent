@@ -6,9 +6,19 @@ The Tauri desktop process launches the installed Python package as a child proce
 
 `python -m kardecagent.cli studio --project <canonical-project-path>`
 
-The executable defaults to `python3` on macOS/Linux and `python` on Windows. Set `KARDECAGENT_PYTHON` to select an explicit interpreter. The package must be installed in that interpreter (development: `python -m pip install -e .` from the repository root).
+Python interpreter discovery order:
+1. Explicit `KARDECAGENT_PYTHON` override (executable path or command).
+2. A `.venv` or `venv` under the selected workspace.
+3. A `.venv` or `venv` under the current working directory.
+4. In development, the repository's `.venv` (next to `frontend/`).
+5. A bundled `python/python.exe` (Windows) or `python/bin/python3` (Unix) next to the desktop executable.
+6. System `python` on Windows or `python3` on Unix.
 
-The bridge is JSON Lines over stdin/stdout:
+Before starting the runtime, the bridge checks that the selected interpreter can import `kardecagent`. If not, startup fails with an actionable message instructing the user to install the package in that environment or set `KARDECAGENT_PYTHON`. For development, run `python -m pip install -e .` from the repository root.
+
+The package must be installed in the selected interpreter. The bridge sets `PYTHONIOENCODING=utf-8` and `PYTHONUNBUFFERED=1` for the child process.
+
+The bridge uses JSON Lines over stdin/stdout:
 - one JSON object per line;
 - stdout is reserved for protocol messages;
 - Python logs and diagnostics go to stderr;
@@ -55,7 +65,7 @@ A response is accepted only for the currently pending approval ID. While approva
 
 ## Events
 
-- `runtime.ready`: process initialized, workspace fixed and resource limits announced (`max_concurrent_tasks`, `max_concurrent_subtasks`, `max_subtasks`, LLM iteration and output caps). After this event, the runtime replays a bounded history of up to 20 persisted tasks as `task.created`, their last 100 `core.event` records and a terminal event.
+- `runtime.ready`: process initialized, workspace fixed and resource limits announced (max concurrency, subtask, LLM iteration and output caps). After this event, the runtime replays a bounded history of up to 20 persisted tasks as `task.created`, their last 100 `core.event` records and a terminal event.
 - `command.accepted` / `command.rejected`: command acknowledgement.
 - `task.created`: task accepted by the manager. On startup restoration, `payload.restored` is `true` and the event represents historical work, not a new execution.
 - `core.event`: bounded lifecycle envelope from `TaskState.record`, including event type, sequence, iteration, message and event data. The UI uses `plan_created`, `plan_step_started`, `plan_step_completed` and subtask board snapshots to build the live task map. Events carry both the persisted task ID and a per-execution ID so repeated runs of the same task remain distinct.
@@ -74,5 +84,4 @@ Event IDs are unique per runtime execution; task IDs remain the Python persisten
 - Default resource envelope: one active task per runtime, one active subtask, up to six planned subtasks, configured `max_iterations`, bounded command output, 500-file project snapshots, configured LLM/command timeouts, 8,000-character instructions and 256 KiB event messages.
 - These are application-level workload limits, not hard operating-system CPU/RAM quotas; process isolation will be evaluated with profiling before workers are enabled.
 - Startup restoration loads up to 20 most recently updated persisted tasks from the project's `TaskStore`, replaying at most 100 events per task. Interrupted tasks are marked recoverable in the UI; they are never resumed automatically, so opening the Studio cannot unexpectedly modify files. Only approved tasks already written to the durable store are included; approvals waiting before persistence are not yet recoverable.
-- Cancellation, pause commands, durable approval inbox recovery and concurrent submissions are not yet exposed through this protocol. Explicit resume is now available for tasks present in the latest 100 persisted records; the Studio exposes it for recoverable tasks.
-- Do not add concurrency until resource budgets, workspace write-conflict checks, cancellation and recovery semantics are implemented in the Python scheduler.
+- Cancellation, pause commands, durable approval inbox recovery and concurrent submissions are not yet implemented.
