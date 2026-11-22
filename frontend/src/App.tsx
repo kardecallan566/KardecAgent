@@ -351,6 +351,17 @@ function App() {
   }, []);
 
 
+  useEffect(() => {
+    const lastProject = localStorage.getItem("kardecagent.studio.lastProject");
+    if (!lastProject) return;
+    void activateProject(lastProject).then(() => {
+      setRuntimeEvents(items => [
+        ...items,
+        { id: crypto.randomUUID(), type: "workspace.restored", message: "Último projeto restaurado: " + lastProject }
+      ].slice(-100));
+    });
+  }, []);
+
   async function startTerminal() {
     if (!projectRoot) { setProjectError("Abra um projeto antes de iniciar o terminal."); return; }
     try {
@@ -452,6 +463,7 @@ function App() {
     try {
       const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
       setProjectRoot(selected); setProjectEntries(entries); setProjectError(null);
+      try { localStorage.setItem("kardecagent.studio.lastProject", selected); } catch { /* local preference storage may be unavailable */ }
       setOpenedPath(null); setSelectedFile(""); setFileContent(""); setFileDirty(false); setOpenTabs([]); setRunOutput(null);
       setRuntimeEvents([]); setRuntimeTasks([]); setRuntimeSubtasks([]); setRuntimePlanSteps([]); setChatMessages([]); pendingInstructionCommandId.current = null;
       setActiveRuntimeSubtask(null); setActiveRuntimeStep(null); setRuntimeLimits(null);
