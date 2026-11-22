@@ -869,7 +869,7 @@ function App() {
               <label htmlFor="manager-instruction">Instrução para o gestor</label>
               <textarea id="manager-instruction" value={instructionDraft} onChange={event => setInstructionDraft(event.target.value.slice(0, 8000))} placeholder="Ex.: Analise o projeto, proponha um plano e implemente a autenticação..." rows={4} maxLength={8000}/>
               <div className="composer-footer"><span>{instructionDraft.length}/8000 · {runtimeStatus !== "online" ? "Aguardando conexão" : runtimeBusy ? "Gestor ocupado" : "Pronto para enviar"}</span><button onClick={submitInstruction} disabled={!projectRoot || !instructionDraft.trim() || runtimeStatus !== "online" || runtimeBusy} title={runtimeStatus === "online" ? "Enviar instrução ao gestor" : "Runtime Python ainda não conectado"}><Plus size={15}/></button></div>
-              <small className="composer-hint">A instrução será enviada ao gestor central, não diretamente a um agente individual.</small>
+              <small className="composer-hint">O agente considera os arquivos do projeto, o histórico recente e as memórias salvas. Só inicia alterações quando você pedir uma ação.</small>
             </div>
             <div className="agent-foot"><ShieldCheck size={13}/> Aprovações e ações sensíveis sob seu controle</div>
           </>}
