@@ -319,7 +319,7 @@ fn quality_project_file(
         }),
     };
 
-    let mut program = tool;
+    let mut program = tool.to_string();
     let mut command_args = args.clone();
     let local_script = if tool == "eslint" {
         let candidate = root.join("node_modules").join("eslint").join("bin").join("eslint.js");
@@ -332,10 +332,15 @@ fn quality_project_file(
         candidates.into_iter().find(|candidate| candidate.is_file())
     } else { None };
     if let Some(script_path) = local_script {
-        program = "node";
+        program = "node".into();
         command_args.insert(0, script_path.to_string_lossy().into_owned());
+    } else if tool == "ruff" {
+        let candidates = [root.join(".venv").join("Scripts").join("ruff.exe"), root.join(".venv").join("bin").join("ruff")];
+        if let Some(local_ruff) = candidates.iter().find(|candidate| candidate.is_file()) {
+            program = local_ruff.to_string_lossy().into_owned();
+        }
     }
-    let mut command = Command::new(program);
+    let mut command = Command::new(&program);
     configure_hidden_process(&mut command);
     let output = match command.args(&command_args).current_dir(&root).output() {
         Ok(output) => output,
