@@ -6,8 +6,11 @@ on:
     branches:
       - main
     paths:
-      - 'frontend/**'
-      - '.github/workflows/studio-windows-build.yml'
+      - "frontend/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "scripts/studio_core_entry.py"
+      - ".github/workflows/studio-windows-build.yml"
   push:
     branches:
       - main
@@ -17,6 +20,9 @@ on:
       - "studio-v*"
     paths:
       - "frontend/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "scripts/studio_core_entry.py"
       - ".github/workflows/studio-windows-build.yml"
 
 permissions:
