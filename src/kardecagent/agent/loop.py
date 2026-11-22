@@ -57,14 +57,14 @@ class AgentLoop:
     def _has_explicit_action_request(cls, message: str) -> bool:
         normalized = cls._normalized_message(message)
         action = re.compile(
-            r"\\b(crie|criar|cria|implemente|implementar|implementar|"
+            r"\b(crie|criar|cria|implemente|implementar|"
             r"altere|alterar|modifique|modificar|corrija|corrigir|conserte|"
             r"consertar|refatore|refatorar|apague|apagar|exclua|excluir|"
             r"delete|deletar|configure|configurar|execute|executar|rode|rodar|"
             r"instale|instalar|atualize|atualizar|adicione|adicionar|"
             r"remova|remover|escreva|escrever|gere|gerar|construa|construir|"
             r"criar|build|fix|implement|create|edit|update|delete|refactor|"
-            r"run|execute|install|add|remove|change|modify|write)\\b"
+            r"run|execute|install|add|remove|change|modify|write)\b"
         )
         return bool(action.search(normalized))
 
