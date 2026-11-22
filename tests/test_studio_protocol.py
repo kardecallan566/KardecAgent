@@ -218,6 +218,56 @@ def test_run_stdio_rejects_resume_for_unknown_persisted_task(monkeypatch, tmp_pa
     assert not any(item["type"] == "task.created" for item in messages)
 
 
+def test_run_stdio_memory_snapshot_and_forget_commands(monkeypatch, tmp_path):
+    from kardecagent.agent.memory import MemoryStore
+    user_memory = tmp_path / "user-memory.json"
+    store = MemoryStore(tmp_path, user_path=user_memory)
+    item = store.remember(
+        scope="project", category="decision",
+        content="O projeto utiliza Expo Router para navegação."
+    )
+    assert item is not None
+    monkeypatch.setattr(
+        studio_protocol, "MemoryStore",
+        lambda root: MemoryStore(root, user_path=user_memory),
+    )
+    commands = [
+        {"type": "memory.list", "schema_version": 1, "command_id": "memory-list",
+         "payload": {"project_root": str(tmp_path)}},
+        {"type": "memory.forget", "schema_version": 1, "command_id": "memory-forget",
+         "payload": {"project_root": str(tmp_path), "memory_id": item["id"]}},
+    ]
+    monkeypatch.setattr(
+        studio_protocol.sys, "stdin",
+        io.StringIO("".join(json.dumps(command, ensure_ascii=False) + "\\n" for command in commands)),
+    )
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4, max_command_output_chars=1200,
+            llm_timeout_seconds=30.0, command_timeout_seconds=15.0,
+        )
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    snapshot = next(item for item in messages if item["type"] == "memory.snapshot")
+    updated = next(item for item in messages if item["type"] == "memory.updated")
+    assert snapshot["payload"]["items"][0]["id"] == item["id"]
+    assert updated["payload"]["removed"] is True
+    assert updated["payload"]["items"] == []
+
+
+def test_run_stdio_writes_non_ascii_protocol_text_without_escaping(monkeypatch, tmp_path):
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+    studio_protocol._write({"type": "assistant.response", "payload": {"message": "Olá, você está conectado."}})
+    encoded = output.getvalue().encode("utf-8")
+    assert "Olá, você está conectado.".encode("utf-8") in encoded
+    assert "Ol\\u00e1" not in output.getvalue()
+
+
 def test_run_stdio_routes_chat_without_creating_or_running_a_task(monkeypatch, tmp_path):
     command = {
         "type": "task.submit",
