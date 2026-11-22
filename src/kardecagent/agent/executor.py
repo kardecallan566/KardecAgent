@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -163,6 +164,22 @@ class AgentExecutor:
             state.record("integrity_change", "Workspace changes recorded with before/after SHA-256 fingerprints.",
                          changes=records, subtask_id=subtask_id)
 
+    @staticmethod
+    def _is_dependency_install_command(command: str) -> bool:
+        """Conservative detection for package-manager mutations; test/build commands remain allowed."""
+        patterns = (
+            r"\\bpip(?:3)?\\s+install\\b",
+            r"\\bpython\\s+-m\\s+pip\\s+install\\b",
+            r"\\buv\\s+(?:add|pip\\s+install)\\b",
+            r"\\bpoetry\\s+add\\b",
+            r"\\bpipenv\\s+install\\b",
+            r"\\b(?:npm|pnpm)\\s+install\\b",
+            r"\\byarn\\s+(?:add|install)\\b",
+            r"\\bcargo\\s+add\\b",
+            r"\\b(?:apt|apt-get|dnf|yum)\\s+install\\b",
+        )
+        return any(re.search(pattern, command, re.IGNORECASE) for pattern in patterns)
+
     def _execute_tool(self, root: Path, action, scope: tuple[str, ...] | None, state: TaskState | None = None, subtask_id: str | None = None) -> str:
         args = action.arguments
         fs = ProjectFilesystem(root)
@@ -206,6 +223,12 @@ class AgentExecutor:
             return json.dumps({"ok": True, "changed_files": list(result.changed_files),
                                 "method": "unified_patch"})
         if action.tool == "run_command":
+            command = args["command"]
+            if not self.settings.allow_dependency_installations and self._is_dependency_install_command(command):
+                raise PermissionError(
+                    "dependency installation blocked: explicit user authorization is required "
+                    "(pip/npm/uv/poetry/cargo/system package managers)."
+                )
             scoped = bool(scope)
             snapshot = self._workspace_snapshot(root, scoped)
             result = run_command(root, args["command"], timeout=self.settings.command_timeout_seconds,
