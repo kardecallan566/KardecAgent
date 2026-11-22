@@ -479,11 +479,24 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             try:
                 interpretation = interpreter(root, instruction)
             except Exception as exc:
+                # Classifier/parser failures are recoverable chat errors, not rejected commands.
+                # Never create a task when intent could not be interpreted safely.
                 _write({
-                    "type": "command.rejected",
+                    "type": "command.accepted",
                     "schema_version": 1,
                     "command_id": command_identifier,
-                    "reason": f"Could not safely interpret the message: {exc}",
+                    "accepted": True,
+                    "intent": "clarify",
+                })
+                _write({
+                    "type": "assistant.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "intent": "clarify",
+                    "payload": {
+                        "message": "Tive uma falha ao interpretar esta mensagem, mas a conversa continua ativa. Tente reformular a pergunta. Nenhuma tarefa ou alteração foi iniciada.",
+                        "reason": f"Recoverable intent parsing error: {exc}",
+                    },
                 })
                 continue
             intent = interpretation.get("intent")
