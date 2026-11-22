@@ -1,17 +1,58 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RuntimeLimits, RuntimePlanStep, RuntimeSubtask } from "./types/runtime";
 import {
-  Activity, Bot, CheckCircle2, ChevronDown, CircleDot,
-  Clock3, FileCode2, Files, Folder, GitBranch,
-  ListTodo, Plus, Search, ShieldCheck, Workflow,
+  Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
+  Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
+  ListTodo, Plus, Search, ShieldCheck, Workflow, Save,
   Zap, GitFork, Circle, AlertCircle
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
+
+function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [children, setChildren] = useState<ProjectEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  async function toggleFolder() {
+    if (!entry.is_dir) { onOpenFile(entry); return; }
+    if (expanded) { setExpanded(false); return; }
+    setLoading(true);
+    try {
+      const result = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot, projectPath: entry.path });
+      setChildren(result); setExpanded(true);
+    } catch (error) { console.error("Falha ao expandir pasta", error); }
+    finally { setLoading(false); }
+  }
+  return <><button className={entry.is_dir ? "tree-row folder-entry" : "tree-row file"} onClick={toggleFolder} title={entry.path}>
+    {entry.is_dir ? (expanded ? <ChevronDown/> : <ChevronRight/>) : <span className="tree-spacer"/>}
+    {entry.is_dir ? (expanded ? <FolderOpen/> : <Folder/>) : <FileCode2/>}<span>{entry.name}</span>{loading && <small className="tree-loading">...</small>}
+  </button>{expanded && <div className="tree-children">{children.map(child => <ExplorerEntry key={child.path} entry={child} projectRoot={projectRoot} onOpenFile={onOpenFile}/>)}</div>}</>;
+}
+
+
+function highlightSource(source: string, extension: string) {
+  const language = extension.toLowerCase();
+  const patterns = language === "json"
+    ? /(\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\b\d+(?:\.\d+)?\b)/gm
+    : /(#[^\n]*|\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`|\b(?:const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|type|interface|extends|implements|def|pass|in|is|not|and|or|None|True|False|lambda|with|as|yield|pub|fn|mut|struct|enum|impl|use|mod|match|Some|Ok|Err)\b|\b\d+(?:\.\d+)?\b)/gm;
+  const nodes: ReactNode[] = [];
+  let cursor = 0, match: RegExpExecArray | null;
+  while ((match = patterns.exec(source)) !== null) {
+    if (match.index > cursor) nodes.push(source.slice(cursor, match.index));
+    const token = match[0];
+    const kind = token.startsWith("#") || token.startsWith("//") || token.startsWith("/*") ? "comment"
+      : token.startsWith('"') || token.startsWith("'") || token.startsWith("`") ? (language === "json" && source.slice(match.index + token.length).trimStart().startsWith(":") ? "property" : "string")
+      : /^\d/.test(token) ? "number" : "keyword";
+    nodes.push(<span className={"syntax-" + kind} key={match.index}>{token}</span>);
+    cursor = match.index + token.length;
+  }
+  if (cursor < source.length) nodes.push(source.slice(cursor));
+  return nodes.length ? nodes : source;
+}
 
 function taskStatusLabel(status: string): string {
   const labels: Record<string, string> = {
@@ -37,6 +78,9 @@ function App() {
   const [projectError, setProjectError] = useState<string | null>(null);
   const [openedPath, setOpenedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
+  const [fileDirty, setFileDirty] = useState(false);
+  const [fileSaving, setFileSaving] = useState(false);
+  const [openTabs, setOpenTabs] = useState<Array<{ path: string; name: string; content: string; dirty: boolean }>>([]);
   const [instructionDraft, setInstructionDraft] = useState("");
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
@@ -166,7 +210,7 @@ function App() {
       if (!active || !event.payload.trim()) return;
       const line = event.payload.slice(0, 2000);
       setRuntimeEvents(items => [...items, { id: crypto.randomUUID(), type: "runtime.log", message: line }].slice(-100));
-      if (/\\b(ERROR|CRITICAL|Traceback|Exception)\\b/.test(line)) setRuntimeError(line);
+      if (/\b(ERROR|CRITICAL|Traceback|Exception)\b/.test(line)) setRuntimeError(line);
     });
     const protocolError = listen<string>("runtime-protocol-error", event => {
       if (active) setRuntimeError("Falha no protocolo do runtime: " + event.payload.slice(0, 1000));
@@ -183,12 +227,14 @@ function App() {
   }, []);
 
   async function openEntry(entry: ProjectEntry) {
-    if (entry.is_dir) {
-      try { setProjectEntries(await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: projectRoot!, projectPath: entry.path })); setProjectError(null); }
-      catch (error) { setProjectError(String(error)); }
-      return;
+    if (entry.is_dir) return;
+    try {
+      const existing = openTabs.find(tab => tab.path === entry.path);
+      if (existing) { setOpenedPath(existing.path); setSelectedFile(existing.name); setFileContent(existing.content); setFileDirty(existing.dirty); setProjectError(null); setActiveNav("explorer"); return; }
+      const content = await invoke<string>("read_project_file", { projectRoot: projectRoot!, filePath: entry.path });
+      setOpenTabs(tabs => [...tabs, { path: entry.path, name: entry.name, content, dirty: false }]);
+      setFileContent(content); setOpenedPath(entry.path); setSelectedFile(entry.name); setFileDirty(false); setProjectError(null); setActiveNav("explorer");
     }
-    try { setFileContent(await invoke<string>("read_project_file", { projectRoot: projectRoot!, filePath: entry.path })); setOpenedPath(entry.path); setSelectedFile(entry.name); setProjectError(null); }
     catch (error) { setProjectError(String(error)); }
   }
 
@@ -232,6 +278,18 @@ function App() {
       setRuntimeStatus("offline");
       setRuntimeError(String(error));
     }
+  }
+
+  async function saveCurrentFile() {
+    if (!projectRoot || !openedPath || !fileDirty || fileSaving) return;
+    setFileSaving(true);
+    try {
+      await invoke("write_project_file", { projectRoot, filePath: openedPath, content: fileContent });
+      setFileDirty(false);
+      setRuntimeEvents(items => [...items, { id: crypto.randomUUID(), type: "file.saved", message: "Arquivo salvo: " + openedPath }].slice(-100));
+      setProjectError(null);
+    } catch (error) { setProjectError("Falha ao salvar arquivo: " + String(error)); }
+    finally { setFileSaving(false); }
   }
 
   async function submitInstruction() {
@@ -310,7 +368,7 @@ function App() {
                   <button className={selectedFile === "main.tsx" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("main.tsx")}><FileCode2/><span>main.tsx</span></button>
                   <button className={selectedFile === "styles.css" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("styles.css")}><FileCode2/><span>styles.css</span></button>
                 </>}
-                {projectEntries.map(entry => <button className="tree-row file" key={entry.path} title={entry.path} onClick={() => openEntry(entry)}>{entry.is_dir ? <Folder/> : <FileCode2/>}<span>{entry.name}</span></button>)}
+                {projectEntries.map(entry => <ExplorerEntry key={entry.path} entry={entry} projectRoot={projectRoot!} onOpenFile={openEntry}/>) }
                 {projectError && <div className="tree-row" role="alert">{projectError}</div>}
               </div>
               <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
@@ -391,9 +449,9 @@ function App() {
             </div>
           ) : (
             <>
-              <div className="tabs"><div className="tab active"><FileCode2 size={14}/>{selectedFile}<span className="tab-close">×</span></div><div className="tab-placeholder">KardecAgent Studio</div></div>
+              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <button className="save-file-button" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving}><Save size={13}/>{fileSaving ? "Salvando..." : "Salvar"}</button>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path">{openedPath}</div><pre>{fileContent}</pre></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap"><div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div><div className="code-surface"><pre className="syntax-highlight" aria-hidden="true">{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
               <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content"><Clock3 size={14}/><span>Eventos do runtime aparecerão aqui, sem polling contínuo.</span></div></div>
             </>
