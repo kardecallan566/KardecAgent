@@ -435,6 +435,20 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             and item.get("role") in {"user", "assistant"}
             and isinstance(item.get("content"), str)
         ]
+        raw_editor = payload.get("active_editor")
+        active_editor = None
+        if isinstance(raw_editor, dict):
+            editor_path = raw_editor.get("path")
+            editor_content = raw_editor.get("content", "")
+            if (isinstance(editor_path, str) and editor_path.strip()
+                    and not Path(editor_path).is_absolute()
+                    and ".." not in Path(editor_path).parts
+                    and isinstance(editor_content, str)):
+                active_editor = {
+                    "path": editor_path.replace("\\", "/")[:500],
+                    "content": editor_content[:16000],
+                    "dirty": bool(raw_editor.get("dirty", False)),
+                }
         if len(instruction) > MAX_INSTRUCTION_LENGTH:
             _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "instruction exceeds 8000 characters."})
             continue
@@ -487,6 +501,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 instruction,
                 event_callback=forward_event,
                 conversation_history=conversation_history,
+                active_editor_context=active_editor,
                 approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="plan"),
                 high_risk_approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="high_risk"),
             )
