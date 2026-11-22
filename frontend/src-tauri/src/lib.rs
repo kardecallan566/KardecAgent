@@ -165,6 +165,121 @@ fn write_project_file(project_root: String, file_path: String, content: String) 
     fs::write(path, content.as_bytes()).map_err(|e| format!("Falha ao gravar arquivo: {e}"))
 }
 
+
+fn resolve_new_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
+    let root = Path::new(project_root).canonicalize()
+        .map_err(|e| format!("Não foi possível acessar a raiz do projeto: {e}"))?;
+    let relative = Path::new(requested_path);
+    if relative.as_os_str().is_empty() || relative.is_absolute() || relative.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        return Err("Informe um caminho relativo válido dentro do projeto.".into());
+    }
+    let candidate = root.join(relative);
+    let parent = candidate.parent().ok_or("Caminho de destino inválido.")?;
+    let canonical_parent = parent.canonicalize()
+        .map_err(|e| format!("A pasta de destino precisa existir: {e}"))?;
+    if !canonical_parent.starts_with(&root) {
+        return Err("A operação está fora da pasta do projeto.".into());
+    }
+    if candidate.exists() || candidate.is_symlink() {
+        return Err("Já existe um arquivo ou pasta nesse caminho.".into());
+    }
+    Ok(candidate)
+}
+
+#[tauri::command]
+fn create_project_file(project_root: String, relative_path: String, content: String) -> Result<(), String> {
+    if content.len() > 1_000_000 { return Err("Arquivo maior que 1 MB.".into()); }
+    let path = resolve_new_workspace_path(&project_root, &relative_path)?;
+    fs::write(path, content.as_bytes()).map_err(|e| format!("Falha ao criar arquivo: {e}"))
+}
+
+#[tauri::command]
+fn create_project_directory(project_root: String, relative_path: String) -> Result<(), String> {
+    let path = resolve_new_workspace_path(&project_root, &relative_path)?;
+    fs::create_dir(path).map_err(|e| format!("Falha ao criar pasta: {e}"))
+}
+
+#[derive(Serialize)]
+struct ProjectRunResult {
+    file: String,
+    language: String,
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+}
+
+#[tauri::command]
+fn run_project_file(project_root: String, file_path: String, approved: bool) -> Result<ProjectRunResult, String> {
+    if !approved { return Err("Execução não autorizada pelo usuário.".into()); }
+    let path = resolve_workspace_path(&project_root, &file_path)?;
+    if !path.is_file() { return Err("Selecione um arquivo válido para executar.".into()); }
+    let root = Path::new(&project_root).canonicalize().map_err(|e| e.to_string())?;
+    let extension = path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase();
+    let language = match extension.as_str() {
+        "py" => "Python", "js" | "mjs" | "cjs" => "JavaScript", "java" => "Java",
+        "go" => "Go", "rs" => "Rust", "php" => "PHP", "rb" => "Ruby",
+        "c" => "C", "cpp" | "cc" | "cxx" => "C++",
+        _ => return Err("Linguagem não habilitada. Suportados: Python, JavaScript, Java, Go, Rust, PHP, Ruby, C e C++.".into()),
+    };
+    let script = r#"
+import json, os, subprocess, sys, tempfile
+root = os.environ["KARDECAGENT_RUN_ROOT"]
+source = os.environ["KARDECAGENT_RUN_FILE"]
+ext = os.path.splitext(source)[1].lower()
+commands = {
+ ".py": [sys.executable, source], ".js": ["node", source], ".mjs": ["node", source], ".cjs": ["node", source],
+ ".java": ["java", source], ".go": ["go", "run", source], ".php": ["php", source], ".rb": ["ruby", source],
+}
+try:
+    if ext in {".rs", ".c", ".cpp", ".cc", ".cxx"}:
+        with tempfile.TemporaryDirectory(prefix="kardecagent-build-") as temp:
+            if ext == ".rs":
+                binary = os.path.join(temp, "program.exe" if os.name == "nt" else "program")
+                compile_argv = ["rustc", source, "-o", binary]
+            elif ext == ".c":
+                binary = os.path.join(temp, "program.exe" if os.name == "nt" else "program")
+                compile_argv = ["gcc", source, "-o", binary]
+            else:
+                binary = os.path.join(temp, "program.exe" if os.name == "nt" else "program")
+                compile_argv = ["g++", source, "-o", binary]
+            build = subprocess.run(compile_argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, shell=False)
+            if build.returncode:
+                print(json.dumps({"exit_code":build.returncode,"stdout":build.stdout[-12000:],"stderr":build.stderr[-12000:],"timed_out":False}))
+                sys.exit(0)
+            argv = [binary]
+            result = subprocess.run(argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, shell=False)
+    else:
+        argv = commands[ext]
+        result = subprocess.run(argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, shell=False)
+    print(json.dumps({"exit_code":result.returncode,"stdout":result.stdout[-12000:],"stderr":result.stderr[-12000:],"timed_out":False}))
+except subprocess.TimeoutExpired as exc:
+    print(json.dumps({"exit_code":-1,"stdout":str(exc.stdout or "")[-12000:],"stderr":str(exc.stderr or "")[-12000:],"timed_out":True}))
+except FileNotFoundError as exc:
+    print(json.dumps({"error":"Runtime ou compilador não encontrado: " + str(exc)}))
+    sys.exit(2)
+except Exception as exc:
+    print(json.dumps({"error":str(exc)}))
+    sys.exit(2)
+"#;
+    let (python, prefix) = resolve_python_command()?;
+    let output = Command::new(python).args(&prefix).args(["-c", script])
+        .current_dir(&root).env("KARDECAGENT_RUN_ROOT", &root).env("KARDECAGENT_RUN_FILE", &path)
+        .output().map_err(|e| format!("Não foi possível iniciar execução: {e}"))?;
+    let parsed: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| format!("Falha ao interpretar saída do executor: {}", String::from_utf8_lossy(&output.stderr)))?;
+    if !output.status.success() {
+        return Err(parsed.get("error").and_then(Value::as_str).unwrap_or("Falha ao executar arquivo.").to_string());
+    }
+    Ok(ProjectRunResult {
+        file: file_path, language: language.into(),
+        exit_code: parsed.get("exit_code").and_then(Value::as_i64).unwrap_or(-1) as i32,
+        stdout: parsed.get("stdout").and_then(Value::as_str).unwrap_or("").to_string(),
+        stderr: parsed.get("stderr").and_then(Value::as_str).unwrap_or("").to_string(),
+        timed_out: parsed.get("timed_out").and_then(Value::as_bool).unwrap_or(false),
+    })
+}
+
 #[tauri::command]
 fn start_runtime(
     app: tauri::AppHandle,
@@ -366,6 +481,9 @@ pub fn run() {
             read_project_entries,
             read_project_file,
             write_project_file,
+            create_project_file,
+            create_project_directory,
+            run_project_file,
             start_runtime,
             test_ollama_connection,
             send_runtime_command,

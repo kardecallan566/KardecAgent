@@ -22,7 +22,7 @@ class ParsedCommand:
 
 
 DEFAULT_ALLOWED_COMMANDS = {
-    "python", "python3", "py", "pip", "pip3",
+    "python", "python3", "py", "pip", "pip3", "java", "javac", "go", "rustc", "gcc", "g++", "php", "ruby",
     "pytest", "ruff", "mypy",
     "node", "npm", "pnpm", "yarn", "npx",
     "tsc", "eslint", "prettier", "git",
