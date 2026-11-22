@@ -224,6 +224,46 @@ def test_intent_router_downgrades_task_without_explicit_action_verb(tmp_path: Pa
     assert "alterações" in result["response"]
 
 
+def test_intent_router_uses_project_files_and_persistent_memory(tmp_path: Path, monkeypatch):
+    (tmp_path / "README.md").write_text(
+        "# Atlas\nA scheduling app for independent music teachers.", encoding="utf-8"
+    )
+    user_memory = tmp_path / "user-memory.json"
+    from kardecagent.agent.memory import MemoryStore
+    MemoryStore(tmp_path, user_path=user_memory).remember(
+        scope="project", category="fact",
+        content="O projeto atende professores independentes de música."
+    )
+    llm = FakeLLM([
+        '{"intent":"chat","response":"O Atlas organiza horários de professores de música.","reason":"README evidence."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "O que esse aplicativo faz?"
+    )
+    assert result["intent"] == "chat"
+    sent_context = json.loads(llm.messages[-1]["content"])
+    assert "A scheduling app for independent music teachers." in sent_context["important_file_contents"][0]["content"]
+    assert sent_context["persistent_memory"][0]["content"].startswith("O projeto atende")
+
+
+def test_intent_router_persists_explicit_memory_updates(tmp_path: Path, monkeypatch):
+    from kardecagent.agent.memory import MemoryStore
+    monkeypatch.setattr(
+        "kardecagent.agent.loop.MemoryStore",
+        lambda root: MemoryStore(root, user_path=tmp_path / "user-memory.json"),
+    )
+    llm = FakeLLM([
+        '{"intent":"chat","response":"Vou considerar isso nas próximas conversas.","reason":"Preference stated.","memory_updates":[{"scope":"user","category":"preference","content":"Prefiro explicações técnicas em português."}]}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Prefiro explicações técnicas em português."
+    )
+    assert result["intent"] == "chat"
+    items = MemoryStore(tmp_path, user_path=tmp_path / "user-memory.json").all_items()
+    assert len(items) == 1
+    assert items[0]["scope"] == "user"
+
+
 def test_intent_router_answers_questions_without_starting_a_task(tmp_path: Path):
     (tmp_path / "README.md").write_text("# Fixture\\nA tiny example project.", encoding="utf-8")
     llm = FakeLLM([
