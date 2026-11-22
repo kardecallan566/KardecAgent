@@ -366,8 +366,7 @@ function App() {
   }, []);
 
 
-  useEffect(() => {
-      // Keep the agent transcript and task/plan projection across IDE upgrades and restarts.
+  // Persist the current workspace transcript independently from startup restoration.
   useEffect(() => {
     if (!projectRoot) return;
     try {
@@ -378,19 +377,25 @@ function App() {
         runtimeEvents: runtimeEvents.slice(-100), runtimePlanSteps: runtimePlanSteps.slice(0, 100),
         runtimeSubtasks: runtimeSubtasks.slice(0, 100)
       }));
-    } catch (error) { console.warn("Não foi possível persistir o histórico local do workspace.", error); }
+    } catch (error) {
+      console.warn("Não foi possível persistir o histórico local do workspace.", error);
+    }
   }, [projectRoot, chatMessages, runtimeTasks, runtimeEvents, runtimePlanSteps, runtimeSubtasks]);
 
-const lastProject = localStorage.getItem("kardecagent.studio.lastProject");
+  // Restore the last opened project once, after the component has mounted.
+  useEffect(() => {
+    let active = true;
+    const lastProject = localStorage.getItem("kardecagent.studio.lastProject");
     if (!lastProject) return;
     void (async () => {
       const restored = await activateProject(lastProject);
-      if (!restored) return;
+      if (!active || !restored) return;
       setRuntimeEvents(items => [
         ...items,
         { id: crypto.randomUUID(), type: "workspace.restored", message: "Último projeto restaurado: " + lastProject }
       ].slice(-100));
     })();
+    return () => { active = false; };
   }, []);
 
   async function startTerminal() {
