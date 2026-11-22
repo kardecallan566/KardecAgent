@@ -187,3 +187,34 @@ def test_recovery_transaction_persists_phase_events(tmp_path: Path):
     assert "recovery_file_rolled_back" in kinds
     assert "recovery_rollback_completed" in kinds
     assert "recovery_completed" in kinds
+
+
+
+def test_recovery_without_audited_changes_transitions_max_iterations_to_resuming(tmp_path: Path):
+    state = TaskState("no-changes", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.record("plan_step_started", "step 2", step=2)
+    state.transition(TaskStatus.MAX_ITERATIONS)
+
+    persisted = []
+    result = RecoveryManager().recover(
+        tmp_path,
+        state,
+        persistence_callback=lambda current: persisted.append(current.status),
+    )
+
+    assert result.recovered
+    assert result.resume_step == 2
+    assert state.status is TaskStatus.RESUMING
+    assert TaskStatus.RESUMING in persisted
+    assert any(event.event_type == "recovery_completed" for event in state.events)
+
+
+def test_recovery_without_audited_changes_preserves_running_task(tmp_path: Path):
+    state = TaskState("running-no-changes", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+
+    result = RecoveryManager().recover(tmp_path, state)
+
+    assert result.recovered
+    assert state.status is TaskStatus.RUNNING
