@@ -61,6 +61,28 @@ def test_subtask_scope_blocks_write_outside_scope(tmp_path: Path):
     assert any(e.event_type == "tool_error" and "scope violation" in e.message for e in result.events)
 
 
+def test_dependency_install_commands_are_blocked_by_default(tmp_path: Path):
+    import json
+    from kardecagent.agent.tools_schema import parse_tool_call
+
+    loop = AgentLoop(FakeLLM([]), Settings())
+    for command in ("pip install requests", "npm install", "uv add httpx", "cargo add serde"):
+        action = parse_tool_call(json.dumps({
+            "tool": "run_command", "arguments": {"command": command}, "plan_step": 1
+        }))
+        try:
+            loop.executor._execute_tool(tmp_path, action, None)
+        except PermissionError as exc:
+            assert "explicit user authorization" in str(exc)
+        else:
+            raise AssertionError(f"dependency installation was not blocked: {command}")
+
+
+def test_non_install_commands_are_not_blocked(tmp_path: Path):
+    assert not AgentLoop(FakeLLM([]), Settings()).executor._is_dependency_install_command("pytest -q")
+    assert not AgentLoop(FakeLLM([]), Settings()).executor._is_dependency_install_command("npm test")
+
+
 def test_run_command_detects_new_file_outside_scope(tmp_path: Path):
     import json
     from kardecagent.agent.tools_schema import parse_tool_call
