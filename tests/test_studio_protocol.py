@@ -239,7 +239,7 @@ def test_run_stdio_memory_snapshot_and_forget_commands(monkeypatch, tmp_path):
     ]
     monkeypatch.setattr(
         studio_protocol.sys, "stdin",
-        io.StringIO("".join(json.dumps(command, ensure_ascii=False) + "\\n" for command in commands)),
+        io.StringIO("".join(json.dumps(command, ensure_ascii=False) + "\n" for command in commands)),
     )
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
