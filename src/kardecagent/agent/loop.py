@@ -134,6 +134,17 @@ class AgentLoop:
                 "A conversa continua ativa; tente reformular a pergunta ou peça diretamente a ação desejada.")
 
     @staticmethod
+    def _capability_question_response(message: str) -> str | None:
+        normalized = AgentLoop._normalized_message(message)
+        if any(term in normalized for term in (
+            "voce consegue pesquisar", "voce pode pesquisar", "consegue pesquisar na internet",
+            "pode pesquisar na internet", "pesquisar coisas na internet",
+        )):
+            return ("Posso ajudar a pesquisar na internet quando uma ferramenta de busca estiver conectada ao agente. "
+                    "No momento, não vou afirmar que consultei sites sem ter acesso real a uma ferramenta web. "
+                    "Também posso analisar os arquivos e a documentação que estiverem disponíveis no projeto.")
+        return None
+    @staticmethod
     def _local_datetime_response(message: str) -> str | None:
         normalized = AgentLoop._normalized_message(message)
         date_terms = ("que dia e hoje", "qual a data de hoje", "qual e a data de hoje", "que data e hoje", "qual e o dia de hoje", "data de hoje", "dia da semana", "que horas sao", "horario atual", "data atual")
@@ -290,6 +301,13 @@ class AgentLoop:
                 pass
             return {"intent": "chat", "response": local_datetime, "reason": "Data e horário obtidos do relógio local do sistema."}
 
+        capability_answer = self._capability_question_response(message)
+        if capability_answer is not None:
+            try:
+                store.append_conversation(message, capability_answer)
+            except OSError:
+                pass
+            return {"intent": "chat", "response": capability_answer, "reason": "Pergunta sobre capacidade respondida sem iniciar uma tarefa."}
         greeting = self._greeting_response(message)
         if greeting is not None:
             brief = self._project_brief(root)
@@ -392,15 +410,27 @@ class AgentLoop:
 
         self._save_memory_updates(store, payload.get("memory_updates"), message)
         if payload["intent"] == "task" and not self._has_explicit_action_request(message):
-            answer = (
-                "Você quer que eu apenas explique ou sugira uma solução, "
-                "ou deseja que eu faça alterações nos arquivos do projeto?"
+            normalized_message = self._normalized_message(message)
+            recommendation_prefixes = (
+                "proponha ", "me proponha ", "sugira ", "me sugira ", "recomende ",
+                "me recomende ", "planeje ", "monte um plano ", "elabore um plano ",
             )
-            result = {
-                "intent": "clarify",
-                "response": answer,
-                "reason": "A classificação sugeriu uma tarefa, mas não foi identificado um pedido explícito de ação.",
-            }
+            if normalized_message.startswith(recommendation_prefixes):
+                result = {
+                    "intent": "chat",
+                    "response": answer.strip() or self._fallback_chat_response(message, response.content),
+                    "reason": "Pedido de proposta/recomendação tratado como conversa, sem alterações no workspace.",
+                }
+            else:
+                answer = (
+                    "Você quer que eu apenas explique ou proponha um plano, "
+                    "ou deseja que eu implemente a solução nos arquivos do projeto?"
+                )
+                result = {
+                    "intent": "clarify",
+                    "response": answer,
+                    "reason": "A classificação sugeriu uma tarefa, mas não foi identificado um pedido explícito de ação.",
+                }
         else:
             result = {"intent": payload["intent"], "response": answer.strip(), "reason": reason.strip()}
         if result["intent"] in {"chat", "clarify"}:
