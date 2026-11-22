@@ -168,15 +168,15 @@ class AgentExecutor:
     def _is_dependency_install_command(command: str) -> bool:
         """Conservative detection for package-manager mutations; test/build commands remain allowed."""
         patterns = (
-            r"\bpip(?:3)?\s+install\\b",
-            r"\bpython\s+-m\s+pip\s+install\\b",
-            r"\buv\s+(?:add|pip\s+install)\\b",
-            r"\bpoetry\s+add\\b",
-            r"\bpipenv\s+install\\b",
-            r"\b(?:npm|pnpm)\s+install\\b",
-            r"\byarn\s+(?:add|install)\\b",
-            r"\bcargo\s+add\\b",
-            r"\b(?:apt|apt-get|dnf|yum)\s+install\\b",
+            r"\bpip(?:3)?\s+install\b",
+            r"\bpython\s+-m\s+pip\s+install\b",
+            r"\buv\s+(?:add|pip\s+install)\b",
+            r"\bpoetry\s+add\b",
+            r"\bpipenv\s+install\b",
+            r"\b(?:npm|pnpm)\s+install\b",
+            r"\byarn\s+(?:add|install)\b",
+            r"\bcargo\s+add\b",
+            r"\b(?:apt|apt-get|dnf|yum)\s+install\b",
         )
         return any(re.search(pattern, command, re.IGNORECASE) for pattern in patterns)
 
