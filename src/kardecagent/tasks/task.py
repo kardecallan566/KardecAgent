@@ -21,6 +21,7 @@ class Subtask:
     id: str
     title: str
     objective: str
+    role: str = "developer"
     scope: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     completion_criteria: tuple[str, ...] = ()
@@ -35,6 +36,7 @@ class Subtask:
             "id": self.id,
             "title": self.title,
             "objective": self.objective,
+            "role": self.role,
             "scope": list(self.scope),
             "dependencies": list(self.dependencies),
             "completion_criteria": list(self.completion_criteria),
