@@ -52,7 +52,7 @@ function highlightSource(source: string, extension: string) {
   const language = extension.toLowerCase();
   const patterns = language === "json"
     ? /(\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\b\d+(?:\.\d+)?\b)/gm
-    : /(#[^\n]*|\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`|\b(?:const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|type|interface|extends|implements|def|pass|in|is|not|and|or|None|True|False|lambda|with|as|yield|pub|fn|mut|struct|enum|impl|use|mod|match|Some|Ok|Err)\b|\b\d+(?:\.\d+)?\b)/gm;
+    : /(#[^\n]*|\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`[^`]*`|\b(?:const|let|var|function|return|if|else|for|while|class|import|from|export|default|async|await|try|catch|throw|new|this|type|interface|extends|implements|def|pass|in|is|not|and|or|None|True|False|lambda|with|as|yield|pub|fn|mut|struct|enum|impl|use|mod|match|Some|Ok|Err|package|func|go|defer|chan|select|map|range|static|final|public|private|protected|void|int|string|bool|char|namespace|using|include|define|ifdef|endif|typedef|sizeof|const|val|fun|when|nil|self|super|override|sealed|record|trait|crate|extern|unsafe|dyn|move|ref|union|guard|throws|yield|switch|case|break|continue|true|false|null)\b|\b\d+(?:\.\d+)?\b)/gm;
   const nodes: ReactNode[] = [];
   let cursor = 0, match: RegExpExecArray | null;
   while ((match = patterns.exec(source)) !== null) {
