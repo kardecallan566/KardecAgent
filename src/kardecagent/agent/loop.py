@@ -123,11 +123,15 @@ class AgentLoop:
             content = update.get("content")
             if not isinstance(content, str):
                 continue
-            store.remember(
-                scope=update.get("scope", "project"),
-                category=update.get("category", "fact"),
-                content=content,
-            )
+            try:
+                store.remember(
+                    scope=update.get("scope", "project"),
+                    category=update.get("category", "fact"),
+                    content=content,
+                )
+            except OSError:
+                # Memory storage must never prevent an otherwise valid chat response.
+                continue
 
     def interpret_message(self, project_root: Path, message: str) -> dict[str, str]:
         """Classify, answer and learn from a message without entering task execution."""
@@ -142,7 +146,10 @@ class AgentLoop:
                 "um erro, revisar um arquivo ou ajudar a planejar uma melhoria. "
                 "Só farei alterações quando você pedir."
             )
-            store.append_conversation(message, response)
+            try:
+                store.append_conversation(message, response)
+            except OSError:
+                pass
             return {
                 "intent": "chat",
                 "response": response,
@@ -219,7 +226,10 @@ class AgentLoop:
         else:
             result = {"intent": payload["intent"], "response": answer.strip(), "reason": reason.strip()}
         if result["intent"] in {"chat", "clarify"}:
-            store.append_conversation(message, result["response"])
+            try:
+                store.append_conversation(message, result["response"])
+            except OSError:
+                pass
         return result
 
     def _build_context(self, root: Path, task: str) -> dict:
