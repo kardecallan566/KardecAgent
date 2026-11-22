@@ -319,7 +319,7 @@ def test_run_stdio_recovers_classifier_exceptions_as_assistant_responses(monkeyp
         "command_id": "classifier-error",
         "payload": {"instruction": "Quanto é 5+4?", "project_root": str(tmp_path)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + chr(10)))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
