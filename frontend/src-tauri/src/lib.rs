@@ -547,20 +547,10 @@ fn start_runtime(
                     // Preserve valid JSON frames by replacing malformed byte sequences instead
                     // of treating one bad byte as a fatal protocol-stream failure.
                     let line = String::from_utf8_lossy(&bytes).into_owned();
-                    match Ok::<String, std::string::FromUtf8Error>(line) {
-                        Ok(line) => {
-                            if let Ok(message) = serde_json::from_str::<Value>(&line) {
-                                let _ = stdout_app.emit("runtime-message", message);
-                            } else {
-                                let _ = stdout_app.emit("runtime-protocol-error", line);
-                            }
-                        }
-                        Err(error) => {
-                            let _ = stdout_app.emit(
-                                "runtime-protocol-error",
-                                format!("O Core enviou texto que não está em UTF-8 válido: {error}"),
-                            );
-                        }
+                    if let Ok(message) = serde_json::from_str::<Value>(&line) {
+                        let _ = stdout_app.emit("runtime-message", message);
+                    } else {
+                        let _ = stdout_app.emit("runtime-protocol-error", line);
                     }
                 }
                 Ok(None) => break,
