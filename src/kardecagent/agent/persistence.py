@@ -406,6 +406,7 @@ def _board_from_dict(payload: dict | None) -> TaskBoard | None:
     for item in payload.get("subtasks", []):
         board.add(Subtask(
             id=item["id"], title=item["title"], objective=item["objective"],
+            role=item.get("role", "developer"),
             scope=tuple(item.get("scope", [])),
             dependencies=tuple(item.get("dependencies", [])),
             completion_criteria=tuple(item.get("completion_criteria", [])),
