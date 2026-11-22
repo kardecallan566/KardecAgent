@@ -457,10 +457,10 @@ function App() {
 
   async function activateProject(selected: string): Promise<boolean> {
     if (projectRoot === selected) return true;
-    if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace."); return; }
+    if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace."); return false; }
     if (projectRoot && projectRoot !== selected && openTabs.some(tab => tab.dirty)) {
       const discard = window.confirm("Existem alterações não salvas. Deseja descartar essas alterações e abrir outro projeto? (Use Salvar tudo antes, se quiser preservá-las.)");
-      if (!discard) return;
+      if (!discard) return false;
     }
     try {
       const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
