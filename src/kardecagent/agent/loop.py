@@ -41,7 +41,7 @@ class AgentLoop:
         self.executor = AgentExecutor(llm, settings)
         self.recovery = RecoveryManager()
 
-    def _build_context(self, root: Path, task: str) -> dict:
+    def _build_context(self, root: Path, task: str, conversation_history: list[dict] | None = None) -> dict:
         profile = detect_project(root)
         return {
             "task": task,
@@ -51,10 +51,11 @@ class AgentLoop:
                 "commands": profile.commands,
             },
             "project_files": project_snapshot(root),
+            "conversation_history": conversation_history or [],
         }
 
-    def _create_plan(self, root: Path, task: str, state: TaskState) -> ExecutionPlan | None:
-        context = self._build_context(root, task)
+    def _create_plan(self, root: Path, task: str, state: TaskState, conversation_history: list[dict] | None = None) -> ExecutionPlan | None:
+        context = self._build_context(root, task, conversation_history)
         base_messages = [
             {"role": "system", "content": compose_system_prompt(
                 SYSTEM_PROMPT, load_registry(root / ".kardecagent" / "harness.json"),
@@ -110,6 +111,7 @@ class AgentLoop:
         approval_callback=None,
         high_risk_approval_callback=None,
         event_callback=None,
+        conversation_history: list[dict] | None = None,
     ) -> TaskState:
         root = project_root.resolve()
         state = TaskState(task, str(root), event_callback=event_callback)
@@ -119,7 +121,7 @@ class AgentLoop:
                      kind=profile.kind, language=profile.language, framework=profile.framework,
                      package_manager=profile.package_manager, commands=profile.commands)
 
-        plan = self._create_plan(root, task, state)
+        plan = self._create_plan(root, task, state, conversation_history)
         if plan is None:
             state.transition(TaskStatus.FAILED, reason="Could not produce a valid execution plan.")
             state.record("plan_failed", "Could not produce a valid execution plan.")
@@ -160,7 +162,7 @@ class AgentLoop:
         else:
             state.record("checkpoint_skipped", "Project is not a Git repository.")
 
-        context = self._build_context(root, task)
+        context = self._build_context(root, task, conversation_history)
         from .orchestrator import Orchestrator, OrchestrationError
         orchestrator = Orchestrator(self.llm, self.settings)
         if orchestrator.should_decompose(plan, root):
