@@ -729,11 +729,11 @@ function App() {
     setRuntimeBusy(true);
     setRuntimeError(null);
     try {
-      const normalizedInstruction = instruction.toLocaleLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
-      const explicitAction = /\\b(crie|criar|implemente|implementar|corrija|corrigir|altere|alterar|modifique|modificar|execute|executar|rode|rodar|instale|instalar|remova|remover|adicione|adicionar|atualize|atualizar|refatore|refatorar|gere|gerar|escreva|escrever|construa|construir|desenvolva|desenvolver|configure|configurar|delete|build|run|implement|fix|create|update)\\b/.test(normalizedInstruction);
-      const explicitPlanExecution = /\\b(use|siga|continue|implemente|execute|comece|inicie|fa[cç]a a cria[cç][aã]o|construa|desenvolva)\\b/.test(normalizedInstruction) && /\\b(plano|planejamento|jogo|projeto|implementa[cç][aã]o)\\b/.test(normalizedInstruction);
-      const asksHow = /^(como|por que|porque|o que|qual|quais|explique|me explique|analise|analisa)\\b/.test(normalizedInstruction);
-      const actionRequest = explicitPlanExecution || (explicitAction && !asksHow && !/\\b(fazer|montar|criar) um plano\\b/.test(normalizedInstruction));
+      const normalizedInstruction = instruction.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const explicitAction = /\b(crie|criar|implemente|implementar|corrija|corrigir|altere|alterar|modifique|modificar|execute|executar|rode|rodar|instale|instalar|remova|remover|adicione|adicionar|atualize|atualizar|refatore|refatorar|gere|gerar|escreva|escrever|construa|construir|desenvolva|desenvolver|configure|configurar|delete|build|run|implement|fix|create|update)\b/.test(normalizedInstruction);
+      const explicitPlanExecution = /\b(use|siga|continue|implemente|execute|comece|inicie|fa[cç]a a cria[cç][aã]o|construa|desenvolva)\b/.test(normalizedInstruction) && /\b(plano|planejamento|jogo|projeto|implementa[cç][aã]o)\b/.test(normalizedInstruction);
+      const asksHow = /^(como|por que|porque|o que|qual|quais|explique|me explique|analise|analisa)\b/.test(normalizedInstruction);
+      const actionRequest = explicitPlanExecution || (explicitAction && !asksHow && !/\b(fazer|montar|criar) um plano\b/.test(normalizedInstruction));
       const history = chatMessages.slice(-16).map(item => ({ role: item.role, content: item.text.slice(0, 4000) }));
       const taskHistory = [...history.slice(-15), { role: "user" as const, content: instruction.slice(0, 4000) }];
       await invoke("send_runtime_command", { message: actionRequest ? {
