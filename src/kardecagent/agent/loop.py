@@ -72,11 +72,11 @@ class AgentLoop:
         if normalized.startswith(("pode criar ", "poderia criar ", "can you create ", "please create ")):
             return True
         action = re.compile(
-            r"\\b(crie|cria|implemente|altere|modifique|corrija|conserte|"
+            r"\b(crie|cria|implemente|altere|modifique|corrija|conserte|"
             r"refatore|apague|exclua|delete|configure|execute|rode|instale|"
             r"atualize|adicione|remova|escreva|gere|construa|faca|faça|"
             r"desenvolva|build|fix|implement|create|edit|update|delete|"
-            r"refactor|run|execute|install|add|remove|change|modify|write)\\b"
+            r"refactor|run|execute|install|add|remove|change|modify|write)\b"
         )
         return bool(action.search(normalized))
 
