@@ -201,6 +201,29 @@ def test_finish_requires_evidence_for_every_completion_criterion(tmp_path: Path)
     assert any(event.event_type == "completion_criteria_failed" for event in state.events)
 
 
+def test_intent_router_answers_simple_greeting_without_calling_the_model(tmp_path: Path):
+    class ExplodingLLM:
+        def chat(self, messages):
+            raise AssertionError("a plain greeting must not call the LLM")
+
+    result = AgentLoop(ExplodingLLM(), Settings(max_iterations=2)).interpret_message(
+        tmp_path, "oi"
+    )
+    assert result["intent"] == "chat"
+    assert "Olá!" in result["response"]
+
+
+def test_intent_router_downgrades_task_without_explicit_action_verb(tmp_path: Path):
+    llm = FakeLLM([
+        '{"intent":"task","response":"","reason":"The model guessed a task."}'
+    ])
+    result = AgentLoop(llm, Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Preciso de uma nova tela para o aplicativo."
+    )
+    assert result["intent"] == "clarify"
+    assert "alterações" in result["response"]
+
+
 def test_intent_router_answers_questions_without_starting_a_task(tmp_path: Path):
     (tmp_path / "README.md").write_text("# Fixture\\nA tiny example project.", encoding="utf-8")
     llm = FakeLLM([
