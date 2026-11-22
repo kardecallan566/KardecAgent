@@ -402,7 +402,8 @@ fn start_runtime(
         .args(&launch_args)
         .arg(&root)
         .current_dir(&root)
-        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONIOENCODING", "utf-8:strict")
+        .env("PYTHONUTF8", "1")
         .env("PYTHONUNBUFFERED", "1")
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
         .env("KARDECAGENT_LLM_MODEL", llm_model.trim())
@@ -422,11 +423,20 @@ fn start_runtime(
         loop {
             match read_bounded_line(&mut reader, MAX_RUNTIME_LINE_BYTES) {
                 Ok(Some(bytes)) => {
-                    let line = String::from_utf8_lossy(&bytes);
-                    if let Ok(message) = serde_json::from_str::<Value>(&line) {
-                        let _ = stdout_app.emit("runtime-message", message);
-                    } else {
-                        let _ = stdout_app.emit("runtime-protocol-error", line.to_string());
+                    match String::from_utf8(bytes) {
+                        Ok(line) => {
+                            if let Ok(message) = serde_json::from_str::<Value>(&line) {
+                                let _ = stdout_app.emit("runtime-message", message);
+                            } else {
+                                let _ = stdout_app.emit("runtime-protocol-error", line);
+                            }
+                        }
+                        Err(error) => {
+                            let _ = stdout_app.emit(
+                                "runtime-protocol-error",
+                                format!("O Core enviou texto que não está em UTF-8 válido: {error}"),
+                            );
+                        }
                     }
                 }
                 Ok(None) => break,
