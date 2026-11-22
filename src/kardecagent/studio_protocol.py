@@ -10,6 +10,7 @@ from .agent.loop import AgentLoop
 from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
+from .agent.memory import MemoryStore
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -132,7 +133,11 @@ def _approval(
 
 
 def run_stdio(project_root: Path, agent: AgentLoop) -> int:
-    """Serve a bounded JSONL command/event stream for the desktop Studio."""
+    """Serve a bounded UTF-8 JSONL command/event stream for the desktop Studio."""
+    for stream in (sys.stdin, sys.stdout):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="strict")
     root = project_root.resolve()
     seen_command_ids: dict[str, None] = {}
     _write({
@@ -257,6 +262,44 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "command_id": command_identifier,
                 "project_root": str(root),
             })
+            continue
+
+        if message.get("schema_version") == 1 and message.get("type") in {"memory.list", "memory.forget"}:
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            requested_root = payload.get("project_root")
+            try:
+                workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+            except (OSError, RuntimeError):
+                workspace_matches = False
+            if not workspace_matches:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier,
+                        "reason": "project_root does not match the active runtime workspace."})
+                continue
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier,
+                        "reason": "command_id has already been processed."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            store = MemoryStore(root)
+            if message.get("type") == "memory.forget":
+                identifier = payload.get("memory_id")
+                if not isinstance(identifier, str) or not identifier.strip():
+                    _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier,
+                            "reason": "memory_id is required."})
+                    continue
+                removed = store.forget(identifier)
+                _write({"type": "memory.updated", "schema_version": 1, "command_id": command_identifier,
+                        "payload": {"removed": removed, "items": store.all_items()}})
+            else:
+                _write({"type": "memory.snapshot", "schema_version": 1, "command_id": command_identifier,
+                        "payload": {"items": store.all_items()}})
             continue
 
         if message.get("schema_version") == 1 and message.get("type") == "task.resume":
