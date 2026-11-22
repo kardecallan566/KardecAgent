@@ -243,7 +243,7 @@ def test_intent_router_uses_project_files_and_persistent_memory(tmp_path: Path, 
         tmp_path, "O que esse aplicativo faz?"
     )
     assert result["intent"] == "chat"
-    sent_context = json.loads(llm.messages[-1]["content"])
+    sent_context = json.loads(llm.messages[-1][-1]["content"])
     assert "A scheduling app for independent music teachers." in sent_context["important_file_contents"][0]["content"]
     assert sent_context["persistent_memory"][0]["content"].startswith("O projeto atende")
 
