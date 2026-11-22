@@ -7,7 +7,7 @@ import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
   ListTodo, Plus, Search, ShieldCheck, Workflow, Save,
-  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square
+  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square, IndentIncrease
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
@@ -677,6 +677,36 @@ function App() {
     }
   }
 
+  async function formatCurrentFile() {
+    if (!projectRoot || !openedPath || qualityBusy) return;
+    if (!window.confirm("Formatar e corrigir a indentação deste arquivo?\\n\\n" + openedPath + "\\n\\nA IDE usará o formatador já disponível no projeto. Nenhuma dependência será instalada.")) return;
+    setQualityBusy(true);
+    setQualityOutput(null);
+    setProjectError(null);
+    try {
+      if (fileDirty) {
+        await invoke("write_project_file", { projectRoot, filePath: openedPath, content: fileContent });
+        setFileDirty(false);
+        setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: fileContent, dirty: false } : tab));
+      }
+      const result = await invoke<{ file: string; language: string; tool: string; available: boolean; exit_code: number; output: string; fixed: boolean }>(
+        "format_project_file", { projectRoot, filePath: openedPath, approved: true }
+      );
+      setQualityOutput(result);
+      setBottomPanel("Output");
+      if (result.fixed) {
+        const updated = await invoke<string>("read_project_file", { projectRoot, filePath: openedPath });
+        setFileContent(updated);
+        setFileDirty(false);
+        setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: updated, dirty: false } : tab));
+      }
+    } catch (error) {
+      setProjectError("Falha ao formatar arquivo: " + String(error));
+    } finally {
+      setQualityBusy(false);
+    }
+  }
+
   async function saveCurrentFile() {
     if (!projectRoot || !openedPath || !fileDirty || fileSaving) return;
     setFileSaving(true);
@@ -901,7 +931,7 @@ function App() {
             </div>
           ) : (
             <>
-              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button" onClick={() => void runQuality(false)} disabled={qualityBusy}><Activity size={13}/>{qualityBusy ? "Analisando..." : "Lint"}</button><button className="save-file-button" onClick={() => void runQuality(true)} disabled={qualityBusy}><Zap size={13}/>{qualityBusy ? "Corrigindo..." : "Corrigir"}</button><button className="save-file-button" onClick={runCurrentFile} disabled={runningFile}><Play size={13}/>{runningFile ? "Executando..." : "Executar"}</button><button className="save-file-button" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving}><Save size={13}/>{fileSaving ? "Salvando..." : "Salvar"}</button></>}</div>
+              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
               <div className="editor">
                 {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
