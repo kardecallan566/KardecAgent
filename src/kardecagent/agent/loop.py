@@ -73,7 +73,7 @@ class AgentLoop:
     @staticmethod
     def _local_datetime_response(message: str) -> str | None:
         normalized = AgentLoop._normalized_message(message)
-        date_terms = ("que dia e hoje", "qual a data de hoje", "data de hoje", "dia da semana", "que horas sao", "horario atual", "data atual")
+        date_terms = ("que dia e hoje", "qual a data de hoje", "qual e a data de hoje", "que data e hoje", "qual e o dia de hoje", "data de hoje", "dia da semana", "que horas sao", "horario atual", "data atual")
         if not any(term in normalized for term in date_terms):
             return None
         now = datetime.now().astimezone()
@@ -94,9 +94,36 @@ class AgentLoop:
             "src/main.tsx", "src/index.tsx", "app/_layout.tsx", "app/index.tsx",
             "src/app.tsx",
         ]
+        discovered_sources = []
+        for folder in ("app", "src", "pages", "screens", "components"):
+            base = root / folder
+            if not base.is_dir():
+                continue
+            try:
+                candidates = [
+                    item for item in base.rglob("*")
+                    if item.is_file()
+                    and item.suffix.lower() in {".tsx", ".ts", ".jsx", ".js"}
+                    and not any(part in {"node_modules", ".expo", ".next", "__tests__", "tests"} for part in item.parts)
+                ]
+            except OSError:
+                candidates = []
+            candidates.sort(key=lambda item: (
+                0 if item.name in {"_layout.tsx", "index.tsx", "App.tsx", "main.tsx"} else 1,
+                len(item.parts),
+                str(item).casefold(),
+            ))
+            discovered_sources.extend(
+                item.relative_to(root).as_posix()
+                for item in candidates[:4]
+                if item.relative_to(root).as_posix() not in preferred
+            )
+            if len(discovered_sources) >= 8:
+                break
+
         excerpts = []
         total = 0
-        for relative in preferred:
+        for relative in [*preferred, *discovered_sources[:8]]:
             path = root / relative
             if not path.is_file():
                 continue
@@ -109,7 +136,7 @@ class AgentLoop:
             remaining = 8000 - total
             if remaining <= 0:
                 break
-            excerpt = content[:min(3500, remaining)]
+            excerpt = content[:min(3000 if relative in preferred else 1800, remaining)]
             excerpts.append({"path": relative, "content": excerpt})
             total += len(excerpt)
         return {
@@ -144,19 +171,31 @@ class AgentLoop:
             for item in store.relevant(query, limit=8)
         ]
 
-    @staticmethod
-    def _save_memory_updates(store: MemoryStore, updates: object) -> None:
+    @classmethod
+    def _save_memory_updates(cls, store: MemoryStore, updates: object, message: str) -> None:
         if not isinstance(updates, list):
             return
+        message_terms = set(re.findall(r"[a-z0-9]{4,}", cls._normalized_message(message)))
+        normalized_message = cls._normalized_message(message)
+        first_person_preference = any(term in normalized_message for term in (
+            "prefiro", "gosto", "quero sempre", "nunca quero", "meu fluxo",
+            "costumo", "trabalho com", "minha preferencia", "minhas preferencias",
+        ))
         for update in updates[:8]:
             if not isinstance(update, dict):
                 continue
             content = update.get("content")
             if not isinstance(content, str):
                 continue
+            scope = update.get("scope", "project")
+            content_terms = set(re.findall(r"[a-z0-9]{4,}", cls._normalized_message(content)))
+            if not message_terms.intersection(content_terms):
+                continue
+            if scope == "user" and not first_person_preference:
+                continue
             try:
                 store.remember(
-                    scope=update.get("scope", "project"),
+                    scope=scope,
                     category=update.get("category", "fact"),
                     content=content,
                 )
@@ -251,7 +290,7 @@ class AgentLoop:
         if payload["intent"] in {"chat", "clarify"} and not answer.strip():
             raise ValueError("Intent classifier did not provide a chat response.")
 
-        self._save_memory_updates(store, payload.get("memory_updates"))
+        self._save_memory_updates(store, payload.get("memory_updates"), message)
         if payload["intent"] == "task" and not self._has_explicit_action_request(message):
             answer = (
                 "Você quer que eu apenas explique ou sugira uma solução, "
