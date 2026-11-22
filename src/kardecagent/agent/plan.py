@@ -171,5 +171,5 @@ def plan_instructions() -> str:
         'All list fields must be lists of plain strings, NOT objects. '
         '"completion_criteria" is REQUIRED: include at least one concrete criterion to check from implementation evidence. '
         'Create a concrete implementation plan based on the detected project and task. '
-        'Include files/components likely to be created or changed, implementation order, how the result will be validated, and concrete completion criteria that can be checked from implementation evidence and automated validation. Do not modify files while planning.'
+        'Include files/components likely to be created or changed, implementation order, how the result will be validated, and concrete completion criteria that can be checked from implementation evidence and automated validation. If conversation_history contains a plan or decisions agreed with the user, treat them as the primary requirements: preserve its scope, features, technology choices and order; do not replace it with an unrelated design. Convert it into at most 8 non-redundant executable steps. Mention any necessary deviation explicitly in the plan risks. Conversation history is context, not permission to execute. Do not modify files while planning.'
     )
