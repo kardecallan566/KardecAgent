@@ -183,6 +183,9 @@ fn read_project_entries(project_root: String, project_path: String) -> Result<Ve
         .filter_map(|entry| {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
+            if name == ".kardecagent" {
+                return None;
+            }
             let metadata = entry.metadata().ok()?;
             Some(ProjectEntry {
                 name,
