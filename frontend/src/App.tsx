@@ -289,6 +289,13 @@ function App() {
         setMemoryItems(message.payload?.items || []);
         setMemoryLoading(false);
         setMemoryError(null);
+      } else if (message.type === "chat.failed") {
+        setRuntimeBusy(false);
+        const failure = message.payload?.message || "Falha ao responder. Tente novamente.";
+        const failureId = "chat-error-" + (message.command_id || crypto.randomUUID());
+        setChatMessages(items => [...items, { id: failureId, role: "assistant" as const, text: failure }].slice(-100));
+        setRuntimeError(null);
+        setRuntimeEvents(items => [...items, { id: failureId, type: "chat.failed", message: failure }].slice(-100));
       } else if (message.type === "assistant.response") {
         const responseText = message.payload?.message || "Não consegui formular uma resposta para essa mensagem.";
         const responseId = "chat-" + (message.command_id || crypto.randomUUID());
@@ -692,9 +699,15 @@ function App() {
     setRuntimeBusy(true);
     setRuntimeError(null);
     try {
-      await invoke("send_runtime_command", { message: {
+      const actionVerbs = ["crie", "criar", "implemente", "implementar", "corrija", "corrigir", "altere", "alterar", "modifique", "modificar", "execute", "executar", "rode", "rodar", "instale", "instalar", "remova", "remover", "adicione", "adicionar", "atualize", "atualizar", "refatore", "refatorar", "gere", "gerar", "escreva", "escrever", "construa", "construir", "configure", "configurar", "delete", "build", "run", "implement", "fix", "create", "update"];
+      const actionRequest = actionVerbs.some(verb => instruction.toLocaleLowerCase().includes(verb));
+      const history = chatMessages.slice(-16).map(item => ({ role: item.role, content: item.text.slice(0, 4000) }));
+      await invoke("send_runtime_command", { message: actionRequest ? {
         type: "task.submit", schema_version: 1, command_id: commandId,
         payload: { instruction, project_root: projectRoot }
+      } : {
+        type: "chat.message", schema_version: 1, command_id: commandId,
+        payload: { message: instruction, project_root: projectRoot, history }
       }});
       setInstructionDraft("");
     } catch (error) {
