@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -136,6 +137,11 @@ def parse_plan(content: str) -> ExecutionPlan:
         raise PlanError("plan requires a non-empty summary")
     if not isinstance(raw_steps, list) or not steps:
         raise PlanError("plan requires a non-empty list of textual steps")
+    if len(steps) > 8:
+        raise PlanError("plan exceeds the hard limit of 8 steps")
+    normalized_steps = [re.sub(r"\s+", " ", step).strip().casefold() for step in steps]
+    if len(set(normalized_steps)) != len(normalized_steps):
+        raise PlanError("plan contains duplicate steps")
     if raw_validation is not None and not isinstance(raw_validation, list):
         raise PlanError("validation must be a list of textual checks")
     if raw_risks is not None and not isinstance(raw_risks, list):
