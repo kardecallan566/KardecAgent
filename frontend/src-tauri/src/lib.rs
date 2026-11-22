@@ -357,10 +357,15 @@ fn run_project_file(project_root: String, file_path: String, approved: bool) -> 
     let root = Path::new(&project_root).canonicalize().map_err(|e| e.to_string())?;
     let extension = path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase();
     let language = match extension.as_str() {
-        "py" => "Python", "js" | "mjs" | "cjs" => "JavaScript", "java" => "Java",
+        "py" | "pyi" => "Python", "js" | "mjs" | "cjs" | "jsx" => "JavaScript",
+        "ts" | "mts" | "cts" | "tsx" => "TypeScript", "java" => "Java",
         "go" => "Go", "rs" => "Rust", "php" => "PHP", "rb" => "Ruby",
-        "c" => "C", "cpp" | "cc" | "cxx" => "C++",
-        _ => return Err("Linguagem não habilitada. Suportados: Python, JavaScript, Java, Go, Rust, PHP, Ruby, C e C++.".into()),
+        "c" | "h" => "C", "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => "C++",
+        "kt" | "kts" => "Kotlin", "cs" => "C#", "swift" => "Swift",
+        "dart" => "Dart", "lua" => "Lua", "sh" | "bash" => "Shell",
+        "pl" => "Perl", "r" => "R", "scala" => "Scala", "ex" | "exs" => "Elixir",
+        "ps1" => "PowerShell",
+        _ => return Err("Linguagem sem executor integrado. A IDE ainda permite editar e aplicar lint às linguagens identificadas.".into()),
     };
     let script = r#"
 import json, os, subprocess, sys, tempfile
@@ -368,16 +373,23 @@ root = os.environ["KARDECAGENT_RUN_ROOT"]
 source = os.environ["KARDECAGENT_RUN_FILE"]
 ext = os.path.splitext(source)[1].lower()
 commands = {
- ".py": [sys.executable, source], ".js": ["node", source], ".mjs": ["node", source], ".cjs": ["node", source],
+ ".py": [sys.executable, source], ".pyi": [sys.executable, source],
+ ".js": ["node", source], ".mjs": ["node", source], ".cjs": ["node", source], ".jsx": ["npx", "--no-install", "tsx", source],
+ ".ts": ["node", "--experimental-strip-types", source], ".mts": ["node", "--experimental-strip-types", source],
+ ".cts": ["node", "--experimental-strip-types", source], ".tsx": ["npx", "--no-install", "tsx", source],
  ".java": ["java", source], ".go": ["go", "run", source], ".php": ["php", source], ".rb": ["ruby", source],
+ ".kt": ["kotlin", source], ".kts": ["kotlinc", "-script", source], ".swift": ["swift", source],
+ ".dart": ["dart", "run", source], ".lua": ["lua", source], ".sh": ["bash", source], ".bash": ["bash", source],
+ ".pl": ["perl", source], ".r": ["Rscript", source], ".scala": ["scala", source],
+ ".ex": ["elixir", source], ".exs": ["elixir", source], ".ps1": ["powershell", "-NoProfile", "-File", source],
 }
 try:
-    if ext in {".rs", ".c", ".cpp", ".cc", ".cxx"}:
+    if ext in {".rs", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".hxx"}:
         with tempfile.TemporaryDirectory(prefix="kardecagent-build-") as temp:
             if ext == ".rs":
                 binary = os.path.join(temp, "program.exe" if os.name == "nt" else "program")
                 compile_argv = ["rustc", source, "-o", binary]
-            elif ext == ".c":
+            elif ext in {".c", ".h"}:
                 binary = os.path.join(temp, "program.exe" if os.name == "nt" else "program")
                 compile_argv = ["gcc", source, "-o", binary]
             else:
