@@ -319,9 +319,25 @@ fn quality_project_file(
         }),
     };
 
-    let mut command = Command::new(tool);
+    let mut program = tool;
+    let mut command_args = args.clone();
+    let local_script = if tool == "eslint" {
+        let candidate = root.join("node_modules").join("eslint").join("bin").join("eslint.js");
+        candidate.is_file().then_some(candidate)
+    } else if tool == "prettier" {
+        let candidates = [
+            root.join("node_modules").join("prettier").join("bin").join("prettier.cjs"),
+            root.join("node_modules").join("prettier").join("bin-prettier.js"),
+        ];
+        candidates.into_iter().find(|candidate| candidate.is_file())
+    } else { None };
+    if let Some(script_path) = local_script {
+        program = "node";
+        command_args.insert(0, script_path.to_string_lossy().into_owned());
+    }
+    let mut command = Command::new(program);
     configure_hidden_process(&mut command);
-    let output = match command.args(&args).current_dir(&root).output() {
+    let output = match command.args(&command_args).current_dir(&root).output() {
         Ok(output) => output,
         Err(error) if error.kind() == ErrorKind::NotFound => {
             return Ok(QualityResult {
