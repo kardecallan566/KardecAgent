@@ -26,6 +26,8 @@ class Settings:
     max_iterations: int = 20
     command_timeout_seconds: float = 120.0
     max_command_output_chars: int = 20_000
+    allow_dependency_installations: bool = False
+    max_investigation_actions: int = 30
     web_allow_domains: tuple[str, ...] = ()
     web_deny_domains: tuple[str, ...] = ()
 
