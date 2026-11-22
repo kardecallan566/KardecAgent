@@ -58,15 +58,23 @@ class AgentLoop:
     @classmethod
     def _has_explicit_action_request(cls, message: str) -> bool:
         normalized = cls._normalized_message(message)
+        question_prefixes = (
+            "como ", "how ", "what ", "why ", "when ", "where ",
+            "o que ", "qual ", "quais ", "por que ", "porque ",
+            "quando ", "onde ", "quem ", "me explique", "me explica",
+            "explique ", "explique-me ", "pode explicar", "pode me explicar",
+            "quero saber ", "gostaria de saber ", "o que voce acha",
+            "qual seria ", "quais seriam ", "tem como ", "seria possivel",
+            "is it possible ", "can you explain", "could you explain",
+        )
+        if normalized.startswith(question_prefixes):
+            return False
         action = re.compile(
-            r"\b(crie|criar|cria|implemente|implementar|"
-            r"altere|alterar|modifique|modificar|corrija|corrigir|conserte|"
-            r"consertar|refatore|refatorar|apague|apagar|exclua|excluir|"
-            r"delete|deletar|configure|configurar|execute|executar|rode|rodar|"
-            r"instale|instalar|atualize|atualizar|adicione|adicionar|"
-            r"remova|remover|escreva|escrever|gere|gerar|construa|construir|"
-            r"criar|build|fix|implement|create|edit|update|delete|refactor|"
-            r"run|execute|install|add|remove|change|modify|write)\b"
+            r"\\b(crie|cria|implemente|altere|modifique|corrija|conserte|"
+            r"refatore|apague|exclua|delete|configure|execute|rode|instale|"
+            r"atualize|adicione|remova|escreva|gere|construa|faca|faça|"
+            r"desenvolva|build|fix|implement|create|edit|update|delete|"
+            r"refactor|run|execute|install|add|remove|change|modify|write)\\b"
         )
         return bool(action.search(normalized))
 
