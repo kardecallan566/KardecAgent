@@ -738,7 +738,7 @@ function App() {
       const taskHistory = [...history.slice(-15), { role: "user" as const, content: instruction.slice(0, 4000) }];
       await invoke("send_runtime_command", { message: actionRequest ? {
         type: "task.submit", schema_version: 1, command_id: commandId,
-        payload: { instruction, project_root: projectRoot, history: taskHistory }
+        payload: { instruction, project_root: projectRoot, history: taskHistory, active_editor: openedPath ? { path: openedPath, content: fileContent.slice(0, 16000), dirty: fileDirty } : null }
       } : {
         type: "chat.message", schema_version: 1, command_id: commandId,
         payload: { message: instruction, project_root: projectRoot, history }
