@@ -543,7 +543,11 @@ fn start_runtime(
         loop {
             match read_bounded_line(&mut reader, MAX_RUNTIME_LINE_BYTES) {
                 Ok(Some(bytes)) => {
-                    // A child process or native dependency may write arbitrary bytes to stdout.\n                    // Preserve valid JSON frames by replacing malformed byte sequences instead\n                    // of treating one bad byte as a fatal protocol-stream failure.\n                    let line = String::from_utf8_lossy(&bytes).into_owned();\n                    match Ok::<String, std::string::FromUtf8Error>(line) {
+                    // A child process or native dependency may write arbitrary bytes to stdout.
+                    // Preserve valid JSON frames by replacing malformed byte sequences instead
+                    // of treating one bad byte as a fatal protocol-stream failure.
+                    let line = String::from_utf8_lossy(&bytes).into_owned();
+                    match Ok::<String, std::string::FromUtf8Error>(line) {
                         Ok(line) => {
                             if let Ok(message) = serde_json::from_str::<Value>(&line) {
                                 let _ = stdout_app.emit("runtime-message", message);

@@ -182,4 +182,13 @@ def test_run_stdio_rejects_resume_for_unknown_persisted_task(monkeypatch, tmp_pa
     assert rejected["type"] == "command.rejected"
     assert "not found" in rejected["reason"].lower()
     assert not any(item["type"] == "task.created" for item in messages)
-\n\n\ndef test_write_uses_ascii_safe_jsonl_while_preserving_unicode(monkeypatch):\n    output = io.StringIO()\n    monkeypatch.setattr(studio_protocol.sys, "stdout", output)\n    studio_protocol._write({"type": "assistant.response", "payload": {"message": "ação concluída — café ☕"}})\n    encoded = output.getvalue().strip()\n    assert encoded.isascii()\n    assert json.loads(encoded)["payload"]["message"] == "ação concluída — café ☕"\n
+\n
+
+
+def test_write_uses_ascii_safe_jsonl_while_preserving_unicode(monkeypatch):
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+    studio_protocol._write({"type": "assistant.response", "payload": {"message": "ação concluída — café ☕"}})
+    encoded = output.getvalue().strip()
+    assert encoded.isascii()
+    assert json.loads(encoded)["payload"]["message"] == "ação concluída — café ☕"
