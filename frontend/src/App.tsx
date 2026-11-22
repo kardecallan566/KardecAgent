@@ -52,7 +52,6 @@ function highlightSource(source: string, extension: string) {
   if (cursor < source.length) nodes.push(source.slice(cursor));
   return nodes.length ? nodes : source;
 }
-
 function taskStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     pending: "Pendente",
