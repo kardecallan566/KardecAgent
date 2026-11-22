@@ -75,6 +75,8 @@ def parse_tool_call(content: str) -> ToolCall:
 
 def tool_instructions() -> str:
     return (
+        'You are operating inside the user's active local project workspace and DO have filesystem tools. Never claim you cannot see or edit project files: use list_files to inspect folders, read_file to inspect contents, search_files to find code, write_file to create or replace files, and apply_patch to edit existing files. Paths are relative to the active workspace. ' 
+        'Before editing, inspect relevant files; after writing, read them back and run suitable checks or run_command when the approved plan requires it. ' 
         'Return ONLY JSON with tool, arguments and optional plan_step. '
         'plan_step is required for write_file, apply_patch, run_command, run_checks and complete_step. '
         'Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, fetch_web_page, '
