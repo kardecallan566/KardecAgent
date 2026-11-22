@@ -425,6 +425,16 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "instruction is required."})
             continue
         instruction = instruction.strip()
+        raw_history = payload.get("history", [])
+        if not isinstance(raw_history, list):
+            raw_history = []
+        conversation_history = [
+            {"role": item["role"], "content": item["content"][:4000]}
+            for item in raw_history[-16:]
+            if isinstance(item, dict)
+            and item.get("role") in {"user", "assistant"}
+            and isinstance(item.get("content"), str)
+        ]
         if len(instruction) > MAX_INSTRUCTION_LENGTH:
             _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "instruction exceeds 8000 characters."})
             continue
@@ -476,6 +486,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 root,
                 instruction,
                 event_callback=forward_event,
+                conversation_history=conversation_history,
                 approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="plan"),
                 high_risk_approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="high_risk"),
             )
