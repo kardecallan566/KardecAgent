@@ -30,6 +30,8 @@ function taskStatusLabel(status: string): string {
 
 function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("explorer");
+  const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(false);
+  const [agentPaneCollapsed, setAgentPaneCollapsed] = useState(false);
   const [selectedFile, setSelectedFile] = useState("App.tsx");
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
@@ -52,6 +54,7 @@ function App() {
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [approvalHistory, setApprovalHistory] = useState<Array<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string; status: string }>>([]);
   const seenEventIds = useRef(new Set<string>());
   const approvalCommandId = useRef<string | null>(null);
 
@@ -74,7 +77,9 @@ function App() {
         setRuntimeError(null);
       } else if (message.type === "approval.requested") {
         setRuntimeTasks(items => items.map(task => (message.execution_id ? task.executionId === message.execution_id : task.id === message.task_id) ? { ...task, status: "Aguardando aprovação" } : task));
-        setPendingApproval({ approvalId: message.payload.approval_id, kind: message.payload.kind, summary: message.payload.summary, risk: message.payload.risk });
+        const approval = { approvalId: message.payload.approval_id, kind: message.payload.kind, summary: message.payload.summary, risk: message.payload.risk };
+        setPendingApproval(approval);
+        setApprovalHistory(items => [...items.filter(item => item.approvalId !== approval.approvalId), { ...approval, status: "Pendente" }].slice(-30));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: "Plano aguardando sua aprovação." }].slice(-100));
       } else if (message.type === "core.event") {
         const coreType = message.payload?.event_type || "core.event";
@@ -135,6 +140,7 @@ function App() {
       } else if (message.type === "command.accepted" && message.command_id === approvalCommandId.current) {
         approvalCommandId.current = null;
         setApprovalSubmitting(false);
+        setApprovalHistory(items => items.map(item => item.approvalId === pendingApproval?.approvalId ? { ...item, status: "Decisão enviada" } : item));
         setPendingApproval(null);
         setRuntimeTasks(items => items.map(task => task.status === "Aguardando aprovação" ? { ...task, status: "Decisão enviada" } : task));
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
@@ -204,6 +210,7 @@ function App() {
       setProjectError(null);
       setRuntimeEvents([]);
       setRuntimeTasks([]);
+      setApprovalHistory([]);
       setRuntimeSubtasks([]);
       setRuntimePlanSteps([]);
       setActiveRuntimeSubtask(null);
@@ -275,10 +282,10 @@ function App() {
       <header className="titlebar">
         <div className="brand"><div className="brand-mark"><Zap size={15} /></div><span>KARDEC<span className="brand-light">AGENT</span></span></div>
         <span className="workspace-label">Studio <span className="muted">/</span> Workspace</span>
-        <div className="titlebar-right"><span className="connection"><span /> {runtimeStatus === "online" ? "Core conectado" : runtimeStatus === "connecting" ? "Conectando ao core..." : "Core desconectado"}</span><span className="avatar">KA</span></div>
+        <div className="titlebar-right"><button className="pane-toggle" onClick={() => setLeftPaneCollapsed(value => !value)}>{leftPaneCollapsed ? "Mostrar navegação" : "Recolher navegação"}</button><button className="pane-toggle" onClick={() => setAgentPaneCollapsed(value => !value)}>{agentPaneCollapsed ? "Mostrar agente" : "Recolher agente"}</button><span className="connection"><span /> {runtimeStatus === "online" ? "Core conectado" : runtimeStatus === "connecting" ? "Conectando ao core..." : "Core desconectado"}</span><span className="avatar">KA</span></div>
       </header>
 
-      <div className="work-area">
+      <div className={`work-area ${leftPaneCollapsed ? "left-pane-collapsed" : ""} ${agentPaneCollapsed ? "agent-pane-collapsed" : ""}`}>
         <nav className="activity-rail" aria-label="Navegação">
           <button className={activeNav === "explorer" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("explorer")} title="Explorer"><Files /></button>
           <button className={activeNav === "agent" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("agent")} title="Agent"><Bot /></button>
@@ -288,7 +295,7 @@ function App() {
           <button className="rail-button" title="Atividade"><Activity /></button>
         </nav>
 
-        <aside className="sidebar">
+        {!leftPaneCollapsed && <aside className="sidebar">
           <div className="sidebar-heading"><span>{activeNav === "explorer" ? "EXPLORER" : activeNav.toUpperCase()}</span><button className="icon-button" title="Nova ação"><Plus size={15}/></button></div>
           {activeNav === "explorer" ? (
             <>
@@ -308,9 +315,9 @@ function App() {
             </>
           ) : activeNav === "tasks" ? (
             <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
-          ) : activeNav === "approvals" ? (pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação pendente</strong><small>Solicitações do gestor aparecerão aqui.</small></div>) :
+          ) : activeNav === "approvals" ? (pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary.slice(0, 180)}{item.summary.length > 180 ? "…" : ""}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>As solicitações e decisões aparecerão aqui durante esta sessão.</small></div> : null) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
-        </aside>
+        </aside>}
 
         <section className="center-pane">
           {activeNav === "agent" ? (
@@ -390,7 +397,7 @@ function App() {
             </>
           )}
         </section>
-        <aside className="agent-panel">
+        {!agentPaneCollapsed && <aside className="agent-panel">
           {activeNav === "tasks" ? (
             <div className="process-inspector">
               <div className="agent-header"><div><GitFork size={16}/><strong>Detalhes do processo</strong></div><span className="live-dot">INSPECTOR</span></div>
@@ -433,7 +440,7 @@ function App() {
             </div>
             <div className="agent-foot"><ShieldCheck size={13}/> Aprovações e ações sensíveis sob seu controle</div>
           </>}
-        </aside>
+        </aside>}
       </div>
 
       <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> Studio <span>·</span> {runtimeStatus === "online" ? "Runtime conectado" : runtimeStatus === "connecting" ? "Conectando runtime" : "Runtime offline"}</div></footer>
