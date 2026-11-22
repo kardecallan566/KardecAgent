@@ -63,7 +63,7 @@ class AgentLoop:
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
         messages = list(base_messages)
-        for _ in range(min(5, self.settings.max_iterations)):
+        for _ in range(min(2, self.settings.max_iterations)):
             response = self.llm.chat(messages)
             state.record("plan_response", response.content)
             plan = None
@@ -84,7 +84,7 @@ class AgentLoop:
                     state.record("plan_error", str(exc))
                     messages = base_messages + [
                         {"role": "assistant", "content": response.content},
-                        {"role": "user", "content": "Invalid plan: " + str(exc) + ". " + plan_instructions()},
+                        {"role": "user", "content": "Previous output invalid. Return concise JSON with at most 8 distinct steps; do not pad or repeat. Error: " + str(exc) + ". " + plan_instructions()},
                     ]
                     continue
 
