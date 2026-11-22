@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from kardecagent.agent.memory import MemoryStore
+from kardecagent.project.context import project_snapshot
 
 
 def test_project_and_user_memory_persist_across_instances(tmp_path: Path):
@@ -46,3 +47,11 @@ def test_conversation_history_is_persistent_and_bounded(tmp_path: Path):
     turns = reopened.recent_conversation()
     assert [turn["role"] for turn in turns] == ["user", "assistant"]
     assert turns[0]["content"] == "Quero usar TypeScript."
+
+
+def test_project_snapshot_hides_private_agent_memory(tmp_path: Path):
+    private = tmp_path / ".kardecagent"
+    private.mkdir()
+    (private / "memory.json").write_text('{"items":[]}', encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Public project file", encoding="utf-8")
+    assert project_snapshot(tmp_path) == ["README.md"]
