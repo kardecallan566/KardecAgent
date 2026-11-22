@@ -502,7 +502,11 @@ const lastProject = localStorage.getItem("kardecagent.studio.lastProject");
           return saved && saved.version === 1 ? saved : null;
         } catch { return null; }
       })();
-      setRuntimeEvents(Array.isArray(workspaceSnapshot?.runtimeEvents) ? workspaceSnapshot.runtimeEvents.slice(-100) : []); setApprovalHistory([]);\n      setRuntimeTasks(Array.isArray(workspaceSnapshot?.runtimeTasks) ? workspaceSnapshot.runtimeTasks.slice(-50) : []);\n      setRuntimeSubtasks(Array.isArray(workspaceSnapshot?.runtimeSubtasks) ? workspaceSnapshot.runtimeSubtasks.slice(-100) : []);\n      setRuntimePlanSteps(Array.isArray(workspaceSnapshot?.runtimePlanSteps) ? workspaceSnapshot.runtimePlanSteps.slice(0, 100) : []);\n      setChatMessages(Array.isArray(workspaceSnapshot?.chatMessages) ? workspaceSnapshot.chatMessages.slice(-100) : []); pendingInstructionCommandId.current = null;
+      setRuntimeEvents(Array.isArray(workspaceSnapshot?.runtimeEvents) ? workspaceSnapshot.runtimeEvents.slice(-100) : []); setApprovalHistory([]);
+      setRuntimeTasks(Array.isArray(workspaceSnapshot?.runtimeTasks) ? workspaceSnapshot.runtimeTasks.slice(-50) : []);
+      setRuntimeSubtasks(Array.isArray(workspaceSnapshot?.runtimeSubtasks) ? workspaceSnapshot.runtimeSubtasks.slice(-100) : []);
+      setRuntimePlanSteps(Array.isArray(workspaceSnapshot?.runtimePlanSteps) ? workspaceSnapshot.runtimePlanSteps.slice(0, 100) : []);
+      setChatMessages(Array.isArray(workspaceSnapshot?.chatMessages) ? workspaceSnapshot.chatMessages.slice(-100) : []); pendingInstructionCommandId.current = null;
       setMemoryItems([]); setMemoryError(null); setMemoryLoading(false);
       setActiveRuntimeSubtask(null); setActiveRuntimeStep(null); setRuntimeLimits(null);
       setRuntimeBusy(false); setPendingApproval(null); setApprovalSubmitting(false);

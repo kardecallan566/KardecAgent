@@ -182,7 +182,6 @@ def test_run_stdio_rejects_resume_for_unknown_persisted_task(monkeypatch, tmp_pa
     assert rejected["type"] == "command.rejected"
     assert "not found" in rejected["reason"].lower()
     assert not any(item["type"] == "task.created" for item in messages)
-\n
 
 
 def test_write_uses_ascii_safe_jsonl_while_preserving_unicode(monkeypatch):
