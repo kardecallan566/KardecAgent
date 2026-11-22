@@ -86,7 +86,7 @@ class AgentLoop:
     @staticmethod
     def _project_brief(root: Path) -> dict:
         profile = detect_project(root)
-        files = project_snapshot(root, limit=120)
+        files = project_snapshot(root, limit=80)
         preferred = [
             "README.md", "readme.md", "package.json", "app.json", "app.config.ts",
             "app.config.js", "tsconfig.json", "pyproject.toml", "requirements.txt",
@@ -106,10 +106,10 @@ class AgentLoop:
                 continue
             if not content.strip():
                 continue
-            remaining = 12000 - total
+            remaining = 8000 - total
             if remaining <= 0:
                 break
-            excerpt = content[:min(5000, remaining)]
+            excerpt = content[:min(3500, remaining)]
             excerpts.append({"path": relative, "content": excerpt})
             total += len(excerpt)
         return {
@@ -125,6 +125,24 @@ class AgentLoop:
             "project_files": files,
             "important_file_contents": excerpts,
         }
+
+    @staticmethod
+    def _conversation_context(store: MemoryStore) -> list[dict[str, str]]:
+        return [
+            {"role": turn["role"], "content": turn["content"][-700:]}
+            for turn in store.recent_conversation(limit=6)
+        ]
+
+    @staticmethod
+    def _memory_context(store: MemoryStore, query: str) -> list[dict[str, str]]:
+        return [
+            {
+                "scope": str(item.get("scope", "project")),
+                "category": str(item.get("category", "fact")),
+                "content": str(item.get("content", ""))[:450],
+            }
+            for item in store.relevant(query, limit=8)
+        ]
 
     @staticmethod
     def _save_memory_updates(store: MemoryStore, updates: object) -> None:
@@ -181,8 +199,8 @@ class AgentLoop:
         context = {
             **brief,
             "current_local_datetime": datetime.now().astimezone().isoformat(),
-            "recent_conversation": store.recent_conversation(limit=10),
-            "persistent_memory": store.relevant(message, limit=12),
+            "recent_conversation": self._conversation_context(store),
+            "persistent_memory": self._memory_context(store, message),
             "message": message,
         }
         prompt = (
@@ -260,7 +278,7 @@ class AgentLoop:
             **self._project_brief(root),
             "current_local_datetime": datetime.now().astimezone().isoformat(),
             "recent_conversation": store.recent_conversation(limit=10),
-            "persistent_memory": store.relevant(task, limit=12),
+            "persistent_memory": self._memory_context(store, task),
         }
 
     def _create_plan(self, root: Path, task: str, state: TaskState) -> ExecutionPlan | None:
