@@ -367,7 +367,7 @@ function App() {
 
 
   useEffect(() => {
-    const lastProject = localStorage.getItem("kardecagent.studio.lastProject");
+      // Keep the agent transcript and task/plan projection across IDE upgrades and restarts.\n  useEffect(() => {\n    if (!projectRoot) return;\n    try {\n      const key = "kardecagent.studio.workspace." + projectRoot;\n      localStorage.setItem(key, JSON.stringify({\n        version: 1, savedAt: new Date().toISOString(),\n        chatMessages: chatMessages.slice(-100), runtimeTasks: runtimeTasks.slice(-50),\n        runtimeEvents: runtimeEvents.slice(-100), runtimePlanSteps: runtimePlanSteps.slice(0, 100),\n        runtimeSubtasks: runtimeSubtasks.slice(0, 100)\n      }));\n    } catch (error) { console.warn("Não foi possível persistir o histórico local do workspace.", error); }\n  }, [projectRoot, chatMessages, runtimeTasks, runtimeEvents, runtimePlanSteps, runtimeSubtasks]);\n\nconst lastProject = localStorage.getItem("kardecagent.studio.lastProject");
     if (!lastProject) return;
     void (async () => {
       const restored = await activateProject(lastProject);
@@ -482,7 +482,7 @@ function App() {
       setProjectRoot(selected); setProjectEntries(entries); setProjectError(null);
       try { localStorage.setItem("kardecagent.studio.lastProject", selected); } catch { /* local preference storage may be unavailable */ }
       setOpenedPath(null); setSelectedFile(""); setFileContent(""); setFileDirty(false); setOpenTabs([]); setRunOutput(null);
-      setRuntimeEvents([]); setApprovalHistory([]); setRuntimeTasks([]); setRuntimeSubtasks([]); setRuntimePlanSteps([]); setChatMessages([]); pendingInstructionCommandId.current = null;
+      const workspaceSnapshot = (() => {\n        try {\n          const saved = JSON.parse(localStorage.getItem("kardecagent.studio.workspace." + selected) || "null");\n          return saved && saved.version === 1 ? saved : null;\n        } catch { return null; }\n      })();\n      setRuntimeEvents(Array.isArray(workspaceSnapshot?.runtimeEvents) ? workspaceSnapshot.runtimeEvents.slice(-100) : []); setApprovalHistory([]);\n      setRuntimeTasks(Array.isArray(workspaceSnapshot?.runtimeTasks) ? workspaceSnapshot.runtimeTasks.slice(-50) : []);\n      setRuntimeSubtasks(Array.isArray(workspaceSnapshot?.runtimeSubtasks) ? workspaceSnapshot.runtimeSubtasks.slice(-100) : []);\n      setRuntimePlanSteps(Array.isArray(workspaceSnapshot?.runtimePlanSteps) ? workspaceSnapshot.runtimePlanSteps.slice(0, 100) : []);\n      setChatMessages(Array.isArray(workspaceSnapshot?.chatMessages) ? workspaceSnapshot.chatMessages.slice(-100) : []); pendingInstructionCommandId.current = null;
       setMemoryItems([]); setMemoryError(null); setMemoryLoading(false);
       setActiveRuntimeSubtask(null); setActiveRuntimeStep(null); setRuntimeLimits(null);
       setRuntimeBusy(false); setPendingApproval(null); setApprovalSubmitting(false);

@@ -23,7 +23,7 @@ class StudioProtocolError(ValueError):
 
 
 def _write(message: dict) -> None:
-    encoded = json.dumps(message, ensure_ascii=False, separators=(",", ":"), default=str)
+    encoded = json.dumps(message, ensure_ascii=True, separators=(",", ":"), default=str)
     if len(encoded.encode("utf-8")) > MAX_EVENT_BYTES:
         bounded = dict(message)
         payload = bounded.get("payload")
@@ -37,7 +37,7 @@ def _write(message: dict) -> None:
             bounded["payload"] = payload
         if isinstance(bounded.get("message"), str):
             bounded["message"] = bounded["message"][:4000]
-        encoded = json.dumps(bounded, ensure_ascii=False, separators=(",", ":"), default=str)
+        encoded = json.dumps(bounded, ensure_ascii=True, separators=(",", ":"), default=str)
     sys.stdout.write(encoded + "\n")
     sys.stdout.flush()
 
