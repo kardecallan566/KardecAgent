@@ -233,18 +233,14 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             command_identifier = message.get("command_id")
             payload = message.get("payload")
             payload = payload if isinstance(payload, dict) else {}
-            requested_root = payload.get("project_root")
             text = payload.get("message")
             if not isinstance(command_identifier, str) or not command_identifier.strip():
                 _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
                 continue
-            try:
-                workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
-            except (OSError, RuntimeError):
-                workspace_matches = False
-            if not workspace_matches:
-                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "project_root does not match the active runtime workspace."})
-                continue
+            # Conversational messages are handled by this already workspace-bound
+            # runtime process. The client path is not an authority for chat and may
+            # differ in representation (case, separators, symlinks) on Windows.
+            # Keep workspace validation on task/resume commands that can access files.
             if not isinstance(text, str) or not text.strip() or len(text) > 8000:
                 _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "message must contain 1-8000 characters."})
                 continue
