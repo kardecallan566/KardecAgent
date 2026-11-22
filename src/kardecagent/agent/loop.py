@@ -69,6 +69,8 @@ class AgentLoop:
         )
         if normalized.startswith(question_prefixes):
             return False
+        if normalized.startswith(("pode criar ", "poderia criar ", "can you create ", "please create ")):
+            return True
         action = re.compile(
             r"\\b(crie|cria|implemente|altere|modifique|corrija|conserte|"
             r"refatore|apague|exclua|delete|configure|execute|rode|instale|"
