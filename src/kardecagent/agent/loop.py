@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from pathlib import Path
 
 from ..config import Settings
@@ -30,12 +32,56 @@ class AgentLoop:
         self.executor = AgentExecutor(llm, settings)
         self.recovery = RecoveryManager()
 
+    @staticmethod
+    def _normalized_message(message: str) -> str:
+        normalized = unicodedata.normalize("NFKD", message).encode("ascii", "ignore").decode("ascii")
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", normalized.lower()).split())
+
+    @classmethod
+    def _greeting_response(cls, message: str) -> str | None:
+        normalized = cls._normalized_message(message)
+        greetings = {
+            "oi", "ola", "olá", "opa", "e ai", "hey", "hello", "hi",
+            "bom dia", "boa tarde", "boa noite", "tudo bem", "como vai",
+            "oi tudo bem", "ola tudo bem", "e ai tudo bem",
+            "obrigado", "obrigada", "valeu", "muito obrigado", "muito obrigada",
+        }
+        if normalized not in greetings:
+            return None
+        return (
+            "Olá! Estou aqui. Você pode conversar comigo, tirar dúvidas sobre o projeto "
+            "ou pedir uma alteração quando quiser."
+        )
+
+    @classmethod
+    def _has_explicit_action_request(cls, message: str) -> bool:
+        normalized = cls._normalized_message(message)
+        action = re.compile(
+            r"\\b(crie|criar|cria|implemente|implementar|implementar|"
+            r"altere|alterar|modifique|modificar|corrija|corrigir|conserte|"
+            r"consertar|refatore|refatorar|apague|apagar|exclua|excluir|"
+            r"delete|deletar|configure|configurar|execute|executar|rode|rodar|"
+            r"instale|instalar|atualize|atualizar|adicione|adicionar|"
+            r"remova|remover|escreva|escrever|gere|gerar|construa|construir|"
+            r"criar|build|fix|implement|create|edit|update|delete|refactor|"
+            r"run|execute|install|add|remove|change|modify|write)\\b"
+        )
+        return bool(action.search(normalized))
+
     def interpret_message(self, project_root: Path, message: str) -> dict[str, str]:
         """Classify a user message before entering the approval-gated task workflow.
 
         Conversation and clarification responses are read-only: this method never
         invokes project tools, writes files, or starts a task.
         """
+        greeting = self._greeting_response(message)
+        if greeting is not None:
+            return {
+                "intent": "chat",
+                "response": greeting,
+                "reason": "A saudação foi reconhecida localmente; nenhuma tarefa ou chamada ao modelo é necessária.",
+            }
+
         root = project_root.resolve()
         profile = detect_project(root)
         context = {
@@ -86,6 +132,19 @@ class AgentLoop:
             reason = ""
         if payload["intent"] in {"chat", "clarify"} and not answer.strip():
             raise ValueError("Intent classifier did not provide a chat response.")
+
+        # The model may be inaccurate on small local models. A task classification
+        # is accepted only when the user's message contains an explicit action verb.
+        if payload["intent"] == "task" and not self._has_explicit_action_request(message):
+            return {
+                "intent": "clarify",
+                "response": (
+                    "Você quer que eu apenas explique ou sugira uma solução, "
+                    "ou deseja que eu faça alterações nos arquivos do projeto?"
+                ),
+                "reason": "A classificação sugeriu uma tarefa, mas não foi identificado um pedido explícito de ação.",
+            }
+
         return {"intent": payload["intent"], "response": answer.strip(), "reason": reason.strip()}
 
     def _build_context(self, root: Path, task: str) -> dict:
