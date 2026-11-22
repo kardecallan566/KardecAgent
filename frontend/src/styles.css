@@ -481,3 +481,5 @@ body { min-width:900px; }
 .startup-error-description{color:#a7a9b7;font-size:13px;line-height:1.6}
 .startup-error-card pre{max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;border:1px solid #34313f;border-radius:8px;background:#101116;color:#f0b8b8;font:11px/1.55 ui-monospace,monospace}
 .startup-error-card button{margin-top:12px;padding:10px 16px;border-radius:7px;background:#8068d7;color:white;font-weight:700}
+
+.save-file-button.icon-only { margin-left:4px; padding:6px; justify-content:center; }
