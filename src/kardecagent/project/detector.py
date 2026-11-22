@@ -46,6 +46,14 @@ def detect_project(root: Path) -> ProjectProfile:
     commands: dict[str, str] = {}
 
     if "package.json" in names:
+        # A package manifest is sufficient evidence of a JavaScript workspace,
+        # even when its source files have not been created yet.
+        if "typescript" not in languages:
+            if "javascript" not in languages:
+                languages.insert(0, "javascript")
+            language = "javascript"
+        else:
+            language = "typescript"
         try:
             package = json.loads((root / "package.json").read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
@@ -146,7 +154,7 @@ def detect_project(root: Path) -> ProjectProfile:
     if language == "unknown" and languages:
         language = languages[0]
     if kind == "unknown" and language != "unknown":
-        kind = language
+        kind = "static-html" if language == "html" else language
 
     return ProjectProfile(kind, language, framework, manager, commands, tuple(languages))
 
