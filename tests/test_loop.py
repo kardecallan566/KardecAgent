@@ -203,6 +203,22 @@ def test_finish_requires_evidence_for_every_completion_criterion(tmp_path: Path)
     assert any(event.event_type == "completion_criteria_failed" for event in state.events)
 
 
+def test_intent_router_answers_current_date_without_model_guessing(tmp_path: Path):
+    class ExplodingLLM:
+        def chat(self, messages):
+            raise AssertionError("date and time must come from the local system clock")
+
+    result = AgentLoop(ExplodingLLM(), Settings(max_iterations=2)).interpret_message(
+        tmp_path, "Que dia é hoje?"
+    )
+    assert result["intent"] == "chat"
+    assert "Hoje é" in result["response"]
+    assert any(month in result["response"] for month in (
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    ))
+
+
 def test_intent_router_answers_simple_greeting_without_calling_the_model(tmp_path: Path):
     class ExplodingLLM:
         def chat(self, messages):
