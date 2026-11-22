@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+import ast
+import operator
 from datetime import datetime
 from pathlib import Path
 
@@ -79,6 +81,57 @@ class AgentLoop:
             r"refactor|run|execute|install|add|remove|change|modify|write)\b"
         )
         return bool(action.search(normalized))
+
+    @staticmethod
+    def _arithmetic_response(message: str) -> str | None:
+        """Answer elementary arithmetic locally instead of asking the LLM to classify it."""
+        normalized = message.strip().rstrip(" ?!").lower()
+        match = re.fullmatch(r"(?:quanto\s+e\s+|quanto\s+é\s+|calcule\s+|calcular\s+)?([0-9().+*/%\-\s]{3,40})", normalized)
+        if not match:
+            return None
+        expression = match.group(1).strip()
+        if not re.search(r"[+*/%\-]", expression):
+            return None
+        operators = {
+            ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+            ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+        }
+        def evaluate(node):
+            if isinstance(node, ast.Expression):
+                return evaluate(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+                return node.value
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+                value = evaluate(node.operand)
+                return value if isinstance(node.op, ast.UAdd) else -value
+            if isinstance(node, ast.BinOp) and type(node.op) in operators:
+                left, right = evaluate(node.left), evaluate(node.right)
+                if isinstance(node.op, ast.Mult) and abs(left) > 1e9 or isinstance(node.op, ast.Mult) and abs(right) > 1e9:
+                    raise ValueError("expression too large")
+                return operators[type(node.op)](left, right)
+            raise ValueError("unsupported arithmetic expression")
+        try:
+            result = evaluate(ast.parse(expression, mode="eval"))
+        except (SyntaxError, ValueError, TypeError, ZeroDivisionError, OverflowError):
+            return None
+        if not isinstance(result, (int, float)) or abs(result) > 1e15:
+            return None
+        rendered = str(int(result)) if isinstance(result, float) and result.is_integer() else str(result)
+        return f"{expression} = {rendered}"
+
+    @staticmethod
+    def _fallback_chat_response(message: str, raw_response: str) -> str:
+        cleaned = re.sub(r"(?s)<think>.*?</think>", "", raw_response or "").strip()
+        cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", cleaned, flags=re.IGNORECASE)
+        if cleaned and not cleaned.startswith(("{", "[")) and len(cleaned) >= 8:
+            return cleaned[:12000]
+        normalized = AgentLoop._normalized_message(message)
+        if any(term in normalized for term in ("consegue pesquisar", "pode pesquisar", "pesquisar na internet", "pesquisar coisas na internet")):
+            return ("Consigo ajudar com pesquisas quando a busca na internet está conectada ao agente. "
+                    "Nesta sessão, porém, não devo afirmar que consultei a web sem uma ferramenta de pesquisa disponível. "
+                    "Posso analisar os arquivos do projeto e explicar o que já está no contexto.")
+        return ("Não consegui estruturar uma resposta confiável nesta tentativa. "
+                "A conversa continua ativa; tente reformular a pergunta ou peça diretamente a ação desejada.")
 
     @staticmethod
     def _local_datetime_response(message: str) -> str | None:
@@ -217,6 +270,14 @@ class AgentLoop:
         """Classify, answer and learn from a message without entering task execution."""
         root = project_root.resolve()
         store = MemoryStore(root)
+        arithmetic = self._arithmetic_response(message)
+        if arithmetic is not None:
+            try:
+                store.append_conversation(message, arithmetic)
+            except OSError:
+                pass
+            return {"intent": "chat", "response": arithmetic, "reason": "Cálculo aritmético simples resolvido localmente."}
+
         local_datetime = self._local_datetime_response(message)
         if local_datetime is not None:
             try:
@@ -287,10 +348,35 @@ class AgentLoop:
         ])
         try:
             payload = extract_json_payload(response.content)
-        except Exception as exc:
-            raise ValueError("Could not classify message safely: " + str(exc)) from exc
+        except Exception:
+            # A local model may emit malformed JSON or plain prose. Never let a
+            # formatting defect terminate the chat or accidentally execute a task.
+            if self._has_explicit_action_request(message):
+                payload = {
+                    "intent": "clarify",
+                    "response": "Entendi que você quer uma alteração, mas a resposta estruturada do modelo veio inválida. "
+                                "Descreva novamente o resultado esperado; não fiz nenhuma alteração.",
+                    "reason": "Fallback seguro após resposta inválida do classificador.",
+                }
+            else:
+                payload = {
+                    "intent": "chat",
+                    "response": self._fallback_chat_response(message, response.content),
+                    "reason": "Resposta em texto livre recuperada após falha na estrutura JSON.",
+                }
         if not isinstance(payload, dict) or payload.get("intent") not in {"chat", "task", "clarify"}:
-            raise ValueError("Intent classifier returned an invalid response.")
+            if self._has_explicit_action_request(message):
+                payload = {
+                    "intent": "clarify",
+                    "response": "Não consegui confirmar com segurança a solicitação de alteração. Pode reformular o pedido?",
+                    "reason": "Intent classifier returned an invalid response; task execution was blocked.",
+                }
+            else:
+                payload = {
+                    "intent": "chat",
+                    "response": self._fallback_chat_response(message, response.content),
+                    "reason": "Malformed classifier response recovered as a chat reply.",
+                }
         answer = payload.get("response", "")
         if not isinstance(answer, str):
             raise ValueError("Intent classifier response must be text.")
