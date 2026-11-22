@@ -40,7 +40,7 @@ def detect_project(root: Path) -> ProjectProfile:
             languages.append(language_name)
 
     language = languages[0] if languages else "unknown"
-    kind = language
+    kind = "static-html" if language == "html" else language
     framework = None
     manager = None
     commands: dict[str, str] = {}
