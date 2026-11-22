@@ -190,6 +190,19 @@ jobs:
       - name: Build Studio Windows installers
         run: npm run tauri build
 
+      - name: Verify bundled Studio interface
+        shell: pwsh
+        run: |
+          $html = "dist/index.html"
+          if (!(Test-Path $html)) { throw "Vite output is missing: $html" }
+          $assets = Get-ChildItem "dist/assets" -Filter "*.js"
+          if (!$assets -or $assets.Count -eq 0) { throw "No compiled frontend JavaScript bundle was generated." }
+          $bundle = ($assets | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
+          foreach ($marker in @("KardecAgent", "Gestor de tarefas", "Instrução para o gestor", "Configurações do KardecAgent Studio")) {
+            if (!$bundle.Contains($marker)) { throw "Compiled UI is missing expected marker: $marker" }
+          }
+          Write-Host "Verified Studio UI bundle: $($assets.Count) JavaScript asset(s)"
+          
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
