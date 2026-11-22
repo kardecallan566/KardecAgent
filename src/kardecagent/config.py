@@ -43,6 +43,8 @@ class Settings:
             max_iterations=int(_env("KARDECAGENT_MAX_ITERATIONS", "KARDEC_MAX_ITERATIONS", str(cls.max_iterations))),
             command_timeout_seconds=float(_env("KARDECAGENT_COMMAND_TIMEOUT", "KARDEC_COMMAND_TIMEOUT", str(cls.command_timeout_seconds))),
             max_command_output_chars=int(_env("KARDECAGENT_MAX_COMMAND_OUTPUT", "KARDEC_MAX_COMMAND_OUTPUT", str(cls.max_command_output_chars))),
+            allow_dependency_installations=_env("KARDECAGENT_ALLOW_DEPENDENCY_INSTALLATIONS", "KARDEC_ALLOW_DEPENDENCY_INSTALLATIONS", "false").lower() in {"1", "true", "yes"},
+            max_investigation_actions=int(_env("KARDECAGENT_MAX_INVESTIGATION_ACTIONS", "KARDEC_MAX_INVESTIGATION_ACTIONS", str(cls.max_investigation_actions))),
             web_allow_domains=_csv_env("KARDECAGENT_WEB_ALLOW_DOMAINS") or _csv_env("KARDEC_WEB_ALLOW_DOMAINS"),
             web_deny_domains=_csv_env("KARDECAGENT_WEB_DENY_DOMAINS") or _csv_env("KARDEC_WEB_DENY_DOMAINS"),
         )
