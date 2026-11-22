@@ -255,6 +255,7 @@ class Orchestrator:
                     "parent_task": parent_task,
                     "parent_plan": parent_plan.as_dict(),
                     "subtask": subtask.as_dict(),
+                    "specialist_role": subtask.role,
                 },
                 allowed_scope=subtask.scope,
                 max_iterations=self.settings.max_iterations,

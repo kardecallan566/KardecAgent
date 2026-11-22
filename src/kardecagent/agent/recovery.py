@@ -69,14 +69,35 @@ class RecoveryManager:
             and (iteration is None or event.iteration == iteration)
         ]
         if not candidates:
+            # A failed/max-iterations task must leave its terminal state even
+            # when there are no audited file mutations to roll back. Otherwise
+            # the orchestrator's retry reaches AgentExecutor.execute() with
+            # MAX_ITERATIONS and is rejected before the model can continue.
+            resume_step = max(1, state.active_plan_step)
             state.record(
                 "recovery_skipped",
-                "No audited integrity changes matched the recovery scope.",
+                "No audited integrity changes matched the recovery scope; preserving the current workspace.",
                 subtask_id=subtask_id,
                 iteration=iteration,
                 min_event_index=min_event_index,
+                resume_step=resume_step,
             )
-            return RecoveryResult(True)
+            if state.status in {TaskStatus.FAILED, TaskStatus.MAX_ITERATIONS}:
+                state.transition(
+                    TaskStatus.RESUMING,
+                    reason="No workspace rollback was needed; task is ready to resume.",
+                    resume_step=resume_step,
+                )
+                state.record(
+                    "recovery_completed",
+                    "Recovery completed without rollback; the approved task can resume.",
+                    subtask_id=subtask_id,
+                    resume_step=resume_step,
+                    rolled_back_events=[],
+                    rolled_back_files=[],
+                )
+                self._persist(persistence_callback, state)
+            return RecoveryResult(True, resume_step=resume_step)
 
         # Changes belonging to already completed plan steps are part of the
         # last consistent state and must survive recovery. Only roll back

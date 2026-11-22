@@ -55,6 +55,13 @@ class SubtaskManager:
             if len(sid) > 40 or len(title) > 160 or len(objective) > 1000:
                 raise SubtaskDecompositionError("subtask text exceeds the configured size limit")
 
+            role = item.get("role", "developer")
+            allowed_roles = {"architect", "developer", "debugger", "tester", "reviewer"}
+            if not isinstance(role, str) or role not in allowed_roles:
+                raise SubtaskDecompositionError(
+                    "role must be architect, developer, debugger, tester, or reviewer"
+                )
+
             scope = self._paths(item.get("scope", []))
             dependencies = self._strings(item.get("dependencies", []), "dependencies")
             criteria = self._strings(item.get("completion_criteria", []), "completion_criteria")
@@ -65,6 +72,7 @@ class SubtaskManager:
                 id=sid,
                 title=title.strip(),
                 objective=objective.strip(),
+                role=role,
                 scope=tuple(scope),
                 dependencies=tuple(dependencies),
                 completion_criteria=tuple(criteria),
