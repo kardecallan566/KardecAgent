@@ -17,7 +17,7 @@ type StudioSettings = {
   shell: "powershell" | "cmd"; terminalFontSize: number;
   uiTheme: "dark" | "midnight" | "light"; uiFontFamily: string; uiFontSize: number; accentColor: "violet" | "cyan" | "blue" | "green";
 };
-type SettingsSection = "core" | "editor" | "appearance" | "terminal" | "diagnostics";
+type SettingsSection = "core" | "editor" | "appearance" | "terminal" | "memory" | "diagnostics";
 type CoreDiagnostics = { running: boolean; pid: number | null; python_executable: string | null; launch_mode: string | null; project_root: string | null; last_exit_code: number | null };
 const DEFAULT_SETTINGS: StudioSettings = {
   ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "", autoStartCore: true,
@@ -111,6 +111,9 @@ function App() {
   const [googleFontBusy, setGoogleFontBusy] = useState(false);
   const [googleFontRevision, setGoogleFontRevision] = useState(0);
   const [coreDiagnosticsError, setCoreDiagnosticsError] = useState<string | null>(null);
+  const [memoryItems, setMemoryItems] = useState<Array<{ id: string; scope: "user" | "project"; category: string; content: string; updated_at: string }>>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
   const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[] } | null>(null);
   const [ollamaTesting, setOllamaTesting] = useState(false);
   const [terminalReady, setTerminalReady] = useState(false);
@@ -275,6 +278,10 @@ function App() {
         const acceptedId = pendingInstructionCommandId.current;
         pendingInstructionCommandId.current = null;
         setChatMessages(items => items.map(item => item.commandId === acceptedId ? { ...item, status: "sent" } : item));
+      } else if (message.type === "memory.snapshot" || message.type === "memory.updated") {
+        setMemoryItems(message.payload?.items || []);
+        setMemoryLoading(false);
+        setMemoryError(null);
       } else if (message.type === "assistant.response") {
         const responseText = message.payload?.message || "Não consegui formular uma resposta para essa mensagem.";
         const responseId = "chat-" + (message.command_id || crypto.randomUUID());
@@ -468,6 +475,7 @@ function App() {
       try { localStorage.setItem("kardecagent.studio.lastProject", selected); } catch { /* local preference storage may be unavailable */ }
       setOpenedPath(null); setSelectedFile(""); setFileContent(""); setFileDirty(false); setOpenTabs([]); setRunOutput(null);
       setRuntimeEvents([]); setRuntimeTasks([]); setRuntimeSubtasks([]); setRuntimePlanSteps([]); setChatMessages([]); pendingInstructionCommandId.current = null;
+      setMemoryItems([]); setMemoryError(null); setMemoryLoading(false);
       setActiveRuntimeSubtask(null); setActiveRuntimeStep(null); setRuntimeLimits(null);
       setRuntimeBusy(false); setPendingApproval(null); setApprovalSubmitting(false);
       seenEventIds.current.clear(); approvalCommandId.current = null; setRuntimeError(null);
@@ -627,6 +635,39 @@ function App() {
       const reason = String(error);
       setChatMessages(items => items.map(item => item.commandId === commandId ? { ...item, status: "rejected", text: item.text + "\n\nFalha ao enviar: " + reason } : item));
       setRuntimeError(reason);
+    }
+  }
+
+  async function loadMemory() {
+    if (!projectRoot || runtimeStatus !== "online" || runtimeBusy) {
+      setMemoryError("Conecte o Core e aguarde ocioso para consultar a memória.");
+      return;
+    }
+    setMemoryLoading(true);
+    setMemoryError(null);
+    try {
+      await invoke("send_runtime_command", { message: {
+        type: "memory.list", schema_version: 1, command_id: crypto.randomUUID(),
+        payload: { project_root: projectRoot }
+      }});
+    } catch (error) {
+      setMemoryLoading(false);
+      setMemoryError(String(error));
+    }
+  }
+
+  async function forgetMemory(memoryId: string) {
+    if (!projectRoot || runtimeStatus !== "online" || runtimeBusy) return;
+    setMemoryLoading(true);
+    setMemoryError(null);
+    try {
+      await invoke("send_runtime_command", { message: {
+        type: "memory.forget", schema_version: 1, command_id: crypto.randomUUID(),
+        payload: { project_root: projectRoot, memory_id: memoryId }
+      }});
+    } catch (error) {
+      setMemoryLoading(false);
+      setMemoryError(String(error));
     }
   }
 
@@ -845,6 +886,7 @@ function App() {
               <button className={settingsSection === "editor" ? "active" : ""} onClick={() => setSettingsSection("editor")}><FileCode2 size={15}/> Editor</button>
               <button className={settingsSection === "appearance" ? "active" : ""} onClick={() => setSettingsSection("appearance")}><Activity size={15}/> Aparência</button>
               <button className={settingsSection === "terminal" ? "active" : ""} onClick={() => setSettingsSection("terminal")}><Terminal size={15}/> Terminal</button>
+              <button className={settingsSection === "memory" ? "active" : ""} onClick={() => { setSettingsSection("memory"); void loadMemory(); }}><Bot size={15}/> Memória do agente</button>
               <button className={settingsSection === "diagnostics" ? "active" : ""} onClick={() => { setSettingsSection("diagnostics"); void refreshCoreDiagnostics(); }}><Activity size={15}/> Diagnóstico</button>
             </nav>
             <div className="settings-page">
@@ -911,6 +953,20 @@ function App() {
                   <label>Shell padrão<select value={settings.shell} onChange={event => setSettings(current => ({ ...current, shell: event.target.value as "powershell" | "cmd" }))}><option value="powershell">PowerShell</option><option value="cmd">Prompt de Comando (CMD)</option></select></label>
                   <label>Tamanho da fonte: {settings.terminalFontSize}px<input type="range" min={10} max={18} value={settings.terminalFontSize} onChange={event => setSettings(current => ({ ...current, terminalFontSize: Number(event.target.value) }))}/></label>
                   <div className="settings-help">O terminal inicia na pasta do projeto aberto. Os comandos são executados no shell selecionado.</div>
+                </div>
+              </>}
+              {settingsSection === "memory" && <>
+                <div className="settings-page-heading"><strong>Memória persistente do agente</strong><p>O KardecAgent guarda preferências explicitamente informadas, decisões e fatos úteis do projeto. Você pode revisar e apagar qualquer registro.</p></div>
+                <div className="settings-section">
+                  <div className="diagnostic-row"><span>Registros disponíveis</span><strong>{memoryItems.length}</strong></div>
+                  <p className="settings-help">Memória do projeto fica em .kardecagent/memory.json. Preferências gerais ficam em ~/.kardecagent/memory.json. O histórico recente da conversa é local ao projeto. Credenciais e segredos não devem ser memorizados.</p>
+                  <div className="settings-actions"><button className="settings-secondary" disabled={memoryLoading || runtimeBusy || runtimeStatus !== "online"} onClick={() => void loadMemory()}>{memoryLoading ? "Carregando..." : "Atualizar memória"}</button></div>
+                  {memoryError && <div className="ollama-test-result error"><AlertCircle size={15}/><p>{memoryError}</p></div>}
+                  {memoryItems.length === 0 && !memoryLoading && <div className="settings-help">Nenhuma memória registrada ainda. Ao longo das conversas, o agente poderá guardar preferências e decisões estáveis que você declarar explicitamente.</div>}
+                  {memoryItems.map(item => <article className="memory-record" key={item.id}>
+                    <div className="diagnostic-row"><span>{item.scope === "project" ? "Este projeto" : "Preferência geral"} · {item.category}</span><button className="settings-secondary" disabled={memoryLoading || runtimeBusy} onClick={() => void forgetMemory(item.id)}>Esquecer</button></div>
+                    <p>{item.content}</p>
+                  </article>)}
                 </div>
               </>}
               {settingsSection === "diagnostics" && <>
