@@ -84,3 +84,26 @@ def test_task_board_rejects_invalid_state_transition(tmp_path: Path):
     })
     with pytest.raises(TaskBoardError):
         board.complete("1", result="bad", evidence=[])
+
+
+def test_decomposition_validates_and_preserves_specialist_role(tmp_path: Path):
+    manager = SubtaskManager(tmp_path)
+    board = manager.parse_decomposition({
+        "subtasks": [
+            {"id": "1", "title": "Design", "objective": "Design architecture", "role": "architect"},
+            {"id": "2", "title": "Tests", "objective": "Validate behavior", "role": "tester"},
+        ]
+    })
+    assert board.get("1").role == "architect"
+    assert board.get("2").as_dict()["role"] == "tester"
+
+
+def test_decomposition_rejects_unknown_specialist_role(tmp_path: Path):
+    manager = SubtaskManager(tmp_path)
+    with pytest.raises(ValueError, match="role must be"):
+        manager.parse_decomposition({
+            "subtasks": [
+                {"id": "1", "title": "A", "objective": "A", "role": "magic"},
+                {"id": "2", "title": "B", "objective": "B"},
+            ]
+        })
