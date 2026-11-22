@@ -14,8 +14,8 @@ MAX_MEMORY_ITEMS = 200
 MAX_MEMORY_TEXT = 700
 MAX_CONVERSATION_TURNS = 40
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|senha|secret)\\s*[:=]\\s*[^\\s,;]+"),
-    re.compile(r"(?i)bearer\\s+[a-z0-9._~+/-]+=*"),
+    re.compile(r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|senha|secret)\s*[:=]\s*[^\s,;]+"),
+    re.compile(r"(?i)bearer\s+[a-z0-9._~+/-]+=*"),
     re.compile(r"(?i)gh[pousr]_[a-z0-9]{20,}"),
 )
 
@@ -55,7 +55,7 @@ class MemoryStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\\n") as handle:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(payload, handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -66,7 +66,7 @@ class MemoryStore:
 
     @staticmethod
     def _identifier(scope: str, category: str, content: str) -> str:
-        raw = f"{scope}\\0{category}\\0{content.casefold()}".encode("utf-8")
+        raw = f"{scope}\0{category}\0{content.casefold()}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()[:16]
 
     def remember(self, *, scope: str, category: str, content: str) -> dict[str, Any] | None:
