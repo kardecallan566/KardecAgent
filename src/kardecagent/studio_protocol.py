@@ -257,7 +257,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "command.accepted", "schema_version": 1, "command_id": command_identifier, "accepted": True})
             try:
                 response = agent.llm.chat([
-                    {"role": "system", "content": "Você é o KardecAgent, assistente técnico da IDE. Esta é uma conversa, não uma tarefa. Responda diretamente. Não crie planos, não peça aprovação e não execute ferramentas ou comandos. Pedidos de alteração concreta devem ser enviados como tarefa de implementação. Não invente ações ou resultados."},
+                    {"role": "system", "content": "Você é o KardecAgent, assistente técnico da IDE. Esta é uma conversa, não uma tarefa. Responda diretamente, em português quando o usuário usar português. Seja objetivo: no máximo 8 itens em listas ou planos informais, sem etapas repetidas, sem preencher espaço com sugestões genéricas. Se o usuário pedir um plano, produza um plano curto, concreto e coerente com a pasta/projeto e mantenha-o claramente referenciável na conversa. Não crie plano de execução estruturado, não peça aprovação e não execute ferramentas ou comandos nesta etapa. Pedidos de alteração concreta serão enviados como tarefa separada, acompanhados do histórico recente. Não invente ações ou resultados."},
                     *safe_history,
                     {"role": "user", "content": text.strip()},
                 ], temperature=0.3)
