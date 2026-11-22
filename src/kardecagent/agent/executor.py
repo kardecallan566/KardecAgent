@@ -168,15 +168,15 @@ class AgentExecutor:
     def _is_dependency_install_command(command: str) -> bool:
         """Conservative detection for package-manager mutations; test/build commands remain allowed."""
         patterns = (
-            r"\\bpip(?:3)?\\s+install\\b",
-            r"\\bpython\\s+-m\\s+pip\\s+install\\b",
-            r"\\buv\\s+(?:add|pip\\s+install)\\b",
-            r"\\bpoetry\\s+add\\b",
-            r"\\bpipenv\\s+install\\b",
-            r"\\b(?:npm|pnpm)\\s+install\\b",
-            r"\\byarn\\s+(?:add|install)\\b",
-            r"\\bcargo\\s+add\\b",
-            r"\\b(?:apt|apt-get|dnf|yum)\\s+install\\b",
+            r"\bpip(?:3)?\\s+install\\b",
+            r"\bpython\\s+-m\\s+pip\\s+install\\b",
+            r"\buv\\s+(?:add|pip\\s+install)\\b",
+            r"\bpoetry\\s+add\\b",
+            r"\bpipenv\\s+install\\b",
+            r"\b(?:npm|pnpm)\\s+install\\b",
+            r"\byarn\\s+(?:add|install)\\b",
+            r"\bcargo\\s+add\\b",
+            r"\b(?:apt|apt-get|dnf|yum)\\s+install\\b",
         )
         return any(re.search(pattern, command, re.IGNORECASE) for pattern in patterns)
 
@@ -495,8 +495,33 @@ class AgentExecutor:
                 state.transition(TaskStatus.COMPLETED, reason="Approved plan completed and verified.")
                 return state
 
+            investigation_tools = {"list_files", "read_file", "search_files", "search_web", "fetch_web_page", "git_status", "git_diff", "git_log", "run_checks"}
+            investigation_key = json.dumps(
+                {"tool": action.tool, "arguments": action.arguments},
+                sort_keys=True, ensure_ascii=False,
+            )
+            if action.tool in investigation_tools:
+                prior = [
+                    event for event in state.events
+                    if event.event_type == "investigation_action"
+                ]
+                if any(event.data.get("key") == investigation_key for event in prior):
+                    state.record("investigation_blocked", "Repeated investigation action was blocked.",
+                                 tool=action.tool, key=investigation_key)
+                    messages += [{"role": "assistant", "content": response.content},
+                                 {"role": "user", "content": "This exact investigation was already performed. Use its recorded result or choose a materially different, justified action."}]
+                    continue
+                if len(prior) >= self.settings.max_investigation_actions:
+                    state.record("investigation_budget_exhausted", "Investigation action budget exhausted.",
+                                 limit=self.settings.max_investigation_actions)
+                    messages += [{"role": "assistant", "content": response.content},
+                                 {"role": "user", "content": "Investigation budget exhausted. Implement using available evidence or report the specific missing information to the user."}]
+                    continue
             try:
                 result = self._execute_tool(root, action, allowed_scope, state, (context or {}).get("subtask", {}).get("id"))
+                if action.tool in investigation_tools:
+                    state.record("investigation_action", "Read-only investigation action recorded.",
+                                 tool=action.tool, key=investigation_key)
                 state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result)
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
