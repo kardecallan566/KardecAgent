@@ -32,36 +32,32 @@ def repair_json_string(text: str) -> str:
 
 
 def escape_json_control_chars(text: str) -> str:
-    """Escape literal control characters inside JSON strings emitted by LLMs.
-
-    Local models often place real line breaks/tabs in source-code string values
-    instead of JSON escapes. Preserve JSON structure while making those values
-    parseable; already escaped sequences are left untouched.
-    """
+    """Escape literal control characters inside JSON strings emitted by LLMs."""
     output: list[str] = []
     in_string = False
     escaped = False
+    slash = chr(92)
     for char in text:
         code = ord(char)
         if in_string:
             if escaped:
                 output.append(char)
                 escaped = False
-            elif char == "\\\\":
+            elif code == 92:
                 output.append(char)
                 escaped = True
             elif char == '"':
                 output.append(char)
                 in_string = False
             elif code < 0x20:
-                if char == "\\n":
-                    output.append("\\\\n")
-                elif char == "\\r":
-                    output.append("\\\\r")
-                elif char == "\\t":
-                    output.append("\\\\t")
+                if code == 10:
+                    output.append(slash + "n")
+                elif code == 13:
+                    output.append(slash + "r")
+                elif code == 9:
+                    output.append(slash + "t")
                 else:
-                    output.append(f"\\\\u{code:04x}")
+                    output.append(slash + f"u{code:04x}")
             else:
                 output.append(char)
         else:
@@ -69,7 +65,6 @@ def escape_json_control_chars(text: str) -> str:
             if char == '"':
                 in_string = True
     return "".join(output)
-
 
 def extract_json_payload(content: str) -> Any:
     """Robustly extract and parse JSON from a model response.
