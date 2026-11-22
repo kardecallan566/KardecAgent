@@ -229,6 +229,50 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
             continue
 
+        if message.get("schema_version") == 1 and message.get("type") == "chat.message":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            requested_root = payload.get("project_root")
+            text = payload.get("message")
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            try:
+                workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+            except (OSError, RuntimeError):
+                workspace_matches = False
+            if not workspace_matches:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "project_root does not match the active runtime workspace."})
+                continue
+            if not isinstance(text, str) or not text.strip() or len(text) > 8000:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "message must contain 1-8000 characters."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            history = payload.get("history", [])
+            if not isinstance(history, list):
+                history = []
+            safe_history = [{"role": item["role"], "content": item["content"][:4000]} for item in history[-16:] if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str)]
+            _write({"type": "command.accepted", "schema_version": 1, "command_id": command_identifier, "accepted": True})
+            try:
+                response = agent.llm.chat([
+                    {"role": "system", "content": "Você é o KardecAgent, assistente técnico da IDE. Esta é uma conversa, não uma tarefa. Responda diretamente. Não crie planos, não peça aprovação e não execute ferramentas ou comandos. Pedidos de alteração concreta devem ser enviados como tarefa de implementação. Não invente ações ou resultados."},
+                    *safe_history,
+                    {"role": "user", "content": text.strip()},
+                ], temperature=0.3)
+                answer = response.content.strip()
+                if not answer:
+                    raise RuntimeError("O modelo retornou uma resposta vazia.")
+                _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer[:12000]}})
+            except Exception as exc:
+                reason = "timeout" if "timeout" in type(exc).__name__.lower() else "model_error"
+                _write({"type": "chat.failed", "schema_version": 1, "command_id": command_identifier, "payload": {"reason": reason, "message": f"Falha na conversa ({reason}): {exc}", "retryable": reason == "timeout"}})
+            continue
         if message.get("schema_version") == 1 and message.get("type") == "task.resume":
             command_identifier = message.get("command_id")
             payload = message.get("payload")
