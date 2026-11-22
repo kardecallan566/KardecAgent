@@ -437,3 +437,20 @@ body { min-width:900px; }
   border-color: rgba(239, 68, 68, .45);
   background: rgba(239, 68, 68, .06);
 }
+
+
+.memory-record {
+  padding: 12px 0;
+  border-top: 1px solid var(--border, rgba(255,255,255,.08));
+}
+.memory-record p {
+  margin: 8px 0 0;
+  line-height: 1.55;
+  color: var(--text-primary, inherit);
+  overflow-wrap: anywhere;
+}
+.memory-record .diagnostic-row button {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
