@@ -311,3 +311,36 @@ def test_run_stdio_routes_chat_without_creating_or_running_a_task(monkeypatch, t
     assert fake_agent.run_calls == 0
     assert not any(item["type"] == "task.created" for item in messages)
     assert not any(item["type"] == "approval.requested" for item in messages)
+
+def test_run_stdio_recovers_classifier_exceptions_as_assistant_responses(monkeypatch, tmp_path):
+    command = {
+        "type": "task.submit",
+        "schema_version": 1,
+        "command_id": "classifier-error",
+        "payload": {"instruction": "Quanto é 5+4?", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4, max_command_output_chars=1200,
+            llm_timeout_seconds=30.0, command_timeout_seconds=15.0,
+        )
+
+        def interpret_message(self, root, instruction):
+            raise ValueError("invalid JSON from classifier")
+
+        def run(self, *args, **kwargs):
+            raise AssertionError("an invalid classifier response must never create a task")
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    accepted = next(item for item in messages if item.get("command_id") == "classifier-error")
+    reply = next(item for item in messages if item["type"] == "assistant.response")
+    assert accepted["type"] == "command.accepted"
+    assert accepted["intent"] == "clarify"
+    assert reply["intent"] == "clarify"
+    assert "conversa continua ativa" in reply["payload"]["message"]
+    assert not any(item["type"] == "task.created" for item in messages)
