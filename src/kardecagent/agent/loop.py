@@ -424,7 +424,7 @@ class AgentLoop:
             else:
                 answer = (
                     "Você quer que eu apenas explique ou proponha um plano, "
-                    "ou deseja que eu implemente a solução nos arquivos do projeto?"
+                    "ou deseja que eu faça alterações nos arquivos do projeto?"
                 )
                 result = {
                     "intent": "clarify",
