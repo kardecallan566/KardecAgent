@@ -679,7 +679,7 @@ function App() {
 
   async function formatCurrentFile() {
     if (!projectRoot || !openedPath || qualityBusy) return;
-    if (!window.confirm("Formatar e corrigir a indentação deste arquivo?\\n\\n" + openedPath + "\\n\\nA IDE usará o formatador já disponível no projeto. Nenhuma dependência será instalada.")) return;
+    if (!window.confirm("Formatar e corrigir a indentação deste arquivo?\n\n" + openedPath + "\n\nA IDE usará o formatador já disponível no projeto. Nenhuma dependência será instalada.")) return;
     setQualityBusy(true);
     setQualityOutput(null);
     setProjectError(null);
