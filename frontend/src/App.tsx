@@ -140,7 +140,7 @@ function App() {
       } else if (message.type === "command.accepted" && message.command_id === approvalCommandId.current) {
         approvalCommandId.current = null;
         setApprovalSubmitting(false);
-        setApprovalHistory(items => items.map(item => item.approvalId === pendingApproval?.approvalId ? { ...item, status: "Decisão enviada" } : item));
+        setApprovalHistory(items => items.map(item => item.approvalId === pendingApproval?.approvalId ? { ...item, status: "Decisão confirmada" } : item));
         setPendingApproval(null);
         setRuntimeTasks(items => items.map(task => task.status === "Aguardando aprovação" ? { ...task, status: "Decisão enviada" } : task));
       } else if (message.type === "runtime.error" || message.type === "command.rejected") {
@@ -265,6 +265,7 @@ function App() {
     try {
       const commandId = crypto.randomUUID();
       approvalCommandId.current = commandId;
+      setApprovalHistory(items => items.map(item => item.approvalId === pendingApproval.approvalId ? { ...item, status: decision === "approve" ? "Aprovação enviada" : "Rejeição enviada" } : item));
       setApprovalSubmitting(true);
       await invoke("send_runtime_command", { message: {
         type: "approval.respond", schema_version: 1, command_id: commandId,
