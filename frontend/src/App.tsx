@@ -7,10 +7,12 @@ import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
   ListTodo, Plus, Search, ShieldCheck, Workflow, Save,
-  Zap, GitFork, Circle, AlertCircle
+  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
+type StudioSettings = { ollamaUrl: string; model: string; timeout: number };
+const DEFAULT_SETTINGS: StudioSettings = { ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180 };
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 
 function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void }) {
@@ -71,6 +73,10 @@ function taskStatusLabel(status: string): string {
 
 function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("explorer");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<StudioSettings>(() => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") }; } catch { return DEFAULT_SETTINGS; } });
+  const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[] } | null>(null);
+  const [ollamaTesting, setOllamaTesting] = useState(false);
   const [selectedFile, setSelectedFile] = useState("App.tsx");
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
@@ -272,7 +278,7 @@ function App() {
       setRuntimeError(null);
       await invoke("stop_runtime").catch(() => undefined);
       await runtimeListenersReady.current;
-      await invoke("start_runtime", { projectPath: selected });
+      await invoke("start_runtime", { projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model, llmTimeoutSeconds: settings.timeout });
     } catch (error) {
       setProjectError(String(error));
       setRuntimeStatus("offline");
@@ -353,6 +359,7 @@ function App() {
           <button className={activeNav === "approvals" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("approvals")} title="Aprovações"><ShieldCheck /></button>
           <div className="rail-spacer" />
           <button className="rail-button" title="Atividade"><Activity /></button>
+          <button className="rail-button" title="Configurações" onClick={() => setSettingsOpen(true)}><Settings /></button>
         </nav>
 
         <aside className="sidebar">
@@ -451,7 +458,7 @@ function App() {
             <>
               <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <button className="save-file-button" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving}><Save size={13}/>{fileSaving ? "Salvando..." : "Salvar"}</button>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap"><div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div><div className="code-surface"><pre className="syntax-highlight" aria-hidden="true">{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap"><div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div><div className="code-surface"><pre className="syntax-highlight" aria-hidden="true">{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
               <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content"><Clock3 size={14}/><span>Eventos do runtime aparecerão aqui, sem polling contínuo.</span></div></div>
             </>
@@ -503,6 +510,29 @@ function App() {
         </aside>
       </div>
 
+
+      {settingsOpen && <div className="settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+        <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <header className="settings-header"><div><span className="eyebrow">PREFERÊNCIAS DO AMBIENTE</span><h2 id="settings-title">Configurações do Studio</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Fechar configurações"><X size={18}/></button></header>
+          <div className="settings-section">
+            <div className="settings-section-title"><Wifi size={16}/><strong>Conexão com Ollama</strong></div>
+            <label>Endereço do servidor<input value={settings.ollamaUrl} onChange={event => setSettings(current => ({ ...current, ollamaUrl: event.target.value }))} placeholder="http://127.0.0.1:11434"/></label>
+            <label>Modelo local<input value={settings.model} onChange={event => setSettings(current => ({ ...current, model: event.target.value }))} placeholder="qwen2.5-coder:3b"/></label>
+            <label>Timeout (segundos)<input type="number" min={10} max={900} value={settings.timeout} onChange={event => setSettings(current => ({ ...current, timeout: Math.max(10, Math.min(900, Number(event.target.value) || 180)) }))}/></label>
+            <div className="settings-actions"><button className="settings-secondary" disabled={ollamaTesting} onClick={async () => {
+              setOllamaTesting(true); setOllamaTest(null);
+              try { const result = await invoke<{ version: string; models: string[]; model: string; response: string }>("test_ollama_connection", { ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model, llmTimeoutSeconds: settings.timeout }); setOllamaTest({ ok: true, version: result.version, models: result.models, message: result.response }); }
+              catch (error) { setOllamaTest({ ok: false, message: String(error) }); }
+              finally { setOllamaTesting(false); }
+            }}><Wifi size={14}/>{ollamaTesting ? "Testando modelo..." : "Testar conexão e modelo"}</button></div>
+            {ollamaTest && <div className={ollamaTest.ok ? "ollama-test-result success" : "ollama-test-result error"}>{ollamaTest.ok ? <CheckCircle size={15}/> : <AlertCircle size={15}/>}<div><strong>{ollamaTest.ok ? "Ollama respondeu corretamente" : "Falha na conexão"}</strong><p>{ollamaTest.message}</p>{ollamaTest.version && <small>Ollama {ollamaTest.version} · Modelo {settings.model}</small>}{ollamaTest.models && <small>Modelos instalados: {ollamaTest.models.join(", ") || "nenhum"}</small>}</div></div>}
+          </div>
+          <div className="settings-footer"><span>As alterações são aplicadas ao próximo início do core.</span><button className="settings-primary" onClick={() => {
+            localStorage.setItem("kardecagent.studio.settings", JSON.stringify(settings)); setOllamaTest(null); setSettingsOpen(false);
+            if (projectRoot && !runtimeBusy) void (async () => { try { setRuntimeStatus("connecting"); setRuntimeError(null); await invoke("stop_runtime"); await invoke("start_runtime", { projectPath: projectRoot, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model, llmTimeoutSeconds: settings.timeout }); } catch (error) { setRuntimeStatus("offline"); setRuntimeError(String(error)); } })();
+          }}><RefreshCw size={14}/> Salvar e aplicar</button></div>
+        </section>
+      </div>}
       <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> Studio <span>·</span> {runtimeStatus === "online" ? "Runtime conectado" : runtimeStatus === "connecting" ? "Conectando runtime" : "Runtime offline"}</div></footer>
     </main>
   );
