@@ -374,9 +374,9 @@ source = os.environ["KARDECAGENT_RUN_FILE"]
 ext = os.path.splitext(source)[1].lower()
 commands = {
  ".py": [sys.executable, source],
- ".js": ["node", source], ".mjs": ["node", source], ".cjs": ["node", source], ".jsx": ["npx", "--no-install", "tsx", source],
+ ".js": ["node", source], ".mjs": ["node", source], ".cjs": ["node", source],
  ".ts": ["node", "--experimental-strip-types", source], ".mts": ["node", "--experimental-strip-types", source],
- ".cts": ["node", "--experimental-strip-types", source], ".tsx": ["npx", "--no-install", "tsx", source],
+ ".cts": ["node", "--experimental-strip-types", source],
  ".java": ["java", source], ".go": ["go", "run", source], ".php": ["php", source], ".rb": ["ruby", source],
  ".kt": ["kotlin", source], ".kts": ["kotlinc", "-script", source], ".swift": ["swift", source],
  ".dart": ["dart", "run", source], ".lua": ["lua", source], ".sh": ["bash", source], ".bash": ["bash", source],
@@ -402,7 +402,13 @@ try:
             argv = [binary]
             result = subprocess.run(argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, shell=False)
     else:
-        argv = commands[ext]
+        if ext in {".jsx", ".tsx"}:
+            tsx_cli = os.path.join(root, "node_modules", "tsx", "dist", "cli.mjs")
+            if not os.path.isfile(tsx_cli):
+                raise FileNotFoundError("Para executar JSX/TSX, instale a dependência tsx no projeto (npm install -D tsx).")
+            argv = ["node", tsx_cli, source]
+        else:
+            argv = commands[ext]
         result = subprocess.run(argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, shell=False)
     print(json.dumps({"exit_code":result.returncode,"stdout":result.stdout[-12000:],"stderr":result.stderr[-12000:],"timed_out":False}))
 except subprocess.TimeoutExpired as exc:
