@@ -54,6 +54,7 @@ function App() {
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
   const seenEventIds = useRef(new Set<string>());
   const approvalCommandId = useRef<string | null>(null);
+  const runtimeListenersReady = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let active = true;
@@ -170,6 +171,7 @@ function App() {
     const protocolError = listen<string>("runtime-protocol-error", event => {
       if (active) setRuntimeError("Falha no protocolo do runtime: " + event.payload.slice(0, 1000));
     });
+    runtimeListenersReady.current = Promise.all([unlisten, streamClosed, stderr, protocolError]).then(() => undefined);
     return () => {
       active = false;
       unlisten.then(stop => stop());
@@ -195,7 +197,13 @@ function App() {
       setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace.");
       return;
     }
-    const selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
+    let selected: string | string[] | null;
+    try {
+      selected = await open({ directory: true, multiple: false, title: "Abrir projeto" });
+    } catch (error) {
+      setProjectError("Não foi possível abrir o seletor de pastas: " + String(error));
+      return;
+    }
     if (typeof selected !== "string") return;
     try {
       const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
@@ -217,6 +225,7 @@ function App() {
       setRuntimeStatus("connecting");
       setRuntimeError(null);
       await invoke("stop_runtime").catch(() => undefined);
+      await runtimeListenersReady.current;
       await invoke("start_runtime", { projectPath: selected });
     } catch (error) {
       setProjectError(String(error));
