@@ -397,6 +397,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
 
                 state = agent.resume(root, persisted_state.task, event_callback=forward_resumed_event)
                 summary = state.events[-1].message if state.events else f"Task ended with status {state.status.value}."
+                try:
+                    MemoryStore(root).append_conversation(persisted_state.task, summary)
+                except OSError:
+                    pass
                 completed = state.status.value == "completed"
                 _write({
                     "type": "task.completed" if completed else "task.failed",
@@ -559,6 +563,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 state.events[-1].message if state.events
                 else f"Task ended with status {state.status.value}."
             )
+            try:
+                MemoryStore(root).append_conversation(instruction, result_summary)
+            except OSError:
+                pass
             _write({
                 "type": "task.completed" if state.status.value == "completed" else "task.failed",
                 "schema_version": 1,
