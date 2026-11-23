@@ -254,6 +254,22 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             if not isinstance(history, list):
                 history = []
             safe_history = [{"role": item["role"], "content": item["content"][:4000]} for item in history[-16:] if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str)]
+            raw_editor = payload.get("active_editor")
+            active_editor = None
+            if isinstance(raw_editor, dict):
+                editor_path = raw_editor.get("path")
+                editor_content = raw_editor.get("content", "")
+                if (
+                    isinstance(editor_path, str) and editor_path.strip()
+                    and not Path(editor_path).is_absolute()
+                    and ".." not in Path(editor_path).parts
+                    and isinstance(editor_content, str)
+                ):
+                    active_editor = {
+                        "path": editor_path.replace("\\\\", "/")[:500],
+                        "content": editor_content[:16000],
+                        "dirty": bool(raw_editor.get("dirty", False)),
+                    }
             _write({"type": "command.accepted", "schema_version": 1, "command_id": command_identifier, "accepted": True})
             try:
                 # Conversational answers are workspace-aware too: inspect the actual
@@ -294,6 +310,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     "workspace_root": str(root),
                     "project_files": project_files,
                     "inspected_files": inspected,
+                    "active_editor": active_editor,
                     "instruction": "Estes dados foram lidos diretamente do workspace ativo. Use-os como evidência; nunca diga que não tem acesso aos arquivos. Se um arquivo não estiver listado ou não puder ser lido, informe isso com precisão.",
                 }
                 response = agent.llm.chat([
