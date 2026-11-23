@@ -194,6 +194,22 @@ def test_write_uses_ascii_safe_jsonl_while_preserving_unicode(monkeypatch):
 
 
 
+
+def test_repair_mojibake_preserves_unicode_and_fixes_corrupted_portuguese():
+    assert studio_protocol._repair_mojibake("Hoje Ã© dia de aÃ§Ã£o.") == "Hoje é dia de ação."
+    assert studio_protocol._repair_mojibake("Olá, você!") == "Olá, você!"
+
+
+def test_local_date_context_uses_current_local_calendar_date():
+    context = studio_protocol._local_date_context()
+    now = studio_protocol.datetime.now().astimezone()
+    assert context["date_pt_br"] == (
+        f"{now.day:02d} de {studio_protocol._PT_MONTHS[now.month - 1]} de {now.year}"
+    )
+    assert context["iso_datetime"].endswith(("+00:00",)) or "T" in context["iso_datetime"]
+    assert context["timezone"]
+
+
 def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatch, tmp_path):
     target = tmp_path / "loucura.py"
     target.write_text("def soma(a, b):\n    return a + b\n", encoding="utf-8")
@@ -216,6 +232,7 @@ def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatc
             assert "loucura.py" in context["project_files"]
             assert context["inspected_files"][0]["path"] == "loucura.py"
             assert "def soma" in context["inspected_files"][0]["content"]
+            assert context["current_local_datetime"]["date_pt_br"]
             assert context["active_editor"]["path"] == "loucura.py"
             assert context["active_editor"]["dirty"] is True
             assert "def soma" in context["active_editor"]["content"]
