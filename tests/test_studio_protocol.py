@@ -210,6 +210,31 @@ def test_local_date_context_uses_current_local_calendar_date():
     assert context["timezone"]
 
 
+
+def test_chat_confirms_file_access_only_after_successful_workspace_read(monkeypatch, tmp_path):
+    (tmp_path / "loucura.py").write_text("print('olá')\n", encoding="utf-8")
+    command = {
+        "type": "chat.message", "schema_version": 1, "command_id": "file-access-check",
+        "payload": {"message": "Você consegue acessar o arquivo loucura.py?"},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeLLM:
+        def chat(self, *args, **kwargs):
+            raise AssertionError("A confirmação simples deve usar a leitura real, sem depender do modelo.")
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+        llm = FakeLLM()
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    answer = next(item for item in messages if item["type"] == "assistant.response")
+    assert "Sim. Consegui acessar loucura.py" in answer["payload"]["message"]
+
+
 def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatch, tmp_path):
     target = tmp_path / "loucura.py"
     target.write_text("def soma(a, b):\n    return a + b\n", encoding="utf-8")
