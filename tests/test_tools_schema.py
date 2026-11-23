@@ -18,13 +18,13 @@ def test_fence_accepted():
 
 def test_validate_kind():
     assert parse_tool_call(
-        '{"tool":"run_checks","arguments":{"kind":"validate"}}'
+        '{"tool":"run_checks","arguments":{"kind":"validate"},"plan_step":1}'
     ).arguments["kind"] == "validate"
 
 
 def test_invalid_check_kind():
     with pytest.raises(ToolCallError, match="must be one of"):
-        parse_tool_call('{"tool":"run_checks","arguments":{"kind":"deploy"}}')
+        parse_tool_call('{"tool":"run_checks","arguments":{"kind":"deploy"},"plan_step":1}')
 
 
 def test_mutating_tool_requires_plan_step():
