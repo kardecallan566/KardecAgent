@@ -753,21 +753,18 @@ function App() {
       // Opening a file is a navigation request, not a code-generation task.
       // Resolve and read it through the same workspace-constrained Tauri API
       // used by the explorer, then select it in the editor immediately.
-      const openRequest = instruction.match(/\\b(?:abra|abrir|abre|open)\\s+(?:o\\s+)?arquivo\\s+["'`]?([^"' `\\n]+)["'`]?/i);
+      const openRequest = instruction.match(/\b(?:abra|abrir|abre|open)\s+(?:o\s+)?arquivo\s+["'\`]?([^"' \`\n]+)["'\`]?/i);
       if (openRequest?.[1]) {
-        const requestedPath = openRequest[1].replace(/[.,;:!?]+$/, "").replaceAll("\\\\", "/");
+        const requestedPath = openRequest[1].replace(/[.,;:!?]+$/, "").replaceAll("\\", "/");
         const targetPath = requestedPath.includes(":") || requestedPath.startsWith("/")
           ? requestedPath
-          : projectRoot.replaceAll("\\\\", "/").replace(/\\/$/, "") + "/" + requestedPath;
+          : projectRoot.replaceAll("\\", "/").replace(/\/$/, "") + "/" + requestedPath;
         const content = await invoke<string>("read_project_file", { projectRoot, filePath: targetPath });
         const name = requestedPath.split("/").pop() || requestedPath;
-        setOpenTabs(tabs => {
-          const existing = tabs.find(tab => tab.path === targetPath);
-          return existing
-            ? tabs.map(tab => tab.path === targetPath ? { ...tab, content: existing.dirty ? existing.content : content } : tab)
-            : [...tabs, { path: targetPath, name, content, dirty: false }];
-        });
         const existingTab = openTabs.find(tab => tab.path === targetPath);
+        setOpenTabs(tabs => existingTab
+          ? tabs.map(tab => tab.path === targetPath ? { ...tab, content: existingTab.dirty ? existingTab.content : content } : tab)
+          : [...tabs, { path: targetPath, name, content, dirty: false }]);
         setFileContent(existingTab?.dirty ? existingTab.content : content);
         setOpenedPath(targetPath);
         setSelectedFile(name);
