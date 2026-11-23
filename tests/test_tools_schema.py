@@ -72,12 +72,12 @@ def test_finish_accepts_completion_evidence():
 
 
 def test_tool_json_with_literal_newlines_inside_file_content():
-    raw = '{"tool":"write_file","arguments":{"path":"loucura.py","content":"def main():\n    print(\'ola\')\n"}}'
+    raw = '{"tool":"write_file","plan_step":1,"arguments":{"path":"loucura.py","content":"def main():\n    print(\'ola\')\n"}}'
     action = parse_tool_call(raw.replace("\\n", "\n"))
     assert action.arguments["content"] == "def main():\n    print('ola')\n"
 
 
 def test_tool_json_with_literal_tabs_inside_file_content():
-    raw = '{"tool":"write_file","arguments":{"path":"a.py","content":"def main():\tpass"}}'
+    raw = '{"tool":"write_file","plan_step":1,"arguments":{"path":"a.py","content":"def main():\tpass"}}'
     action = parse_tool_call(raw.replace("\\t", "\t"))
     assert action.arguments["content"] == "def main():\tpass"
