@@ -270,7 +270,8 @@ function App() {
         }
         setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
       } else if (message.type === "task.created") {
-        setRuntimeBusy(true);
+        // Restored records are history only; they are not live executions.
+        setRuntimeBusy(!message.payload?.restored);
         setRuntimeSubtasks([]);
         setRuntimePlanSteps([]);
         setActiveRuntimeSubtask(null);
