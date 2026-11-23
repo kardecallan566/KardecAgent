@@ -242,8 +242,10 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
     let mut scanned_bytes = 0u64;
 
     while let Some(directory) = pending.pop() {
-        let entries = fs::read_dir(&directory)
-            .map_err(|e| format!("Falha ao pesquisar {}: {e}", directory.display()))?;
+        let entries = match fs::read_dir(&directory) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
         let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
         entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
 
