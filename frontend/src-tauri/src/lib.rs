@@ -202,6 +202,120 @@ fn read_project_entries(project_root: String, project_path: String) -> Result<Ve
     Ok(entries)
 }
 
+#[derive(Serialize)]
+struct ProjectSearchResult {
+    path: String,
+    name: String,
+    line: usize,
+    preview: String,
+}
+
+#[tauri::command]
+fn search_project_files(project_root: String, query: String) -> Result<Vec<ProjectSearchResult>, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    if query.chars().count() > 200 {
+        return Err("A busca aceita no máximo 200 caracteres.".into());
+    }
+    let root = Path::new(&project_root)
+        .canonicalize()
+        .map_err(|e| format!("Não foi possível acessar a raiz do projeto: {e}"))?;
+    if !root.is_dir() {
+        return Err("A raiz do workspace não é uma pasta.".into());
+    }
+
+    const MAX_FILES: usize = 5000;
+    const MAX_RESULTS: usize = 100;
+    const MAX_FILE_BYTES: u64 = 512 * 1024;
+    const IGNORED: &[&str] = &[
+        ".git", ".hg", ".svn", ".venv", "venv", "node_modules",
+        "dist", "build", ".next", ".expo", "__pycache__",
+        ".pytest_cache", ".mypy_cache", ".kardecagent", "target",
+    ];
+    let needle = query.to_lowercase();
+    let mut pending = vec![root.clone()];
+    let mut results = Vec::new();
+    let mut visited_files = 0usize;
+
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory)
+            .map_err(|e| format!("Falha ao pesquisar {}: {e}", directory.display()))?;
+        let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
+
+        for entry in entries.into_iter().rev() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let file_type = match entry.file_type() {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            // Never follow symlinks: they can escape the workspace root.
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                if !IGNORED.iter().any(|ignored| name.eq_ignore_ascii_case(ignored)) {
+                    pending.push(path);
+                }
+                continue;
+            }
+            if !file_type.is_file() || visited_files >= MAX_FILES {
+                continue;
+            }
+            visited_files += 1;
+            let relative = match path.strip_prefix(&root) {
+                Ok(value) => value.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+
+            if name.to_lowercase().contains(&needle) {
+                results.push(ProjectSearchResult {
+                    path: path.to_string_lossy().into_owned(),
+                    name: relative.clone(),
+                    line: 0,
+                    preview: "Correspondência no nome do arquivo".into(),
+                });
+                if results.len() >= MAX_RESULTS { return Ok(results); }
+            }
+
+            let metadata = match fs::metadata(&path) {
+                Ok(value) if value.len() <= MAX_FILE_BYTES => value,
+                _ => continue,
+            };
+            let bytes = match fs::read(&path) {
+                Ok(value) if value.len() as u64 <= metadata.len() && !value.contains(&0) => value,
+                _ => continue,
+            };
+            let content = match String::from_utf8(bytes) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            for (index, line) in content.lines().enumerate() {
+                if line.to_lowercase().contains(&needle) {
+                    let compact = line.trim();
+                    let preview = if compact.chars().count() > 240 {
+                        format!("{}…", compact.chars().take(240).collect::<String>())
+                    } else {
+                        compact.to_string()
+                    };
+                    results.push(ProjectSearchResult {
+                        path: path.to_string_lossy().into_owned(),
+                        name: relative.clone(),
+                        line: index + 1,
+                        preview,
+                    });
+                    if results.len() >= MAX_RESULTS { return Ok(results); }
+                }
+            }
+        }
+        if visited_files >= MAX_FILES { break; }
+    }
+    Ok(results)
+}
+
 #[tauri::command]
 fn read_project_file(project_root: String, file_path: String) -> Result<String, String> {
     let path = resolve_workspace_path(&project_root, &file_path)
@@ -917,6 +1031,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_project_entries,
+            search_project_files,
             read_project_file,
             write_project_file,
             create_project_file,
