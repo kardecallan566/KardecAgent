@@ -126,6 +126,12 @@ function App() {
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [fileSearchOpen, setFileSearchOpen] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [fileSearchResults, setFileSearchResults] = useState<Array<{ path: string; name: string; line: number; preview: string }>>([]);
+  const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const [fileSearchError, setFileSearchError] = useState<string | null>(null);
+
   const [openedPath, setOpenedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [fileDirty, setFileDirty] = useState(false);
@@ -175,6 +181,22 @@ function App() {
   }, [googleFontRevision]);
 
   useEffect(() => () => { if (startupTimer.current) window.clearTimeout(startupTimer.current); }, []);
+  useEffect(() => {
+    function handleWorkspaceSearchShortcut(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        if (projectRoot) {
+          setFileSearchOpen(true);
+          setFileSearchError(null);
+        }
+      } else if (event.key === "Escape") {
+        setFileSearchOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleWorkspaceSearchShortcut);
+    return () => window.removeEventListener("keydown", handleWorkspaceSearchShortcut);
+  }, [projectRoot]);
+
 
   useEffect(() => {
     let active = true;
@@ -631,6 +653,24 @@ function App() {
     setProjectEntries(entries);
   }
 
+  async function searchWorkspaceFiles() {
+    if (!projectRoot || !fileSearchQuery.trim() || fileSearchLoading) return;
+    setFileSearchLoading(true);
+    setFileSearchError(null);
+    try {
+      const results = await invoke<Array<{ path: string; name: string; line: number; preview: string }>>(
+        "search_project_files", { projectRoot, query: fileSearchQuery.trim() }
+      );
+      setFileSearchResults(results);
+    } catch (error) {
+      setFileSearchError(String(error));
+      setFileSearchResults([]);
+    } finally {
+      setFileSearchLoading(false);
+    }
+  }
+
+
   async function createProjectItem(kind: "file" | "directory") {
     if (!projectRoot) { setProjectError("Abra um projeto antes de criar arquivos ou pastas."); return; }
     const relativePath = window.prompt(kind === "file" ? "Caminho do novo arquivo (relativo ao projeto):" : "Caminho da nova pasta (relativo ao projeto):");
@@ -907,7 +947,7 @@ function App() {
                 {projectEntries.map(entry => <ExplorerEntry key={entry.path} entry={entry} projectRoot={projectRoot!} onOpenFile={openEntry}/>) }
                 {projectError && <div className="tree-row" role="alert">{projectError}</div>}
               </div>
-              <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
+              <button className="sidebar-bottom workspace-search-trigger" onClick={() => { setFileSearchOpen(true); setFileSearchError(null); }} disabled={!projectRoot}><Search size={14}/> Buscar nos arquivos <span className="shortcut">Ctrl+P</span></button>
             </>
           ) : activeNav === "tasks" ? (
             <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
@@ -1167,6 +1207,36 @@ function App() {
               else void (async () => { try { await invoke("stop_runtime"); setRuntimeStatus("offline"); await refreshCoreDiagnostics(); } catch (error) { setRuntimeError(String(error)); } })();
             }
           }}><CheckCircle2 size={14}/> Salvar preferências</button></footer>
+        </section>
+      </div>}
+      {fileSearchOpen && <div className="workspace-search-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setFileSearchOpen(false); }}>
+        <section className="workspace-search-dialog" role="dialog" aria-modal="true" aria-label="Buscar nos arquivos">
+          <div className="workspace-search-input-row">
+            <Search size={17}/>
+            <input
+              autoFocus
+              value={fileSearchQuery}
+              placeholder="Buscar texto ou nome de arquivo no projeto..."
+              onChange={event => { setFileSearchQuery(event.target.value); setFileSearchResults([]); setFileSearchError(null); }}
+              onKeyDown={event => { if (event.key === "Enter") void searchWorkspaceFiles(); }}
+            />
+            <button onClick={() => void searchWorkspaceFiles()} disabled={!fileSearchQuery.trim() || fileSearchLoading}>{fileSearchLoading ? "Buscando..." : "Buscar"}</button>
+            <button className="workspace-search-close" onClick={() => setFileSearchOpen(false)} title="Fechar (Esc)"><X size={16}/></button>
+          </div>
+          {fileSearchError && <div className="workspace-search-error">{fileSearchError}</div>}
+          <div className="workspace-search-results">
+            {fileSearchResults.map((result, index) => <button className="workspace-search-result" key={result.path + ":" + result.line + ":" + index} onClick={() => {
+              void openEntry({ name: result.name.split("/").pop() || result.name, path: result.path, is_dir: false });
+              setFileSearchOpen(false);
+            }}>
+              <span className="workspace-search-result-heading"><FileCode2 size={14}/><strong>{result.name}</strong><small>{result.line > 0 ? ":" + result.line : "nome"}</small></span>
+              <span className="workspace-search-result-preview">{result.preview || " "}</span>
+            </button>)}
+            {!fileSearchLoading && fileSearchQuery.trim() && !fileSearchError && fileSearchResults.length === 0 && <div className="workspace-search-empty">Nenhum resultado encontrado.</div>}
+            {!fileSearchQuery.trim() && <div className="workspace-search-empty">Digite um termo para pesquisar no conteúdo e nos nomes dos arquivos.</div>}
+            {fileSearchResults.length === 100 && <div className="workspace-search-limit">Exibindo os primeiros 100 resultados.</div>}
+          </div>
+          <div className="workspace-search-footer">Pesquisa local · ignora dependências, builds e arquivos binários · Esc para fechar</div>
         </section>
       </div>}
       <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> Studio <span>·</span> {runtimeStatus === "online" ? "Runtime conectado" : runtimeStatus === "connecting" ? "Conectando runtime" : "Runtime offline"}</div></footer>
