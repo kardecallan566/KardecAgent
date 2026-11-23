@@ -256,8 +256,35 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             safe_history = [{"role": item["role"], "content": item["content"][:4000]} for item in history[-16:] if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str)]
             _write({"type": "command.accepted", "schema_version": 1, "command_id": command_identifier, "accepted": True})
             try:
+                # Conversational answers are workspace-aware too: inspect the actual
+                # project tree and explicitly requested files before asking the model.
+                from .tools.filesystem import ProjectFilesystem
+                from .project.context import project_snapshot
+                import re
+                fs = ProjectFilesystem(root)
+                project_files = project_snapshot(root, limit=250)
+                requested_paths = re.findall(r"(?<![\\w])(?:[\\w.-]+[\\\\/])*[\\w.-]+\\.[A-Za-z0-9_-]{1,10}", text.strip())
+                inspect_paths = list(dict.fromkeys(requested_paths))
+                if re.search(r"\\b(analise|analisar|analise o projeto|visao geral|estrutura do projeto)\\b", text, re.IGNORECASE):
+                    for candidate in ("README.md", "pyproject.toml", "package.json", "Cargo.toml", "requirements.txt"):
+                        if candidate in project_files and candidate not in inspect_paths:
+                            inspect_paths.append(candidate)
+                inspected = []
+                for relative in inspect_paths[:8]:
+                    try:
+                        content = fs.read_file(relative)
+                        inspected.append({"path": relative, "content": content[:12000], "truncated": len(content) > 12000})
+                    except (OSError, ValueError):
+                        inspected.append({"path": relative, "error": "Arquivo não encontrado ou não pode ser lido dentro do workspace."})
+                workspace_context = {
+                    "workspace_root": str(root),
+                    "project_files": project_files,
+                    "inspected_files": inspected,
+                    "instruction": "Estes dados foram lidos diretamente do workspace ativo. Use-os como evidência; nunca diga que não tem acesso aos arquivos. Se um arquivo não estiver listado ou não puder ser lido, informe isso com precisão.",
+                }
                 response = agent.llm.chat([
-                    {"role": "system", "content": "Você é o KardecAgent, assistente técnico da IDE. Esta é uma conversa, não uma tarefa. Responda diretamente, em português quando o usuário usar português. Seja objetivo: no máximo 8 itens em listas ou planos informais, sem etapas repetidas, sem preencher espaço com sugestões genéricas. Se o usuário pedir um plano, produza um plano curto, concreto e coerente com a pasta/projeto e mantenha-o claramente referenciável na conversa. Não crie plano de execução estruturado, não peça aprovação e não execute ferramentas ou comandos nesta etapa. Pedidos de alteração concreta serão enviados como tarefa separada, acompanhados do histórico recente. Não invente ações ou resultados."},
+                    {"role": "system", "content": "Você é o KardecAgent, assistente técnico da IDE e está conectado ao workspace local. Você recebe abaixo uma listagem real de arquivos e, quando solicitado, conteúdo real dos arquivos. Use esse contexto para responder perguntas sobre o projeto. Se pedirem para ver um arquivo específico, baseie a resposta em inspected_files. Se pedirem análise do projeto, analise a árvore e os arquivos de configuração/README fornecidos; não invente conteúdo não inspecionado. Responda em português quando o usuário usar português. Seja objetivo: no máximo 8 itens em listas, sem etapas repetidas. Esta é uma conversa, não execute alterações nem comandos e não invente ações. Para modificar arquivos, o usuário deve pedir a tarefa de implementação."},
+                    {"role": "system", "content": "CONTEXTO REAL DO WORKSPACE (JSON): " + json.dumps(workspace_context, ensure_ascii=False)[:50000]},
                     *safe_history,
                     {"role": "user", "content": text.strip()},
                 ], temperature=0.3)
