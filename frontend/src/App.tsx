@@ -788,7 +788,12 @@ function App() {
         payload: { instruction, project_root: projectRoot, history: taskHistory, active_editor: openedPath ? { path: openedPath, content: fileContent.slice(0, 16000), dirty: fileDirty } : null }
       } : {
         type: "chat.message", schema_version: 1, command_id: commandId,
-        payload: { message: instruction, project_root: projectRoot, history }
+        payload: {
+          message: instruction,
+          project_root: projectRoot,
+          history,
+          active_editor: openedPath ? { path: openedPath.startsWith(projectRoot) ? openedPath.slice(projectRoot.length).replace(/^[/\\\\]+/, "") : openedPath, content: fileContent.slice(0, 16000), dirty: fileDirty } : null
+        }
       }});
       setInstructionDraft("");
     } catch (error) {
