@@ -201,7 +201,10 @@ def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatc
         "type": "chat.message",
         "schema_version": 1,
         "command_id": "chat-inspect-file",
-        "payload": {"message": "Você consegue ver o que tem no arquivo loucura.py?"},
+        "payload": {
+            "message": "Você consegue ver o que tem no arquivo loucura.py?",
+            "active_editor": {"path": "loucura.py", "content": "def soma(a, b):\\n    return a + b\\n", "dirty": True},
+        },
     }
     monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
@@ -213,6 +216,9 @@ def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatc
             assert "loucura.py" in context["project_files"]
             assert context["inspected_files"][0]["path"] == "loucura.py"
             assert "def soma" in context["inspected_files"][0]["content"]
+            assert context["active_editor"]["path"] == "loucura.py"
+            assert context["active_editor"]["dirty"] is True
+            assert "def soma" in context["active_editor"]["content"]
             return SimpleNamespace(content="O arquivo define a função soma.")
 
     class FakeAgent:
