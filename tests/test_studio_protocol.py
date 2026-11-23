@@ -203,7 +203,7 @@ def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatc
         "command_id": "chat-inspect-file",
         "payload": {
             "message": "Você consegue ver o que tem no arquivo loucura.py?",
-            "active_editor": {"path": "loucura.py", "content": "def soma(a, b):\\n    return a + b\\n", "dirty": True},
+            "active_editor": {"path": "loucura.py", "content": "def soma(a, b):\n    return a + b\n", "dirty": True},
         },
     }
     monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
