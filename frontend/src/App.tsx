@@ -229,9 +229,9 @@ function App() {
         const board = eventData.board;
         if (coreType === "editor.open_file_requested" && typeof eventData.path === "string") {
           const requestedPath = eventData.path.split(String.fromCharCode(92)).join("/");
-          const entry = projectEntries.find(item => !item.is_dir && item.path.split(String.fromCharCode(92)).join("/") === requestedPath);
-          if (entry) void openEntry(entry);
-          else setProjectError("O agente solicitou abrir um arquivo que não foi encontrado na árvore atual: " + requestedPath);
+          const entry = projectEntries.find(item => !item.is_dir && item.path.split(String.fromCharCode(92)).join("/") === requestedPath)
+            || { name: requestedPath.split("/").pop() || requestedPath, path: requestedPath, is_dir: false };
+          void openEntry(entry);
         }
         if (coreType === "plan_created" && Array.isArray(eventData.plan?.steps)) {
           setRuntimePlanSteps(eventData.plan.steps.map((title: string, index: number) => ({ step: index + 1, title, status: "pending" })));
