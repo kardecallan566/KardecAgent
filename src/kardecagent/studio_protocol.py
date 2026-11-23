@@ -263,9 +263,9 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 import re
                 fs = ProjectFilesystem(root)
                 project_files = project_snapshot(root, limit=250)
-                requested_paths = re.findall(r"(?<![\\w])(?:[\\w.-]+[\\\\/])*[\\w.-]+\\.[A-Za-z0-9_-]{1,10}", text.strip())
+                requested_paths = re.findall(r"(?<![\w])(?:[\w.-]+[\\/])*[\w.-]+\.[A-Za-z0-9_-]{1,10}", text.strip())
                 inspect_paths = list(dict.fromkeys(requested_paths))
-                if re.search(r"\\b(analise|analisar|analise o projeto|visao geral|estrutura do projeto)\\b", text, re.IGNORECASE):
+                if re.search(r"\b(analise|analisar|analise o projeto|visao geral|estrutura do projeto)\b", text, re.IGNORECASE):
                     for candidate in ("README.md", "pyproject.toml", "package.json", "Cargo.toml", "requirements.txt"):
                         if candidate in project_files and candidate not in inspect_paths:
                             inspect_paths.append(candidate)
