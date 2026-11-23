@@ -265,8 +265,22 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 project_files = project_snapshot(root, limit=250)
                 requested_paths = re.findall(r"(?<![\w])(?:[\w.-]+[\\/])*[\w.-]+\.[A-Za-z0-9_-]{1,10}", text.strip())
                 inspect_paths = list(dict.fromkeys(requested_paths))
-                if re.search(r"\b(analise|analisar|analise o projeto|visao geral|estrutura do projeto)\b", text, re.IGNORECASE):
-                    for candidate in ("README.md", "pyproject.toml", "package.json", "Cargo.toml", "requirements.txt"):
+                analysis_request = re.search(
+                    r"\\b(an[aá]lise|analisar|vis[aã]o geral|estrutura do projeto|como o projeto está organizado)\\b",
+                    text,
+                    re.IGNORECASE,
+                )
+                if analysis_request:
+                    # A tree alone is insufficient to explain an application.
+                    # Read metadata and likely entry points as evidence.
+                    candidates = (
+                        "README.md", "pyproject.toml", "package.json", "Cargo.toml",
+                        "requirements.txt", "main.py", "app.py", "manage.py",
+                        "src/main.py", "src/app.py", "src/__main__.py",
+                        "src/kardecagent/__init__.py", "frontend/src/App.tsx",
+                        "frontend/package.json", "index.js", "src/index.ts",
+                    )
+                    for candidate in candidates:
                         if candidate in project_files and candidate not in inspect_paths:
                             inspect_paths.append(candidate)
                 inspected = []
