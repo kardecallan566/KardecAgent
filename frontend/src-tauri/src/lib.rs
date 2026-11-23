@@ -226,9 +226,10 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
         return Err("A raiz do workspace não é uma pasta.".into());
     }
 
-    const MAX_FILES: usize = 5000;
+    const MAX_FILES: usize = 2000;
     const MAX_RESULTS: usize = 100;
-    const MAX_FILE_BYTES: u64 = 512 * 1024;
+    const MAX_FILE_BYTES: u64 = 256 * 1024;
+    const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
     const IGNORED: &[&str] = &[
         ".git", ".hg", ".svn", ".venv", "venv", "node_modules",
         "dist", "build", ".next", ".expo", "__pycache__",
@@ -238,6 +239,7 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
     let mut pending = vec![root.clone()];
     let mut results = Vec::new();
     let mut visited_files = 0usize;
+    let mut scanned_bytes = 0u64;
 
     while let Some(directory) = pending.pop() {
         let entries = fs::read_dir(&directory)
@@ -262,7 +264,7 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
                 }
                 continue;
             }
-            if !file_type.is_file() || visited_files >= MAX_FILES {
+            if !file_type.is_file() || visited_files >= MAX_FILES || scanned_bytes >= MAX_TOTAL_BYTES {
                 continue;
             }
             visited_files += 1;
@@ -271,7 +273,7 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
                 Err(_) => continue,
             };
 
-            if name.to_lowercase().contains(&needle) {
+            if relative.to_lowercase().contains(&needle) {
                 results.push(ProjectSearchResult {
                     path: path.to_string_lossy().into_owned(),
                     name: relative.clone(),
@@ -289,6 +291,8 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
                 Ok(value) if value.len() as u64 <= metadata.len() && !value.contains(&0) => value,
                 _ => continue,
             };
+            scanned_bytes = scanned_bytes.saturating_add(bytes.len() as u64);
+            if scanned_bytes > MAX_TOTAL_BYTES { break; }
             let content = match String::from_utf8(bytes) {
                 Ok(value) => value,
                 Err(_) => continue,
@@ -311,7 +315,7 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
                 }
             }
         }
-        if visited_files >= MAX_FILES { break; }
+        if visited_files >= MAX_FILES || scanned_bytes >= MAX_TOTAL_BYTES { break; }
     }
     Ok(results)
 }
