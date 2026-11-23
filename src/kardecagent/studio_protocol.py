@@ -22,6 +22,40 @@ class StudioProtocolError(ValueError):
     pass
 
 
+_PT_MONTHS = (
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+)
+
+
+def _local_date_context() -> dict[str, str]:
+    now = datetime.now().astimezone()
+    return {
+        "iso_datetime": now.isoformat(timespec="seconds"),
+        "date_pt_br": f"{now.day:02d} de {_PT_MONTHS[now.month - 1]} de {now.year}",
+        "timezone": now.tzname() or "fuso horário local",
+    }
+
+
+def _repair_mojibake(value: str) -> str:
+    """Repair common UTF-8 bytes mis-decoded as Latin-1/Windows-1252."""
+    current = value
+    markers = ("Ã", "Â", "â€", "ðŸ")
+    for _ in range(4):
+        if not any(marker in current for marker in markers):
+            break
+        try:
+            candidate = current.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            break
+        current_score = sum(current.count(marker) for marker in markers)
+        candidate_score = sum(candidate.count(marker) for marker in markers)
+        if candidate_score >= current_score:
+            break
+        current = candidate
+    return current
+
+
 def _write(message: dict) -> None:
     encoded = json.dumps(message, ensure_ascii=True, separators=(",", ":"), default=str)
     if len(encoded.encode("utf-8")) > MAX_EVENT_BYTES:
@@ -214,7 +248,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "task_id": persisted_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {
-                    "message": "Execução interrompida antes de encerrar. A tarefa permanece disponível para recuperação." if interrupted else f"Tarefa encerrada com estado {persisted_state.status.value}.",
+                    "message": "Esta é uma tarefa anterior que foi pausada quando o KardecAgent foi encerrado. Ela permanece disponível para recuperação; esta conversa não foi interrompida." if interrupted else f"Tarefa encerrada com estado {persisted_state.status.value}.",
                     "recoverable": persisted_state.status.value in {"running", "verifying", "resuming", "recovering", "failed", "max_iterations"},
                     "restored": True,
                 },
@@ -306,7 +340,9 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                         inspected.append({"path": relative, "content": content[:12000], "truncated": len(content) > 12000})
                     except (OSError, ValueError):
                         inspected.append({"path": relative, "error": "Arquivo não encontrado ou não pode ser lido dentro do workspace."})
+                clock_context = _local_date_context()
                 workspace_context = {
+                    "current_local_datetime": clock_context,
                     "workspace_root": str(root),
                     "project_files": project_files,
                     "inspected_files": inspected,
@@ -319,7 +355,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     *safe_history,
                     {"role": "user", "content": text.strip()},
                 ], temperature=0.3)
-                answer = response.content.strip()
+                answer = _repair_mojibake(response.content.strip())
                 if not answer:
                     raise RuntimeError("O modelo retornou uma resposta vazia.")
                 _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer[:12000]}})
