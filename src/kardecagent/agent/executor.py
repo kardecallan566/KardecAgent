@@ -192,7 +192,7 @@ class AgentExecutor:
         if action.tool == "read_file":
             return fs.read_file(args["path"])
         if action.tool == "open_file":
-            relative = fs.resolve(args["path"]).relative_to(root).as_posix()
+            relative = fs.safe_path(args["path"]).relative_to(root).as_posix()
             if state is not None:
                 state.record("editor.open_file_requested", "Agent requested opening a project file in the Studio editor.", path=relative)
             return json.dumps({"ok": True, "path": relative, "requested": "open_in_editor"}, ensure_ascii=False)
