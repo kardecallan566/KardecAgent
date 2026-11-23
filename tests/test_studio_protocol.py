@@ -191,3 +191,35 @@ def test_write_uses_ascii_safe_jsonl_while_preserving_unicode(monkeypatch):
     encoded = output.getvalue().strip()
     assert encoded.isascii()
     assert json.loads(encoded)["payload"]["message"] == "ação concluída — café ☕"
+
+
+
+def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatch, tmp_path):
+    target = tmp_path / "loucura.py"
+    target.write_text("def soma(a, b):\\n    return a + b\\n", encoding="utf-8")
+    command = {
+        "type": "chat.message",
+        "schema_version": 1,
+        "command_id": "chat-inspect-file",
+        "payload": {"message": "Você consegue ver o que tem no arquivo loucura.py?"},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeLLM:
+        def chat(self, messages, temperature=0.3):
+            context = json.loads(messages[1]["content"].split("JSON): ", 1)[1])
+            assert "loucura.py" in context["project_files"]
+            assert context["inspected_files"][0]["path"] == "loucura.py"
+            assert "def soma" in context["inspected_files"][0]["content"]
+            return SimpleNamespace(content="O arquivo define a função soma.")
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+        llm = FakeLLM()
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    answer = next(item for item in messages if item["type"] == "assistant.response")
+    assert "função soma" in answer["payload"]["message"]
