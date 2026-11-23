@@ -81,3 +81,12 @@ def test_tool_json_with_literal_tabs_inside_file_content():
     raw = '{"tool":"write_file","plan_step":1,"arguments":{"path":"a.py","content":"def main():\tpass"}}'
     action = parse_tool_call(raw.replace("\\t", "\t"))
     assert action.arguments["content"] == "def main():\tpass"
+
+
+
+def test_open_file_requires_approved_plan_step():
+    with pytest.raises(ToolCallError, match="plan_step is required"):
+        parse_tool_call('{"tool":"open_file","arguments":{"path":"src/main.py"}}')
+    action = parse_tool_call('{"tool":"open_file","arguments":{"path":"src/main.py"},"plan_step":1}')
+    assert action.tool == "open_file"
+    assert action.arguments["path"] == "src/main.py"
