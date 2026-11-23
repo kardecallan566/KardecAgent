@@ -13,7 +13,7 @@ class FakeLLM:
         try:
             return LLMResponse(next(self.responses), {})
         except StopIteration:
-            return LLMResponse('{"tool":"run_checks","arguments":{"kind":"test"}}', {})
+            return LLMResponse('{"tool":"run_checks","arguments":{"kind":"test"},"plan_step":1}', {})
 
 
 def _plan(steps=("Finish validation",)) -> str:
