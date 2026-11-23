@@ -266,7 +266,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     and isinstance(editor_content, str)
                 ):
                     active_editor = {
-                        "path": editor_path.replace("\\\\", "/")[:500],
+                        "path": editor_path.replace(chr(92), "/")[:500],
                         "content": editor_content[:16000],
                         "dirty": bool(raw_editor.get("dirty", False)),
                     }
@@ -282,7 +282,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 requested_paths = re.findall(r"(?<![\w])(?:[\w.-]+[\\/])*[\w.-]+\.[A-Za-z0-9_-]{1,10}", text.strip())
                 inspect_paths = list(dict.fromkeys(requested_paths))
                 analysis_request = re.search(
-                    r"\\b(an[aá]lise|analisar|vis[aã]o geral|estrutura do projeto|como o projeto está organizado)\\b",
+                    r"\b(an[aá]lise|analisar|vis[aã]o geral|estrutura do projeto|como o projeto está organizado)\b",
                     text,
                     re.IGNORECASE,
                 )
