@@ -196,14 +196,14 @@ def test_write_uses_ascii_safe_jsonl_while_preserving_unicode(monkeypatch):
 
 def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatch, tmp_path):
     target = tmp_path / "loucura.py"
-    target.write_text("def soma(a, b):\\n    return a + b\\n", encoding="utf-8")
+    target.write_text("def soma(a, b):\n    return a + b\n", encoding="utf-8")
     command = {
         "type": "chat.message",
         "schema_version": 1,
         "command_id": "chat-inspect-file",
         "payload": {"message": "Você consegue ver o que tem no arquivo loucura.py?"},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
