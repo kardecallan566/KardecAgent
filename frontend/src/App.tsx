@@ -278,15 +278,29 @@ function App() {
         setRuntimeTasks(items => [...items, { id: message.task_id, executionId: message.execution_id, title: message.payload.title, status: message.payload?.resumed ? "Retomando" : message.payload?.restored ? "Restaurada" : "Recebida", recoverable: false }].slice(-50));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
       } else if (message.type === "task.completed" || message.type === "task.failed") {
-        setRuntimeBusy(false);
-        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : message.payload?.recoverable ? "Recuperável" : "Falhou", recoverable: message.type === "task.failed" && Boolean(message.payload?.recoverable) } : task));
+        // Startup history replay is informational; it must not look like a new
+        // assistant answer or alter the state of a task currently running.
+        if (!message.payload?.restored) {
+          setRuntimeBusy(false);
+          setChatMessages(items => [...items, {
+            id: message.event_id || crypto.randomUUID(),
+            role: "assistant" as const,
+            text: message.payload?.result_summary || message.payload?.message ||
+              (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.")
+          }].slice(-100));
+          setPendingApproval(null);
+          setApprovalSubmitting(false);
+        }
+        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? {
+          ...task,
+          status: message.type === "task.completed" ? "Concluída" : message.payload?.recoverable ? "Recuperável" : "Falhou",
+          recoverable: message.type === "task.failed" && Boolean(message.payload?.recoverable)
+        } : task));
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
-        const terminalSummary = message.payload?.result_summary || message.payload?.message || (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
-        setChatMessages(items => [...items, { id: message.event_id || crypto.randomUUID(), role: "assistant" as const, text: terminalSummary }].slice(-100));
+        const terminalSummary = message.payload?.result_summary || message.payload?.message ||
+          (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: terminalSummary }].slice(-100));
-        setPendingApproval(null);
-        setApprovalSubmitting(false);
       } else if (message.type === "command.accepted" && message.command_id === pendingInstructionCommandId.current) {
         const acceptedId = pendingInstructionCommandId.current;
         pendingInstructionCommandId.current = null;
