@@ -288,11 +288,12 @@ fn search_project_files(project_root: String, query: String) -> Result<Vec<Proje
                 _ => continue,
             };
             let bytes = match fs::read(&path) {
-                Ok(value) if value.len() as u64 <= metadata.len() && !value.contains(&0) => value,
+                Ok(value) if value.len() as u64 <= metadata.len() => value,
                 _ => continue,
             };
             scanned_bytes = scanned_bytes.saturating_add(bytes.len() as u64);
             if scanned_bytes > MAX_TOTAL_BYTES { break; }
+            if bytes.contains(&0) { continue; }
             let content = match String::from_utf8(bytes) {
                 Ok(value) => value,
                 Err(_) => continue,
