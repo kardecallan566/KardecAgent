@@ -10,6 +10,7 @@ on:
       - "src/**"
       - "pyproject.toml"
       - "scripts/studio_core_entry.py"
+      - "scripts/verify_studio_windows_bundle.py"
       - ".github/workflows/studio-windows-build.yml"
   push:
     branches:
@@ -23,6 +24,7 @@ on:
       - "src/**"
       - "pyproject.toml"
       - "scripts/studio_core_entry.py"
+      - "scripts/verify_studio_windows_bundle.py"
       - ".github/workflows/studio-windows-build.yml"
 
 permissions:
