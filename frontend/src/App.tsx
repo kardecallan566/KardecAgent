@@ -750,6 +750,36 @@ function App() {
     setRuntimeError(null);
     try {
       const normalizedInstruction = instruction.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      // Opening a file is a navigation request, not a code-generation task.
+      // Resolve and read it through the same workspace-constrained Tauri API
+      // used by the explorer, then select it in the editor immediately.
+      const openRequest = instruction.match(/\\b(?:abra|abrir|abre|open)\\s+(?:o\\s+)?arquivo\\s+["'`]?([^"' `\\n]+)["'`]?/i);
+      if (openRequest?.[1]) {
+        const requestedPath = openRequest[1].replace(/[.,;:!?]+$/, "").replaceAll("\\\\", "/");
+        const targetPath = requestedPath.includes(":") || requestedPath.startsWith("/")
+          ? requestedPath
+          : projectRoot.replaceAll("\\\\", "/").replace(/\\/$/, "") + "/" + requestedPath;
+        const content = await invoke<string>("read_project_file", { projectRoot, filePath: targetPath });
+        const name = requestedPath.split("/").pop() || requestedPath;
+        setOpenTabs(tabs => {
+          const existing = tabs.find(tab => tab.path === targetPath);
+          return existing
+            ? tabs.map(tab => tab.path === targetPath ? { ...tab, content: existing.dirty ? existing.content : content } : tab)
+            : [...tabs, { path: targetPath, name, content, dirty: false }];
+        });
+        const existingTab = openTabs.find(tab => tab.path === targetPath);
+        setFileContent(existingTab?.dirty ? existingTab.content : content);
+        setOpenedPath(targetPath);
+        setSelectedFile(name);
+        setFileDirty(Boolean(existingTab?.dirty));
+        setActiveNav("explorer");
+        pendingInstructionCommandId.current = null;
+        setChatMessages(items => [...items, { id: "opened-" + commandId, role: "assistant" as const, text: "Abri **" + requestedPath + "** no editor." }].slice(-100));
+        setInstructionDraft("");
+        setRuntimeBusy(false);
+        setRuntimeError(null);
+        return;
+      }
       const explicitAction = /\b(crie|criar|implemente|implementar|corrija|corrigir|altere|alterar|modifique|modificar|execute|executar|rode|rodar|instale|instalar|remova|remover|adicione|adicionar|atualize|atualizar|refatore|refatorar|gere|gerar|escreva|escrever|construa|construir|desenvolva|desenvolver|configure|configurar|delete|build|run|implement|fix|create|update)\b/.test(normalizedInstruction);
       const explicitPlanExecution = /\b(use|siga|continue|implemente|execute|comece|inicie|fa[cç]a a cria[cç][aã]o|construa|desenvolva)\b/.test(normalizedInstruction) && /\b(plano|planejamento|jogo|projeto|implementa[cç][aã]o)\b/.test(normalizedInstruction);
       const asksHow = /^(como|por que|porque|o que|qual|quais|explique|me explique|analise|analisa)\b/.test(normalizedInstruction);
