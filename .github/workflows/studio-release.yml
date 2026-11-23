@@ -1,107 +1,50 @@
 name: Publish Studio release
 
 on:
-  push:
-    tags:
-      - "studio-v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing Studio release tag (for example studio-v0.1.1)
-        required: true
-        type: string
+  workflow_run:
+    workflows:
+      - Studio Windows build
+    types:
+      - completed
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
-  group: studio-release-${{ github.ref }}
+  group: studio-release-${{ github.event.workflow_run.head_branch || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   windows-release:
-    name: Build and publish Windows installers
-    runs-on: windows-latest
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: frontend
+    name: Publish verified Windows installers
+    if: ${{ github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'studio-v') }}
+    runs-on: ubuntu-latest
     steps:
-      - name: Check out tagged source
-        uses: actions/checkout@v5
+      - name: Download installers from the successful Windows build
+        uses: actions/download-artifact@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          name: kardecagent-studio-windows
+          path: release-artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify release version
-        shell: pwsh
+      - name: Verify release payload is complete
+        shell: bash
         run: |
-          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
-          $tagVersion = $tag -replace '^studio-v', ''
-          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-          if ($tagVersion -ne $config.version) {
-            throw "Release tag $tagVersion does not match Tauri version $($config.version)"
-          }
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          target: x86_64-pc-windows-msvc
-
-      - name: Generate Windows app icon
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.Drawing
-          $iconDir = "src-tauri/icons"
-          New-Item -ItemType Directory -Force -Path $iconDir | Out-Null
-          $bitmap = New-Object System.Drawing.Bitmap 256, 256
-          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-          $graphics.Clear([System.Drawing.Color]::FromArgb(30, 41, 59))
-          $font = New-Object System.Drawing.Font("Arial", 112, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-          $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(56, 189, 248))
-          $graphics.DrawString("K", $font, $brush, 48, 35)
-          $pngPath = Join-Path $iconDir "icon.png"
-          $icoPath = Join-Path $iconDir "icon.ico"
-          $bitmap.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
-          $graphics.Dispose()
-          $font.Dispose()
-          $brush.Dispose()
-          $bitmap.Dispose()
-          $png = [System.IO.File]::ReadAllBytes($pngPath)
-          $stream = [System.IO.File]::Create($icoPath)
-          $writer = New-Object System.IO.BinaryWriter($stream)
-          $writer.Write([UInt16]0)
-          $writer.Write([UInt16]1)
-          $writer.Write([UInt16]1)
-          $writer.Write([byte]0)
-          $writer.Write([byte]0)
-          $writer.Write([byte]0)
-          $writer.Write([byte]0)
-          $writer.Write([UInt16]1)
-          $writer.Write([UInt16]32)
-          $writer.Write([UInt32]$png.Length)
-          $writer.Write([UInt32]22)
-          $writer.Write($png)
-          $writer.Dispose()
-
-      - name: Build Studio Windows installers
-        run: npm run tauri build
+          test -f release-artifacts/studio-build-manifest.json
+          find release-artifacts -type f -name '*.msi' -print -quit | grep -q .
+          find release-artifacts -type f -name '*.exe' -print -quit | grep -q .
+          echo "Verified installer artifact and build manifest."
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: KardecAgent Studio ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ github.event.workflow_run.head_branch }}
+          name: KardecAgent Studio ${{ github.event.workflow_run.head_branch }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            frontend/src-tauri/target/release/bundle/msi/*.msi
-            frontend/src-tauri/target/release/bundle/nsis/*.exe
+            release-artifacts/**/*.msi
+            release-artifacts/**/*.exe
+            release-artifacts/studio-build-manifest.json
