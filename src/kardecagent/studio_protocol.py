@@ -349,6 +349,19 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     "active_editor": active_editor,
                     "instruction": "Estes dados foram lidos diretamente do workspace ativo. Use-os como evidência; nunca diga que não tem acesso aos arquivos. Se um arquivo não estiver listado ou não puder ser lido, informe isso com precisão.",
                 }
+                access_only = (
+                    re.search(r"\b(?:consegue|pode|tem como)\s+(?:acessar|ver|ler|abrir)\b", text, re.IGNORECASE)
+                    and not re.search(r"\b(?:o que|explique|resuma|analise|mostre|conteúdo|conteudo)\b", text, re.IGNORECASE)
+                )
+                if access_only and inspected:
+                    target = inspected[0]
+                    if "error" in target:
+                        answer = f"Não consegui ler o arquivo {target['path']} dentro do workspace ativo."
+                    else:
+                        answer = f"Sim. Consegui acessar {target['path']} no workspace ativo e ler seu conteúdo."
+                    _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer}})
+                    continue
+
                 response = agent.llm.chat([
                     {"role": "system", "content": "Você é o KardecAgent, assistente técnico da IDE e está conectado ao workspace local. Você recebe abaixo uma listagem real de arquivos e, quando solicitado, conteúdo real dos arquivos. Use esse contexto para responder perguntas sobre o projeto. Se pedirem para ver um arquivo específico, baseie a resposta em inspected_files. Se perguntarem sobre o arquivo aberto no editor, use active_editor, que pode conter alterações ainda não salvas e tem precedência sobre a cópia em disco. Se pedirem análise do projeto, analise a árvore e os arquivos de configuração/README fornecidos; não invente conteúdo não inspecionado. Para perguntas sobre a data atual, use obrigatoriamente current_local_datetime.date_pt_br presente no contexto; nunca use datas de treinamento ou invente uma data. Responda em português quando o usuário usar português. Seja objetivo: no máximo 8 itens em listas, sem etapas repetidas. Esta é uma conversa, não execute alterações nem comandos e não invente ações. Para modificar arquivos, o usuário deve pedir a tarefa de implementação."},
                     {"role": "system", "content": "CONTEXTO REAL DO WORKSPACE (JSON): " + json.dumps(workspace_context, ensure_ascii=False)[:50000]},
