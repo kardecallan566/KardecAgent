@@ -41,7 +41,7 @@ def _local_date_context() -> dict[str, str]:
 def _repair_mojibake(value: str) -> str:
     """Repair repeated UTF-8/Windows-1252 decoding errors, including mixed text."""
     markers = ("Ã", "Â", "â€", "ðŸ", "Æ’", "â‚¬")
-    proper_accents = set("áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ")
+    proper_accents = set("áàãéêíóôõúüçÁÀÉÊÍÓÔÕÚÜÇ")
     
     def repair_fragment(fragment: str) -> str:
         current = fragment
