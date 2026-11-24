@@ -1,5 +1,6 @@
 import io
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -332,3 +333,32 @@ def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatc
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
     answer = next(item for item in messages if item["type"] == "assistant.response")
     assert "função soma" in answer["payload"]["message"]
+
+
+def test_run_stdio_emits_heartbeat_while_agent_execution_is_blocked(monkeypatch, tmp_path):
+    monkeypatch.setattr(studio_protocol, "RUNTIME_HEARTBEAT_INTERVAL_SECONDS", 0.005)
+    command = {
+        "type": "task.submit",
+        "schema_version": 1,
+        "command_id": "heartbeat-command",
+        "payload": {"instruction": "do work", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+    monkeypatch.setattr(studio_protocol, "_approval", lambda *args, **kwargs: True)
+
+    class FakeAgent:
+        settings = SimpleNamespace(
+            max_iterations=4, max_command_output_chars=1200,
+            llm_timeout_seconds=30.0, command_timeout_seconds=15.0,
+        )
+
+        def run(self, root, instruction, **kwargs):
+            time.sleep(0.04)
+            return SimpleNamespace(status=TaskStatus.COMPLETED, events=[])
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert any(item["type"] == "runtime.heartbeat" for item in messages)
+    assert all(item.get("schema_version") == 1 for item in messages)
