@@ -182,3 +182,45 @@ def test_denies_retry_when_a_command_already_returned_a_result():
 
     assert not decision.allowed
     assert "external side effects" in decision.reason
+
+
+
+def test_denies_non_transient_tool_error_without_rollback_or_progress():
+    decision = RetryPolicy().decide(
+        events=[],
+        retry_event="resume_retry_started",
+        status="max_iterations",
+        diagnostic=diagnostic(FailureCategory.TOOL_EXECUTION),
+        recovery=recovery(),
+        base_iteration_limit=10,
+    )
+
+    assert not decision.allowed
+    assert "no transient signal" in decision.reason
+
+
+def test_allows_tool_error_after_audited_rollback():
+    decision = RetryPolicy().decide(
+        events=[],
+        retry_event="resume_retry_started",
+        status="failed",
+        diagnostic=diagnostic(FailureCategory.TOOL_EXECUTION),
+        recovery=recovery(rolled_back=(4,)),
+        base_iteration_limit=10,
+    )
+
+    assert decision.allowed
+
+
+def test_denies_verification_failure_without_progress_to_resume():
+    decision = RetryPolicy().decide(
+        events=[],
+        retry_event="resume_retry_started",
+        status="failed",
+        diagnostic=diagnostic(FailureCategory.VERIFICATION),
+        recovery=recovery(),
+        base_iteration_limit=10,
+    )
+
+    assert not decision.allowed
+    assert "no recovered progress" in decision.reason
