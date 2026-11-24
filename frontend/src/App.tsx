@@ -33,10 +33,23 @@ const DEFAULT_SETTINGS: StudioSettings = {
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 type RecentProject = { path: string; name: string; lastOpenedAt: string };
 
-function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void }) {
+function ExplorerEntry({ entry, projectRoot, onOpenFile, refreshKey }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void; refreshKey: number }) {
   const [expanded, setExpanded] = useState(false);
+  const lastRefreshKey = useRef(refreshKey);
   const [children, setChildren] = useState<ProjectEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (lastRefreshKey.current === refreshKey) return;
+    lastRefreshKey.current = refreshKey;
+    if (!expanded || !entry.is_dir) return;
+    let active = true;
+    setLoading(true);
+    void invoke<ProjectEntry[]>("read_project_entries", { projectRoot, projectPath: entry.path })
+      .then(result => { if (active) setChildren(result); })
+      .catch(error => { if (active) console.error("Falha ao atualizar pasta", error); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [refreshKey]);
   async function toggleFolder() {
     if (!entry.is_dir) { onOpenFile(entry); return; }
     if (expanded) { setExpanded(false); return; }
@@ -50,7 +63,7 @@ function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry
   return <><button className={entry.is_dir ? "tree-row folder-entry" : "tree-row file"} onClick={toggleFolder} title={entry.path}>
     {entry.is_dir ? (expanded ? <ChevronDown/> : <ChevronRight/>) : <span className="tree-spacer"/>}
     {entry.is_dir ? (expanded ? <FolderOpen/> : <Folder/>) : <FileCode2/>}<span>{entry.name}</span>{loading && <small className="tree-loading">...</small>}
-  </button>{expanded && <div className="tree-children">{children.map(child => <ExplorerEntry key={child.path} entry={child} projectRoot={projectRoot} onOpenFile={onOpenFile}/>)}</div>}</>;
+  </button>{expanded && <div className="tree-children">{children.map(child => <ExplorerEntry key={child.path} entry={child} projectRoot={projectRoot} onOpenFile={onOpenFile} refreshKey={refreshKey}/>)}</div>}</>;
 }
 
 
@@ -146,6 +159,7 @@ function App() {
     } catch { return []; }
   });
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
+  const [projectTreeRevision, setProjectTreeRevision] = useState(0);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [fileSearchOpen, setFileSearchOpen] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
@@ -927,6 +941,7 @@ function App() {
     if (!projectRoot) return;
     const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot, projectPath: projectRoot });
     setProjectEntries(entries);
+    setProjectTreeRevision(revision => revision + 1);
   }
 
   async function searchWorkspaceFiles() {
@@ -1222,7 +1237,7 @@ function App() {
                   <button className={selectedFile === "main.tsx" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("main.tsx")}><FileCode2/><span>main.tsx</span></button>
                   <button className={selectedFile === "styles.css" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("styles.css")}><FileCode2/><span>styles.css</span></button>
                 </>}
-                {projectEntries.map(entry => <ExplorerEntry key={entry.path} entry={entry} projectRoot={projectRoot!} onOpenFile={openEntry}/>) }
+                {projectEntries.map(entry => <ExplorerEntry key={entry.path} entry={entry} projectRoot={projectRoot!} onOpenFile={openEntry} refreshKey={projectTreeRevision}/>) }
                 {projectError && <div className="tree-row" role="alert">{projectError}</div>}
               </div>
               <button className="sidebar-bottom workspace-search-trigger" onClick={() => { setFileSearchOpen(true); setFileSearchError(null); }} disabled={!projectRoot}><Search size={14}/> Buscar nos arquivos <span className="shortcut">Ctrl+P</span></button>
