@@ -2,6 +2,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{
     fs,
+    fs::OpenOptions,
     io::{BufRead, BufReader, ErrorKind, Write},
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
@@ -345,24 +346,77 @@ fn write_project_file(project_root: String, file_path: String, content: String) 
     if !path.is_file() {
         return Err("O caminho selecionado não é um arquivo existente.".into());
     }
-    fs::write(path, content.as_bytes()).map_err(|e| format!("Falha ao gravar arquivo: {e}"))
+    write_workspace_file(&path, content.as_bytes())
 }
 
+fn write_workspace_file(path: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = path.parent().ok_or("Pasta de destino inválida.")?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let temporary = parent.join(format!(".kardecagent-{}-{nonce}.tmp", std::process::id()));
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)
+        .map_err(|e| format!("Não foi possível preparar o salvamento: {e}"))?;
+    if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("Falha ao gravar arquivo temporário: {error}"));
+    }
+    drop(file);
+
+    #[cfg(windows)]
+    {
+        let backup = parent.join(format!(".kardecagent-{}-{nonce}.bak", std::process::id()));
+        if let Err(error) = fs::rename(path, &backup) {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Não foi possível preservar a versão anterior: {error}"));
+        }
+        if let Err(error) = fs::rename(&temporary, path) {
+            let _ = fs::rename(&backup, path);
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Falha ao substituir o arquivo; a versão anterior foi restaurada: {error}"));
+        }
+        let _ = fs::remove_file(backup);
+    }
+    #[cfg(not(windows))]
+    {
+        if let Err(error) = fs::rename(&temporary, path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Falha ao substituir o arquivo: {error}"));
+        }
+    }
+    Ok(())
+}
 
 fn resolve_new_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
     let root = Path::new(project_root).canonicalize()
         .map_err(|e| format!("Não foi possível acessar a raiz do projeto: {e}"))?;
     let relative = Path::new(requested_path);
-    if relative.as_os_str().is_empty() || relative.is_absolute() || relative.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+    if relative.as_os_str().is_empty() || relative.is_absolute()
+        || relative.components().any(|component| !matches!(component, std::path::Component::Normal(_))) {
         return Err("Informe um caminho relativo válido dentro do projeto.".into());
     }
-    let candidate = root.join(relative);
-    let parent = candidate.parent().ok_or("Caminho de destino inválido.")?;
-    let canonical_parent = parent.canonicalize()
-        .map_err(|e| format!("A pasta de destino precisa existir: {e}"))?;
-    if !canonical_parent.starts_with(&root) {
-        return Err("A operação está fora da pasta do projeto.".into());
+
+    let components = relative.components().collect::<Vec<_>>();
+    let mut parent = root.clone();
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        let next = parent.join(component.as_os_str());
+        if next.exists() {
+            let metadata = fs::symlink_metadata(&next).map_err(|e| e.to_string())?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err("O caminho pai contém um link simbólico ou não é uma pasta.".into());
+            }
+        } else {
+            fs::create_dir(&next).map_err(|e| format!("Falha ao criar pasta intermediária: {e}"))?;
+        }
+        parent = next.canonicalize().map_err(|e| e.to_string())?;
+        if !parent.starts_with(&root) {
+            return Err("A operação está fora da pasta do projeto.".into());
+        }
     }
+
+    let leaf = components.last().ok_or("Caminho de destino inválido.")?.as_os_str();
+    let candidate = parent.join(leaf);
     if candidate.exists() || candidate.is_symlink() {
         return Err("Já existe um arquivo ou pasta nesse caminho.".into());
     }
