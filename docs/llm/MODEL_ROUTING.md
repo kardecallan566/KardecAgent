@@ -69,13 +69,13 @@ Measure plan validity, Portuguese instruction adherence, tool-call correctness, 
 The first opt-in implementation is deliberately narrower than the full design above:
 
 - `KARDECAGENT_MODEL_ROUTING_ENABLED=true` enables routing; it is disabled by default.
-- `KARDECAGENT_FAST_MODEL` names the installed lightweight model. `KARDECAGENT_LLM_MODEL` remains the primary coding/planning model.
+- `KARDECAGENT_FAST_MODEL` names the installed lightweight model. `KARDECAGENT_LLM_MODEL` remains the primary coding/planning model. Studio exposes these as **Modelo rápido** and **Roteamento adaptativo** in Settings → Core e IA, and passes them to the Core process explicitly.
 - `KARDECAGENT_FAST_MODEL` and `KARDECAGENT_MODEL_ROUTING_ENABLED` also accept the legacy `KARDEC_` prefix.
 - Short conversational requests can use the fast model. Planning/implementation phases, tool-protocol transcripts, code/path content, long requests, and software-engineering intents stay on the primary model.
 - The classifier is deterministic and local; it does not call a third-party classifier or send prompt content elsewhere.
 - If the fast model fails, the same request is retried once on the primary model. Primary-model failures are surfaced normally.
 - Each response includes `raw._kardecagent_routing` metadata with tier, selected model, reason and fallback flag. This metadata is available to logs/diagnostics without changing the task journal schema.
-- `kardec-agent doctor` verifies that both configured Ollama models are installed before reporting routing as ready.
+- `kardec-agent doctor` and the Studio connection test verify that both configured Ollama models are installed before reporting routing as ready.
 
 Example:
 
