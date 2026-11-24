@@ -976,71 +976,221 @@ fn stop_runtime(state: State<'_, RuntimeState>) -> Result<(), String> {
 }
 
 
-struct TerminalProcess { child: Child, stdin: ChildStdin }
-impl Drop for TerminalProcess {
-    fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); }
+struct TerminalProcess {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    exited: bool,
 }
-#[derive(Default)]
-struct TerminalState(Mutex<Option<TerminalProcess>>);
-
-#[tauri::command]
-fn start_integrated_terminal(app: tauri::AppHandle, state: State<'_, TerminalState>, project_path: String, shell_name: String) -> Result<(), String> {
-    let root = Path::new(&project_path).canonicalize().map_err(|e| format!("Pasta do terminal inválida: {e}"))?;
-    if !root.is_dir() { return Err("A pasta selecionada não é um diretório.".into()); }
-    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
-    if let Some(existing) = terminal.as_mut() {
-        match existing.child.try_wait().map_err(|e| format!("Falha ao verificar terminal: {e}"))? {
-            Some(_) => { terminal.take(); }
-            None => return Err("O terminal já está em execução.".into()),
+impl Drop for TerminalProcess {
+    fn drop(&mut self) {
+        if !self.exited {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
     }
+}
+#[derive(Default)]
+struct TerminalInner {
+    process: Option<TerminalProcess>,
+    last_exit_code: Option<i32>,
+}
+#[derive(Default)]
+struct TerminalState(Mutex<TerminalInner>);
+
+#[derive(Serialize)]
+struct TerminalDiagnostics {
+    running: bool,
+    pid: Option<u32>,
+    last_exit_code: Option<i32>,
+}
+
+#[tauri::command]
+fn terminal_diagnostics(state: State<'_, TerminalState>) -> Result<TerminalDiagnostics, String> {
+    let mut inner = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    let status = match inner.process.as_mut() {
+        Some(process) => process.child.try_wait()
+            .map_err(|error| format!("Falha ao verificar terminal: {error}"))?,
+        None => None,
+    };
+    if let Some(status) = status {
+        let code = status.code().unwrap_or(-1);
+        if let Some(process) = inner.process.as_mut() {
+            process.exited = true;
+        }
+        inner.process.take();
+        inner.last_exit_code = Some(code);
+    }
+    if let Some(process) = inner.process.as_ref() {
+        return Ok(TerminalDiagnostics {
+            running: true,
+            pid: Some(process.child.id()),
+            last_exit_code: inner.last_exit_code,
+        });
+    }
+    Ok(TerminalDiagnostics {
+        running: false,
+        pid: None,
+        last_exit_code: inner.last_exit_code,
+    })
+}
+
+const MAX_TERMINAL_LINE_BYTES: usize = 16 * 1024;
+
+#[tauri::command]
+fn start_integrated_terminal(
+    app: tauri::AppHandle,
+    state: State<'_, TerminalState>,
+    project_path: String,
+    shell_name: String,
+) -> Result<(), String> {
+    let root = Path::new(&project_path)
+        .canonicalize()
+        .map_err(|error| format!("Pasta do terminal inválida: {error}"))?;
+    if !root.is_dir() {
+        return Err("A pasta selecionada não é um diretório.".into());
+    }
+    let mut inner = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    let status = match inner.process.as_mut() {
+        Some(process) => process.child.try_wait()
+            .map_err(|error| format!("Falha ao verificar terminal: {error}"))?,
+        None => None,
+    };
+    if let Some(status) = status {
+        let code = status.code().unwrap_or(-1);
+        if let Some(process) = inner.process.as_mut() {
+            process.exited = true;
+        }
+        inner.process.take();
+        inner.last_exit_code = Some(code);
+    } else if inner.process.is_some() {
+        return Err("O terminal já está em execução.".into());
+    }
+
     #[cfg(windows)]
     let mut command = match shell_name.as_str() {
-        "cmd" => { let mut c = Command::new("cmd.exe"); c.args(["/Q"]); c },
-        "powershell" => { let mut c = Command::new("powershell.exe"); c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]); c },
+        "cmd" => { let mut command = Command::new("cmd.exe"); command.args(["/Q"]); command },
+        "powershell" => { let mut command = Command::new("powershell.exe"); command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]); command },
         _ => return Err("Shell não permitido. Escolha PowerShell ou CMD.".into()),
     };
     #[cfg(not(windows))]
-    let _ = shell_name;
-    #[cfg(not(windows))]
-    let mut command = { let mut c = Command::new("bash"); c.args(["--noprofile", "--norc"]); c };
+    let mut command = {
+        let _ = shell_name;
+        let mut command = Command::new("bash");
+        command.args(["--noprofile", "--norc"]);
+        command
+    };
     configure_hidden_process(&mut command);
-    let mut child = command.current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().map_err(|e| format!("Não foi possível iniciar o terminal integrado: {e}"))?;
+    let mut child = command
+        .current_dir(&root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Não foi possível iniciar o terminal integrado: {error}"))?;
     let stdin = child.stdin.take().ok_or("Falha ao abrir entrada do terminal.")?;
     let stdout = child.stdout.take().ok_or("Falha ao abrir saída do terminal.")?;
     let stderr = child.stderr.take().ok_or("Falha ao abrir erros do terminal.")?;
+
     let out_app = app.clone();
     thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line { Ok(line) => { let _ = out_app.emit("terminal-output", line); }, Err(error) => { let _ = out_app.emit("terminal-output", format!("Erro de leitura: {error}")); break; } }
+        let mut reader = BufReader::new(stdout);
+        loop {
+            match read_bounded_line(&mut reader, MAX_TERMINAL_LINE_BYTES) {
+                Ok(Some(bytes)) => {
+                    let line = String::from_utf8_lossy(&bytes).into_owned();
+                    let _ = out_app.emit("terminal-output", line);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let message = if error.kind() == ErrorKind::InvalidData {
+                        "Linha do terminal excedeu 16 KiB e foi descartada.".to_string()
+                    } else {
+                        format!("Erro de leitura do terminal: {error}")
+                    };
+                    let _ = out_app.emit("terminal-output", message);
+                    if error.kind() != ErrorKind::InvalidData { break; }
+                }
+            }
         }
         let _ = out_app.emit("terminal-exited", ());
     });
     let err_app = app.clone();
     thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() { match line { Ok(line) => { let _ = err_app.emit("terminal-output", line); }, Err(_) => break } }
+        let mut reader = BufReader::new(stderr);
+        loop {
+            match read_bounded_line(&mut reader, MAX_TERMINAL_LINE_BYTES) {
+                Ok(Some(bytes)) => {
+                    let line = String::from_utf8_lossy(&bytes).into_owned();
+                    let _ = err_app.emit("terminal-output", line);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let message = if error.kind() == ErrorKind::InvalidData {
+                        "Linha de erro do terminal excedeu 16 KiB e foi descartada.".to_string()
+                    } else {
+                        format!("Erro de leitura stderr do terminal: {error}")
+                    };
+                    let _ = err_app.emit("terminal-output", message);
+                    if error.kind() != ErrorKind::InvalidData { break; }
+                }
+            }
+        }
     });
-    *terminal = Some(TerminalProcess { child, stdin });
+    inner.last_exit_code = None;
+    inner.process = Some(TerminalProcess { child, stdin: Some(stdin), exited: false });
     Ok(())
 }
 
 #[tauri::command]
 fn write_integrated_terminal(state: State<'_, TerminalState>, input: String) -> Result<(), String> {
-    if input.len() > 16 * 1024 { return Err("Comando excede 16 KiB.".into()); }
-    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
-    let process = terminal.as_mut().ok_or("Terminal não iniciado.")?;
-    process.stdin.write_all(input.as_bytes()).map_err(|e| format!("Falha ao enviar comando: {e}"))?;
-    process.stdin.write_all(b"\n").map_err(|e| format!("Falha ao finalizar comando: {e}"))?;
-    process.stdin.flush().map_err(|e| format!("Falha ao descarregar comando: {e}"))
+    if input.len() > 16 * 1024 {
+        return Err("Comando excede 16 KiB.".into());
+    }
+    let mut inner = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    let status = inner.process.as_mut()
+        .ok_or("Terminal não iniciado.")?
+        .child.try_wait()
+        .map_err(|error| format!("Falha ao verificar terminal: {error}"))?;
+    if let Some(status) = status {
+        let code = status.code().unwrap_or(-1);
+        if let Some(process) = inner.process.as_mut() {
+            process.exited = true;
+        }
+        inner.process.take();
+        inner.last_exit_code = Some(code);
+        return Err(format!("O terminal encerrou com código {code}."));
+    }
+    let process = inner.process.as_mut().ok_or("Terminal não iniciado.")?;
+    let stdin = process.stdin.as_mut().ok_or("Entrada do terminal indisponível.")?;
+    stdin.write_all(input.as_bytes()).map_err(|error| format!("Falha ao enviar comando: {error}"))?;
+    stdin.write_all(b"\n").map_err(|error| format!("Falha ao finalizar comando: {error}"))?;
+    stdin.flush().map_err(|error| format!("Falha ao descarregar comando: {error}"))
 }
 
 #[tauri::command]
 fn stop_integrated_terminal(state: State<'_, TerminalState>) -> Result<(), String> {
-    let mut terminal = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
-    terminal.take();
+    let mut inner = state.0.lock().map_err(|_| "Terminal lock poisoned".to_string())?;
+    let Some(mut process) = inner.process.take() else { return Ok(()); };
+
+    // EOF lets interactive shells exit normally before the forced-stop fallback.
+    process.stdin.take();
+    let mut status = None;
+    for _ in 0..10 {
+        if let Some(result) = process.child.try_wait()
+            .map_err(|error| format!("Falha ao aguardar terminal: {error}"))? {
+            status = Some(result);
+            break;
+        }
+        thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let result = if let Some(status) = status {
+        status
+    } else {
+        let _ = process.child.kill();
+        process.child.wait().map_err(|error| format!("Falha ao finalizar terminal: {error}"))?
+    };
+    process.exited = true;
+    inner.last_exit_code = Some(result.code().unwrap_or(-1));
     Ok(())
 }
 
@@ -1067,6 +1217,7 @@ pub fn run() {
             send_runtime_command,
             stop_runtime,
             start_integrated_terminal,
+            terminal_diagnostics,
             write_integrated_terminal,
             stop_integrated_terminal
         ])
