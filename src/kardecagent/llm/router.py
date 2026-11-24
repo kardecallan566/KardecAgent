@@ -101,6 +101,7 @@ class ModelRouter:
 
     def chat(self, primary: ChatClient, fast: ChatClient, messages: list[dict[str, Any]], *, temperature: float = 0.2):
         decision = self.decide(messages)
+        logger.info("Model route: tier=%s model=%s reason=%s", decision.tier, decision.model, decision.reason)
         selected = fast if decision.tier == "fast" else primary
         fallback_reason = ""
         try:
