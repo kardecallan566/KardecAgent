@@ -15,6 +15,7 @@ A retry is denied when:
 - the task did not end in `failed` or `max_iterations`;
 - recovery did not complete, reported an error, or found workspace conflicts;
 - the failure is a plan, recovery-conflict, or unknown failure;
+- a tool or verification failure has neither a transient signal nor audited rollback/progress to resume;
 - the retry budget is exhausted; or
 - a `run_command` failure is not classified as transient.
 
