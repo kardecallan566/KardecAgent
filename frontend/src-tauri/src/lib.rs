@@ -1465,7 +1465,7 @@ mod git_status_tests {
     #[test]
     fn parses_branch_tracking_and_staged_unstaged_and_untracked_files() {
         let status = parse_git_status_text(
-            "## feature/editor...origin/feature/editor [ahead 2, behind 1]\\nM  src/main.rs\\n M README.md\\n?? new file.txt\\n",
+            "## feature/editor...origin/feature/editor [ahead 2, behind 1]\nM  src/main.rs\n M README.md\n?? new file.txt\n",
         );
         assert_eq!(status.branch, "feature/editor");
         assert_eq!(status.ahead, 2);
