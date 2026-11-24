@@ -51,7 +51,7 @@ def _repair_mojibake(value: str) -> str:
                 break
             try:
                 candidate = current.encode("cp1252").decode("utf-8")
-            except UnicodeEncodeError:
+            except (UnicodeEncodeError, UnicodeDecodeError):
                 fragments: list[str] = []
                 pending: list[str] = []
                 for char in current:
@@ -65,8 +65,6 @@ def _repair_mojibake(value: str) -> str:
                 if pending:
                     fragments.append(repair_fragment("".join(pending)))
                 return "".join(fragments)
-            except UnicodeDecodeError:
-                break
             if sum(candidate.count(marker) for marker in markers) >= score:
                 break
             current = candidate
