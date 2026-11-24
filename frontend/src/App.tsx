@@ -1388,12 +1388,13 @@ function App() {
                 }
                 const today = new Date();
                 const todayKey = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-");
-                return [...groups.entries()].reverse().map(([key, messages], index) => {
+                const orderedGroups = [...groups.entries()];
+                return orderedGroups.map(([key, messages], index) => {
                   const date = key === "undated" ? null : new Date(key + "T12:00:00");
                   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
                   const yesterdayKey = [yesterday.getFullYear(), String(yesterday.getMonth() + 1).padStart(2, "0"), String(yesterday.getDate()).padStart(2, "0")].join("-");
                   const label = key === todayKey ? "Hoje" : key === yesterdayKey ? "Ontem" : date ? date.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : "Histórico sem data";
-                  const collapsed = collapsedChatDates[key] ?? index > 0;
+                  const collapsed = collapsedChatDates[key] ?? index < orderedGroups.length - 1;
                   return <section className="chat-date-group" key={key}>
                     <button className="chat-date-heading" onClick={() => setCollapsedChatDates(current => ({ ...current, [key]: !collapsed }))} aria-expanded={!collapsed}><span>{label}</span><small>{messages.length} mensagem(ns)</small><ChevronDown size={13} className={collapsed ? "collapsed" : ""}/></button>
                     {!collapsed && messages.map(message => <article className={`agent-chat-message role-${message.role} ${message.status || ""}`} key={message.id}>
