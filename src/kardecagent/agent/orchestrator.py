@@ -380,6 +380,11 @@ class Orchestrator:
                         else f"Subtask retry stopped with status {result_state.status.value}."
                     )
                 else:
+                    if result_state.status is TaskStatus.RESUMING:
+                        result_state.transition(
+                            TaskStatus.FAILED,
+                            reason="Automatic retry was denied: " + decision.reason,
+                        )
                     summary = (
                         f"Subtask stopped with status {result_state.status.value}; "
                         f"retry not performed: {decision.reason}."
