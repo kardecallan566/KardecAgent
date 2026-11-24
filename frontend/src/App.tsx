@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RuntimeLimits, RuntimePlanStep, RuntimeSubtask } from "./types/runtime";
+import { getEditorCompletions, getLiveEditorDiagnostics, parseToolDiagnostics, type EditorCompletion, type EditorDiagnostic } from "./editor/intelligence";
 import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
@@ -137,6 +138,11 @@ function App() {
 
   const [openedPath, setOpenedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const completionRange = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  const [editorCompletions, setEditorCompletions] = useState<EditorCompletion[]>([]);
+  const [activeCompletionIndex, setActiveCompletionIndex] = useState(0);
+  const [toolEditorDiagnostics, setToolEditorDiagnostics] = useState<EditorDiagnostic[]>([]);
   const [fileDirty, setFileDirty] = useState(false);
   const [fileSaving, setFileSaving] = useState(false);
   const [runningFile, setRunningFile] = useState(false);
@@ -153,6 +159,8 @@ function App() {
   const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
   const [eventSearch, setEventSearch] = useState("");
   const filteredEvents = runtimeEvents.filter(event => `${event.type} ${event.message}`.toLowerCase().includes(eventSearch.trim().toLowerCase()));
+  const liveEditorDiagnostics = openedPath ? getLiveEditorDiagnostics(fileContent, openedPath.split(".").pop() || "", openedPath) : [];
+  const editorDiagnostics = [...liveEditorDiagnostics, ...toolEditorDiagnostics];
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string; recoverable?: boolean }>>([]);
   const [runtimeSubtasks, setRuntimeSubtasks] = useState<RuntimeSubtask[]>([]);
   const [runtimePlanSteps, setRuntimePlanSteps] = useState<RuntimePlanStep[]>([]);
@@ -475,6 +483,12 @@ function App() {
     return () => window.clearInterval(watchdog);
   }, [runtimeStatus]);
 
+  useEffect(() => {
+    setToolEditorDiagnostics([]);
+    setEditorCompletions([]);
+    setActiveCompletionIndex(0);
+  }, [openedPath]);
+
   // Persist the current workspace transcript independently from startup restoration.
   useEffect(() => {
     if (!projectRoot) return;
@@ -536,6 +550,46 @@ function App() {
       setTerminalOutput(items => [...items, "[Falha ao encerrar terminal: " + String(error) + "]"].slice(-1000));
     }
     setTerminalReady(false);
+  }
+
+  function refreshEditorCompletions(source: string, cursor: number, force = false) {
+    if (!openedPath) { setEditorCompletions([]); return; }
+    const result = getEditorCompletions(
+      source,
+      openedPath.split(".").pop() || "",
+      cursor,
+      projectEntries.filter(entry => !entry.is_dir).map(entry => entry.path),
+      force,
+    );
+    completionRange.current = { start: result.start, end: result.end };
+    setEditorCompletions(result.items);
+    setActiveCompletionIndex(0);
+  }
+
+  function applyEditorCompletion(item: EditorCompletion) {
+    const start = completionRange.current.start;
+    const end = completionRange.current.end;
+    const next = fileContent.slice(0, start) + item.insertText + fileContent.slice(end);
+    const cursor = start + item.insertText.length;
+    setFileContent(next);
+    setFileDirty(true);
+    setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: next, dirty: true } : tab));
+    setEditorCompletions([]);
+    requestAnimationFrame(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.focus();
+      editor.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  function jumpToEditorDiagnostic(diagnostic: EditorDiagnostic) {
+    if (!editorRef.current) return;
+    const lines = fileContent.split("\n");
+    const lineOffset = lines.slice(0, Math.max(0, diagnostic.line - 1)).reduce((total, line) => total + line.length + 1, 0);
+    const cursor = Math.min(fileContent.length, lineOffset + Math.max(0, diagnostic.column - 1));
+    editorRef.current.focus();
+    editorRef.current.setSelectionRange(cursor, cursor);
   }
 
   async function openEntry(entry: ProjectEntry) {
@@ -794,7 +848,8 @@ function App() {
         "quality_project_file", { projectRoot, filePath: openedPath, fix, approved: fix }
       );
       setQualityOutput(result);
-      setBottomPanel("Output");
+      setToolEditorDiagnostics(parseToolDiagnostics(result.output, openedPath));
+      setBottomPanel("Problemas");
       if (fix && result.fixed) {
         const updated = await invoke<string>("read_project_file", { projectRoot, filePath: openedPath });
         setFileContent(updated);
@@ -1097,9 +1152,17 @@ function App() {
             <>
               <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
+                  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); return; }
+                  if ((event.ctrlKey || event.metaKey) && event.code === "Space") { event.preventDefault(); refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart, true); return; }
+                  if (editorCompletions.length && event.key === "ArrowDown") { event.preventDefault(); setActiveCompletionIndex(index => (index + 1) % editorCompletions.length); return; }
+                  if (editorCompletions.length && event.key === "ArrowUp") { event.preventDefault(); setActiveCompletionIndex(index => (index - 1 + editorCompletions.length) % editorCompletions.length); return; }
+                  if (editorCompletions.length && (event.key === "Enter" || event.key === "Tab")) { event.preventDefault(); applyEditorCompletion(editorCompletions[activeCompletionIndex]); return; }
+                  if (event.key === "Escape") { setEditorCompletions([]); return; }
+                  if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); }
+                }} aria-label="Editor de código" /></div>{editorCompletions.length > 0 && <div className="editor-completions" role="listbox" aria-label="Sugestões de código">{editorCompletions.map((item, index) => <button key={item.kind + ":" + item.label} className={index === activeCompletionIndex ? "selected" : ""} role="option" aria-selected={index === activeCompletionIndex} onMouseDown={event => { event.preventDefault(); applyEditorCompletion(item); }}><span className={"completion-kind " + item.kind}>{item.kind === "keyword" ? "K" : item.kind === "symbol" ? "ƒ" : "F"}</span><strong>{item.label}</strong><small>{item.detail}</small></button>)}</div>}</div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
-              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Terminal" ? <div className="integrated-terminal" style={{ fontSize: settings.terminalFontSize + "px" }}><div className="terminal-toolbar"><span><Terminal size={13}/> {terminalReady ? "Terminal ativo · PID " + (terminalDiagnostics?.pid ?? "—") : terminalDiagnostics?.running ? "Canal fechado · processo PID " + (terminalDiagnostics.pid ?? "—") : terminalDiagnostics?.last_exit_code !== null && terminalDiagnostics?.last_exit_code !== undefined ? "Terminal encerrado · código " + terminalDiagnostics.last_exit_code : "Terminal parado"}</span><div><button onClick={() => setTerminalOutput([])} disabled={!terminalOutput.length}>Limpar</button><button onClick={() => void startTerminal()} disabled={terminalReady || Boolean(terminalDiagnostics?.running) || !projectRoot}>Novo terminal</button><button onClick={() => void stopTerminal()} disabled={!terminalDiagnostics?.running}><Square size={11}/> Encerrar</button></div></div><div className="terminal-screen">{terminalOutput.map((line,index) => <div key={index}>{line}</div>)}</div><form className="terminal-command" onSubmit={event => { event.preventDefault(); void sendTerminalCommand(); }}><span>{settings.shell === "cmd" ? ">" : "PS>"}</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} placeholder={terminalReady ? "Digite um comando e pressione Enter..." : "Inicie um terminal para executar comandos"} disabled={!terminalReady}/><button type="submit" disabled={!terminalReady || !terminalInput.trim()}><Send size={13}/></button></form></div> : bottomPanel === "Output" && qualityOutput ? <div className="run-output"><div className="run-output-header"><strong>{qualityOutput.language} · {qualityOutput.file} · {qualityOutput.tool}</strong><span className={qualityOutput.available && qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "run-success" : "run-failure"}>{!qualityOutput.available ? "Ferramenta indisponível" : qualityOutput.fixed ? "Correções aplicadas" : qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "Sem problemas" : qualityOutput.exit_code === 0 ? "Ajustes sugeridos" : "Problemas encontrados"}</span></div><pre>{qualityOutput.output}</pre></div> : bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
+              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Problemas","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Problemas" ? <div className="editor-problems">{editorDiagnostics.length ? editorDiagnostics.map((diagnostic, index) => <button key={diagnostic.source + ":" + diagnostic.line + ":" + diagnostic.column + ":" + index} className={"editor-problem " + diagnostic.severity} onClick={() => jumpToEditorDiagnostic(diagnostic)}><span>{diagnostic.severity === "error" ? "E" : "W"}</span><strong>{diagnostic.code || diagnostic.source.toUpperCase()}</strong><small>{diagnostic.line}:{diagnostic.column}</small><p>{diagnostic.message}</p></button>) : <div className="editor-problems-empty"><CheckCircle2 size={15}/>{openedPath ? "Nenhum diagnóstico registrado. Execute a análise de código para verificar este arquivo." : "Abra um arquivo para ver diagnósticos."}</div>}</div> : bottomPanel === "Terminal" ? <div className="integrated-terminal" style={{ fontSize: settings.terminalFontSize + "px" }}><div className="terminal-toolbar"><span><Terminal size={13}/> {terminalReady ? "Terminal ativo · PID " + (terminalDiagnostics?.pid ?? "—") : terminalDiagnostics?.running ? "Canal fechado · processo PID " + (terminalDiagnostics.pid ?? "—") : terminalDiagnostics?.last_exit_code !== null && terminalDiagnostics?.last_exit_code !== undefined ? "Terminal encerrado · código " + terminalDiagnostics.last_exit_code : "Terminal parado"}</span><div><button onClick={() => setTerminalOutput([])} disabled={!terminalOutput.length}>Limpar</button><button onClick={() => void startTerminal()} disabled={terminalReady || Boolean(terminalDiagnostics?.running) || !projectRoot}>Novo terminal</button><button onClick={() => void stopTerminal()} disabled={!terminalDiagnostics?.running}><Square size={11}/> Encerrar</button></div></div><div className="terminal-screen">{terminalOutput.map((line,index) => <div key={index}>{line}</div>)}</div><form className="terminal-command" onSubmit={event => { event.preventDefault(); void sendTerminalCommand(); }}><span>{settings.shell === "cmd" ? ">" : "PS>"}</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} placeholder={terminalReady ? "Digite um comando e pressione Enter..." : "Inicie um terminal para executar comandos"} disabled={!terminalReady}/><button type="submit" disabled={!terminalReady || !terminalInput.trim()}><Send size={13}/></button></form></div> : bottomPanel === "Output" && qualityOutput ? <div className="run-output"><div className="run-output-header"><strong>{qualityOutput.language} · {qualityOutput.file} · {qualityOutput.tool}</strong><span className={qualityOutput.available && qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "run-success" : "run-failure"}>{!qualityOutput.available ? "Ferramenta indisponível" : qualityOutput.fixed ? "Correções aplicadas" : qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "Sem problemas" : qualityOutput.exit_code === 0 ? "Ajustes sugeridos" : "Problemas encontrados"}</span></div><pre>{qualityOutput.output}</pre></div> : bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
             </>
           )}
         </section>
