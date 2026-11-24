@@ -663,6 +663,8 @@ fn start_runtime(
     project_path: String,
     ollama_base_url: String,
     llm_model: String,
+    fast_model: String,
+    model_routing_enabled: bool,
     llm_timeout_seconds: f64,
     python_executable: Option<String>,
 ) -> Result<(), String> {
@@ -687,6 +689,7 @@ fn start_runtime(
     let base = ollama_base_url.trim().trim_end_matches('/');
     if !(base.starts_with("http://") || base.starts_with("https://")) || base.len() > 500 { return Err("Endereço Ollama inválido.".into()); }
     if llm_model.trim().is_empty() || llm_model.len() > 200 { return Err("Modelo Ollama inválido.".into()); }
+    if fast_model.len() > 200 || (model_routing_enabled && fast_model.trim().is_empty()) { return Err("Configure um modelo rápido válido antes de ativar o roteamento.".into()); }
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) { return Err("Timeout Ollama deve estar entre 10 e 900 segundos.".into()); }
     let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
         || std::env::var_os("KARDECAGENT_PYTHON").is_some();
@@ -722,6 +725,8 @@ fn start_runtime(
         .env("PYTHONUNBUFFERED", "1")
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
         .env("KARDECAGENT_LLM_MODEL", llm_model.trim())
+        .env("KARDECAGENT_FAST_MODEL", fast_model.trim())
+        .env("KARDECAGENT_MODEL_ROUTING_ENABLED", if model_routing_enabled { "true" } else { "false" })
         .env("KARDECAGENT_LLM_TIMEOUT", llm_timeout_seconds.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -799,6 +804,8 @@ struct OllamaTestResult {
     version: String,
     models: Vec<String>,
     model: String,
+    fast_model: Option<String>,
+    routing_enabled: bool,
     response: String,
 }
 
@@ -807,6 +814,8 @@ fn test_ollama_connection(
     app: tauri::AppHandle,
     ollama_base_url: String,
     llm_model: String,
+    fast_model: String,
+    model_routing_enabled: bool,
     llm_timeout_seconds: f64,
     python_executable: Option<String>,
 ) -> Result<OllamaTestResult, String> {
@@ -816,6 +825,9 @@ fn test_ollama_connection(
     }
     if llm_model.trim().is_empty() || llm_model.len() > 200 {
         return Err("Informe o nome de um modelo Ollama válido.".into());
+    }
+    if fast_model.len() > 200 || (model_routing_enabled && fast_model.trim().is_empty()) {
+        return Err("Informe um modelo rápido válido para ativar o roteamento.".into());
     }
     if !llm_timeout_seconds.is_finite() || !(10.0..=900.0).contains(&llm_timeout_seconds) {
         return Err("O timeout deve estar entre 10 e 900 segundos.".into());
@@ -849,6 +861,8 @@ fn test_ollama_connection(
         .args(&args)
         .env("KARDECAGENT_OLLAMA_BASE_URL", base)
         .env("KARDECAGENT_LLM_MODEL", llm_model.trim())
+        .env("KARDECAGENT_FAST_MODEL", fast_model.trim())
+        .env("KARDECAGENT_MODEL_ROUTING_ENABLED", if model_routing_enabled { "true" } else { "false" })
         .env("KARDECAGENT_LLM_TIMEOUT", llm_timeout_seconds.to_string())
         .output()
         .map_err(|error| format!("Falha ao executar o diagnóstico do Ollama: {error}"))?;
@@ -878,6 +892,8 @@ fn test_ollama_connection(
         version: version.to_string(),
         models,
         model: model.to_string(),
+        fast_model: result.get("fast_model").and_then(Value::as_str).map(str::to_string),
+        routing_enabled: result.get("routing_enabled").and_then(Value::as_bool).unwrap_or(false),
         response: response.to_string(),
     })
 }
