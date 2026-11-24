@@ -51,8 +51,23 @@ def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     for key, expected in {**schema["types"], **schema["optional"]}.items():
         if key in arguments and (isinstance(arguments[key], bool) or not isinstance(arguments[key], expected)):
             raise ToolCallError(f"argument '{key}' must be {expected.__name__}")
-    if tool == "finish" and (not arguments.get("criteria_evidence") or not all(isinstance(x, str) and x.strip() for x in arguments["criteria_evidence"])):
-        raise ToolCallError("criteria_evidence must be a non-empty list of textual evidence")
+    if tool == "finish":
+        evidence = arguments.get("criteria_evidence")
+        valid_strings = isinstance(evidence, list) and all(
+            isinstance(item, str) and item.strip() for item in evidence
+        )
+        valid_objects = isinstance(evidence, list) and all(
+            isinstance(item, dict)
+            and set(item) == {"criterion", "evidence"}
+            and isinstance(item.get("criterion"), str) and item["criterion"].strip()
+            and isinstance(item.get("evidence"), str) and item["evidence"].strip()
+            for item in evidence
+        )
+        if not evidence or not (valid_strings or valid_objects):
+            raise ToolCallError(
+                "criteria_evidence must be a non-empty list of evidence strings "
+                "or objects with textual criterion and evidence fields"
+            )
     if tool == "run_checks" and arguments.get("kind") not in {"test", "lint", "typecheck", "build", "validate", "security", "dependency_audit"}:
         raise ToolCallError("argument 'kind' must be one of: test, lint, typecheck, build, validate, security, dependency_audit")
     for key in ("limit", "max_results", "max_chars"):
@@ -86,7 +101,7 @@ def tool_instructions() -> str:
         "plan_step is required for write_file, apply_patch, run_command, run_checks, open_file and complete_step. "
         "Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, "
         "fetch_web_page, write_file, apply_patch, run_command, run_checks, open_file, git_status, git_diff, git_log, "
-        "complete_step, request_plan_change, finish. finish requires criteria_evidence for every completion criterion. "
+        "complete_step, request_plan_change, finish. finish requires exactly one criteria_evidence item for every approved completion criterion; use objects with criterion and evidence fields so each item is explicitly linked. "
         "Only execute actions belonging to the active approved plan step. Complete a step only after verifying its result. "
         "If the approved plan is insufficient, use request_plan_change with a complete replacement plan; "
         "the agent will pause for user approval before applying it. Never silently deviate from the approved plan. "
