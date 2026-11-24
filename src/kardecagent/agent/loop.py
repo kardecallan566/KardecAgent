@@ -374,6 +374,12 @@ class AgentLoop:
                     status=result.status.value,
                     events_from_index=retry_start_index,
                 )
+            else:
+                if result.status is TaskStatus.RESUMING:
+                    result.transition(
+                        TaskStatus.FAILED,
+                        reason="Automatic retry was denied: " + decision.reason,
+                    )
                 if persistence_callback is not None:
                     persistence_callback(result, plan)
         return result
