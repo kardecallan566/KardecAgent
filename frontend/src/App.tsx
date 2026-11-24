@@ -11,7 +11,7 @@ import {
   Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square, IndentIncrease
 } from "lucide-react";
 
-type NavItem = "explorer" | "agent" | "tasks" | "approvals";
+type NavItem = "explorer" | "projects" | "agent" | "tasks" | "approvals";
 type StudioSettings = {
   ollamaUrl: string; model: string; timeout: number; pythonPath: string; autoStartCore: boolean;
   editorFontSize: number; editorFontFamily: string; lineHeight: number; tabSize: number; wordWrap: boolean; showLineNumbers: boolean;
@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: StudioSettings = {
   uiTheme: "dark", uiFontFamily: "Shantell Sans", uiFontSize: 13, accentColor: "violet"
 };
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
+type RecentProject = { path: string; name: string; lastOpenedAt: string };
 
 function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -138,6 +139,12 @@ function App() {
   const [selectedFile, setSelectedFile] = useState("App.tsx");
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("kardecagent.studio.recentProjects") || "[]");
+      return Array.isArray(saved) ? saved.filter((item): item is RecentProject => item && typeof item.path === "string" && typeof item.name === "string" && typeof item.lastOpenedAt === "string").slice(0, 10) : [];
+    } catch { return []; }
+  });
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [fileSearchOpen, setFileSearchOpen] = useState(false);
@@ -775,6 +782,27 @@ function App() {
     } catch (error) { setProjectError("Falha ao salvar os arquivos: " + String(error)); }
   }
 
+  function rememberProject(path: string) {
+    const name = path.replaceAll("\\", "/").split("/").filter(Boolean).pop() || path;
+    const next = [
+      { path, name, lastOpenedAt: new Date().toISOString() },
+      ...recentProjects.filter(project => project.path !== path),
+    ].slice(0, 10);
+    setRecentProjects(next);
+    try { localStorage.setItem("kardecagent.studio.recentProjects", JSON.stringify(next)); } catch { /* local storage may be unavailable */ }
+  }
+
+  function removeRecentProject(path: string) {
+    const next = recentProjects.filter(project => project.path !== path);
+    setRecentProjects(next);
+    try {
+      localStorage.setItem("kardecagent.studio.recentProjects", JSON.stringify(next));
+      if (localStorage.getItem("kardecagent.studio.lastProject") === path) {
+        localStorage.removeItem("kardecagent.studio.lastProject");
+      }
+    } catch { /* local storage may be unavailable */ }
+  }
+
   async function activateProject(selected: string): Promise<boolean> {
     if (projectRoot === selected) return true;
     if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de trocar de workspace."); return false; }
@@ -786,6 +814,7 @@ function App() {
       const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot: selected, projectPath: selected });
       setProjectRoot(selected); setProjectEntries(entries); setProjectError(null);
       try { localStorage.setItem("kardecagent.studio.lastProject", selected); } catch { /* local preference storage may be unavailable */ }
+      rememberProject(selected);
       setOpenedPath(null); setSelectedFile(""); setFileContent(""); setFileDirty(false); setOpenTabs([]); setRunOutput(null);
       const workspaceSnapshot = (() => {
         try {
@@ -1161,6 +1190,7 @@ function App() {
       <div className={`work-area ${leftPaneCollapsed ? "left-pane-collapsed" : ""} ${agentPaneCollapsed ? "agent-pane-collapsed" : ""}`}>
         <nav className="activity-rail" aria-label="Navegação">
           <button className={activeNav === "explorer" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("explorer")} title="Explorer"><Files /></button>
+          <button className={activeNav === "projects" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("projects")} title="Projetos"><FolderOpen /></button>
           <button className={activeNav === "agent" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("agent")} title="Agent"><Bot /></button>
           <button className={activeNav === "tasks" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("tasks")} title="Tarefas"><Workflow /></button>
           <button className={activeNav === "approvals" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("approvals")} title="Aprovações"><ShieldCheck /></button>
@@ -1187,6 +1217,13 @@ function App() {
               </div>
               <button className="sidebar-bottom workspace-search-trigger" onClick={() => { setFileSearchOpen(true); setFileSearchError(null); }} disabled={!projectRoot}><Search size={14}/> Buscar nos arquivos <span className="shortcut">Ctrl+P</span></button>
             </>
+          ) : activeNav === "projects" ? (
+            <div className="project-sidebar-list">
+              <button className="project-sidebar-action" onClick={() => void openProject()}><FolderOpen size={14}/> Abrir pasta existente</button>
+              <button className="project-sidebar-action" onClick={() => void createNewProject()}><FolderPlus size={14}/> Criar projeto</button>
+              <div className="project-sidebar-heading">Recentes · {recentProjects.length}/10</div>
+              {recentProjects.length ? recentProjects.map(project => <button key={project.path} className={projectRoot === project.path ? "project-recent-item selected" : "project-recent-item"} onClick={() => void activateProject(project.path)}><Folder size={14}/><span><strong>{project.name}</strong><small>{project.path}</small></span></button>) : <div className="empty-state"><FolderOpen/><strong>Nenhum projeto recente</strong><small>Abra ou crie um projeto para começar.</small></div>}
+            </div>
           ) : activeNav === "tasks" ? (
             <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
           ) : activeNav === "approvals" ? (<>{pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>Solicitações do gestor aparecerão aqui.</small></div> : null}</>) :
@@ -1194,7 +1231,19 @@ function App() {
         </aside>}
 
         <section className="center-pane">
-          {activeNav === "agent" ? (
+          {activeNav === "projects" ? (
+            <div className="project-manager">
+              <div className="process-toolbar"><div><span className="eyebrow">WORKSPACES</span><h2>Gerenciador de projetos</h2><p>Abra projetos recentes, alterne entre workspaces e mantenha seus caminhos favoritos organizados.</p></div><span className="runtime-offline">{recentProjects.length} RECENTE(S)</span></div>
+              {projectRoot && <section className="project-current-card"><div className="project-current-icon"><FolderOpen size={20}/></div><div><span className="eyebrow">PROJETO ATUAL</span><strong>{projectRoot.replaceAll("\\", "/").split("/").filter(Boolean).pop() || projectRoot}</strong><small>{projectRoot}</small></div><span className="project-current-status">{runtimeStatus === "online" ? "Core online" : runtimeStatus === "connecting" ? "Conectando" : "Core offline"}</span></section>}
+              <div className="project-manager-actions"><button onClick={() => void openProject()}><FolderOpen size={15}/> Abrir projeto existente</button><button onClick={() => void createNewProject()}><FolderPlus size={15}/> Criar novo projeto</button></div>
+              <section className="project-recent-grid"><div className="process-section-title"><strong>Projetos recentes</strong><span>Até 10 workspaces neste computador</span></div>
+                {recentProjects.length ? recentProjects.map(project => <article className={projectRoot === project.path ? "project-card current" : "project-card"} key={project.path}>
+                  <div className="project-card-icon"><Folder size={18}/></div><div className="project-card-content"><strong>{project.name}</strong><small>{project.path}</small><span>Última abertura: {new Date(project.lastOpenedAt).toLocaleString("pt-BR")}</span></div>
+                  <div className="project-card-actions"><button onClick={() => void activateProject(project.path)}>{projectRoot === project.path ? "Atual" : "Abrir"}</button><button className="project-remove" title="Remover da lista de recentes" onClick={() => removeRecentProject(project.path)}>Remover</button></div>
+                </article>) : <div className="runtime-graph-empty"><FolderOpen size={22}/><strong>Nenhum projeto recente</strong><p>Abra uma pasta existente ou crie um projeto para que ele apareça nesta lista.</p></div>}
+              </section>
+            </div>
+          ) : activeNav === "agent" ? (
             <div className="manager-inbox">
               <div className="process-toolbar"><div><span className="eyebrow">CENTRAL DE COMANDO</span><h2>Gestor de tarefas</h2><p>Converse, tire dúvidas sobre o projeto ou solicite mudanças. O agente identifica a intenção e só cria um plano quando você pede uma ação.</p></div><span className="runtime-offline">{runtimeStatus === "online" ? "CORE ONLINE" : runtimeStatus === "connecting" ? "CONECTANDO" : "CORE OFFLINE"}</span></div>
               <section className="manager-inbox-card">
