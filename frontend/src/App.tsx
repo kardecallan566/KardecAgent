@@ -49,7 +49,7 @@ function ExplorerEntry({ entry, projectRoot, onOpenFile, refreshKey }: { entry: 
       .catch(error => { if (active) console.error("Falha ao atualizar pasta", error); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [refreshKey]);
+  }, [refreshKey, expanded, entry.is_dir, entry.path, projectRoot]);
   async function toggleFolder() {
     if (!entry.is_dir) { onOpenFile(entry); return; }
     if (expanded) { setExpanded(false); return; }
