@@ -749,6 +749,7 @@ function App() {
 
   async function restartCore() {
     if (!projectRoot) { setRuntimeError("Abra um projeto antes de iniciar o Core."); return; }
+    if (settings.modelRoutingEnabled && !settings.fastModel.trim()) { setRuntimeError("Informe o modelo rápido ou desative o roteamento adaptativo."); return; }
     if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de reiniciar o Core."); return; }
     try {
       setRuntimeStatus("connecting");
@@ -1416,6 +1417,7 @@ function App() {
                   <label>Modelo rápido (opcional)<input value={settings.fastModel} onChange={event => setSettings(current => ({ ...current, fastModel: event.target.value }))} placeholder="qwen3.5:0.8b"/></label>
                   <label className="settings-toggle"><input type="checkbox" checked={settings.modelRoutingEnabled} onChange={event => setSettings(current => ({ ...current, modelRoutingEnabled: event.target.checked }))}/> Ativar roteamento adaptativo para perguntas simples</label>
                   <p className="settings-help">Quando ativado, perguntas curtas podem usar o modelo rápido. Planejamento, código e execução continuam no modelo principal. O modelo rápido precisa estar instalado; se falhar, o Core escala para o principal.</p>
+                  {settings.modelRoutingEnabled && !settings.fastModel.trim() && <div className="ollama-test-result error"><AlertCircle size={15}/><div><strong>Modelo rápido obrigatório</strong><p>Informe um modelo rápido instalado antes de salvar o roteamento adaptativo.</p></div></div>}
                   <p className="settings-help">Perfil econômico ativo: contexto de 4.096 tokens, geração limitada e descarregamento do modelo após dois minutos sem uso. O Core é iniciado automaticamente pelo Studio; para gerar respostas, mantenha o Ollama ativo e instale o modelo selecionado.</p>
                   <div className="settings-actions"><button className="settings-secondary" onClick={() => setSettings(current => ({ ...current, model: "qwen2.5-coder:1.5b" }))}>Selecionar modelo ultra-leve (1.5B)</button></div>
                   <label>Tempo limite de resposta (segundos)<input type="number" min={10} max={900} value={settings.timeout} onChange={event => setSettings(current => ({ ...current, timeout: Math.max(10, Math.min(900, Number(event.target.value) || 180)) }))}/></label>
@@ -1507,6 +1509,11 @@ function App() {
             </div>
           </div>
           <footer className="settings-footer"><span>As preferências são salvas localmente neste computador.</span><button className="settings-primary" onClick={() => {
+            if (settings.modelRoutingEnabled && !settings.fastModel.trim()) {
+              setSettingsSection("core");
+              setOllamaTest({ ok: false, message: "Informe um modelo rápido instalado ou desative o roteamento adaptativo." });
+              return;
+            }
             const previous = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") };
             const connectionChanged = previous.ollamaUrl !== settings.ollamaUrl || previous.model !== settings.model || previous.fastModel !== settings.fastModel || previous.modelRoutingEnabled !== settings.modelRoutingEnabled || previous.timeout !== settings.timeout || previous.pythonPath !== settings.pythonPath;
             const startupChanged = previous.autoStartCore !== settings.autoStartCore;
