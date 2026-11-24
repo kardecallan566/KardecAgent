@@ -578,3 +578,45 @@ body { min-width:900px; }
 @media (max-width: 900px) {
   .git-workspace { grid-template-columns:minmax(130px,36%) minmax(0,1fr); }
 }
+
+
+/* Recent project manager */
+.project-sidebar-list { display:flex;flex-direction:column;gap:6px;padding:8px;overflow:auto; }
+.project-sidebar-action { display:flex;align-items:center;gap:8px;padding:9px;border:1px solid #3b3548;border-radius:6px;background:#201d29;color:#d8d2e2;text-align:left;font-size:11px;cursor:pointer; }
+.project-sidebar-action:hover { border-color:#75638f;background:#292438; }
+.project-sidebar-heading { margin:12px 2px 4px;color:#938ba1;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase; }
+.project-recent-item { display:flex;align-items:flex-start;gap:8px;width:100%;padding:9px 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#d7d1e0;text-align:left;cursor:pointer; }
+.project-recent-item:hover,.project-recent-item.selected { border-color:#494056;background:#282334; }
+.project-recent-item > svg { flex-shrink:0;color:#b6a3e7; }
+.project-recent-item > span { display:grid;gap:3px;min-width:0; }
+.project-recent-item strong { overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap; }
+.project-recent-item small { overflow:hidden;color:#8e879b;font-size:9px;text-overflow:ellipsis;white-space:nowrap; }
+.project-manager { display:flex;flex-direction:column;gap:16px;max-width:1100px;height:100%;overflow:auto;padding:22px 26px; }
+.project-current-card { display:flex;align-items:center;gap:13px;padding:15px;border:1px solid #443b55;border-radius:9px;background:linear-gradient(110deg,#211d2c,#191722); }
+.project-current-icon,.project-card-icon { display:grid;place-items:center;width:38px;height:38px;flex-shrink:0;border-radius:8px;background:#352b4a;color:#c9b7f5; }
+.project-current-card > div:nth-child(2) { display:grid;gap:4px;min-width:0;flex:1; }
+.project-current-card strong { color:#eee9f6;font-size:13px; }
+.project-current-card small { overflow:hidden;color:#a39bad;font-size:10px;text-overflow:ellipsis;white-space:nowrap; }
+.project-current-status { color:#a8d9bd;font-size:10px;white-space:nowrap; }
+.project-manager-actions { display:flex;gap:9px;flex-wrap:wrap; }
+.project-manager-actions button { display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid #514765;border-radius:6px;background:#30283e;color:#e3dced;font-size:11px;cursor:pointer; }
+.project-recent-grid { display:grid;gap:8px;align-content:start; }
+.project-card { display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #35303f;border-radius:7px;background:#17151e; }
+.project-card.current { border-color:#756293;background:#211d2b; }
+.project-card-content { display:grid;gap:4px;min-width:0;flex:1; }
+.project-card-content strong { color:#e1dce9;font-size:11px; }
+.project-card-content small { overflow:hidden;color:#9a93a6;font-size:10px;text-overflow:ellipsis;white-space:nowrap; }
+.project-card-content span { color:#7f788b;font-size:9px; }
+.project-card-actions { display:flex;gap:6px;flex-shrink:0; }
+.project-card-actions button { padding:6px 9px;border:1px solid #5a4c73;border-radius:5px;background:#3a304c;color:#e8e0f3;font-size:10px;cursor:pointer; }
+.project-card-actions .project-remove { border-color:#4c3a42;background:#2b2026;color:#d6aeb5; }
+.app-shell[data-theme="light"] .project-sidebar-action,.app-shell[data-theme="light"] .project-card { background:#fff;border-color:#d6dce6;color:#263449; }
+.app-shell[data-theme="light"] .project-recent-item { color:#263449; }
+.app-shell[data-theme="light"] .project-current-card { background:#fff;border-color:#d6dce6; }
+.app-shell[data-theme="light"] .project-current-card strong,.app-shell[data-theme="light"] .project-card-content strong { color:#263449; }
+.app-shell[data-theme="light"] .project-manager-actions button,.app-shell[data-theme="light"] .project-card-actions button { background:#e9e4f3;color:#28344a;border-color:#c8bfd8; }
+@media (max-width: 900px) {
+  .project-manager { padding:16px; }
+  .project-card { align-items:flex-start;flex-wrap:wrap; }
+  .project-card-actions { margin-left:50px; }
+}
