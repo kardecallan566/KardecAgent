@@ -154,3 +154,24 @@ def test_build_llm_rejects_enabled_routing_without_fast_model():
 
     with pytest.raises(ValueError, match="FAST_MODEL"):
         _build_llm(settings)
+
+
+def test_doctor_rejects_routing_when_fast_ollama_model_is_not_installed(tmp_path: Path, monkeypatch, capsys):
+    from kardecagent import cli
+
+    class FakeOllama:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def list_models(self):
+            return [{"name": "qwen3.5:9b"}]
+
+    monkeypatch.setattr(cli, "OllamaClient", FakeOllama)
+    settings = Settings(
+        llm_model="qwen3.5:9b",
+        llm_fast_model="qwen3.5:0.8b",
+        llm_routing_enabled=True,
+    )
+
+    assert _doctor(settings, tmp_path) == 1
+    assert "Fast Ollama model not installed" in capsys.readouterr().out
