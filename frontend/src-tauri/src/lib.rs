@@ -1224,3 +1224,27 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("failed to run KardecAgent Studio");
 }
+
+
+#[cfg(test)]
+mod terminal_io_tests {
+    use super::read_bounded_line;
+    use std::io::{BufReader, Cursor, ErrorKind};
+
+    #[test]
+    fn bounded_terminal_line_discards_overflow_and_recovers_at_next_line() {
+        let input = b"123456789\\nok\\n";
+        let mut reader = BufReader::new(Cursor::new(input));
+        let error = read_bounded_line(&mut reader, 4).expect_err("oversized line must be rejected");
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(read_bounded_line(&mut reader, 4).unwrap(), Some(b"ok".to_vec()));
+        assert_eq!(read_bounded_line(&mut reader, 4).unwrap(), None);
+    }
+
+    #[test]
+    fn bounded_terminal_line_preserves_final_line_without_newline() {
+        let mut reader = BufReader::new(Cursor::new(b"last line"));
+        assert_eq!(read_bounded_line(&mut reader, 32).unwrap(), Some(b"last line".to_vec()));
+        assert_eq!(read_bounded_line(&mut reader, 32).unwrap(), None);
+    }
+}
