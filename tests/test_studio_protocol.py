@@ -248,7 +248,7 @@ def test_date_question_uses_local_clock_without_calling_model(monkeypatch, tmp_p
         "type": "chat.message", "schema_version": 1, "command_id": "date-question",
         "payload": {"message": "que dia é hoje?"},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
@@ -267,15 +267,15 @@ def test_date_question_uses_local_clock_without_calling_model(monkeypatch, tmp_p
 
 
 def test_project_overview_returns_real_workspace_inventory(monkeypatch, tmp_path):
-    (tmp_path / "README.md").write_text("# Projeto de teste\\nUm app local.", encoding="utf-8")
-    (tmp_path / "loucura.py").write_text("print('olá')\\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Projeto de teste\nUm app local.", encoding="utf-8")
+    (tmp_path / "loucura.py").write_text("print('olá')\n", encoding="utf-8")
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "main.py").write_text("def main(): pass\\n", encoding="utf-8")
+    (tmp_path / "src" / "main.py").write_text("def main(): pass\n", encoding="utf-8")
     command = {
         "type": "chat.message", "schema_version": 1, "command_id": "project-overview",
         "payload": {"message": "oque tem nesse projeto?"},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
