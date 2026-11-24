@@ -56,7 +56,8 @@ def test_subtask_scope_blocks_write_outside_scope(tmp_path: Path):
         tmp_path, "parent", plan, state, allowed_scope=("src",), allow_plan_changes=False
     )
 
-    assert result.status.value == "resuming"
+    assert result.status.value == "failed"
+    assert any(e.event_type == "retry_decision" and e.data.get("allowed") is False for e in result.events)
     assert not (tmp_path / "outside.txt").exists()
     assert any(e.event_type == "tool_error" and "scope violation" in e.message for e in result.events)
 
