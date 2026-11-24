@@ -62,3 +62,28 @@ Measure plan validity, Portuguese instruction adherence, tool-call correctness, 
 - llama.cpp quantization: https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md
 - Unsloth Dynamic: https://www.unsloth.ai/blog/dynamic-v2
 - vLLM quantization: https://docs.vllm.ai/en/latest/features/quantization/
+
+
+## Implemented first routing milestone
+
+The first opt-in implementation is deliberately narrower than the full design above:
+
+- `KARDECAGENT_MODEL_ROUTING_ENABLED=true` enables routing; it is disabled by default.
+- `KARDECAGENT_FAST_MODEL` names the installed lightweight model. `KARDECAGENT_LLM_MODEL` remains the primary coding/planning model.
+- `KARDECAGENT_FAST_MODEL` and `KARDECAGENT_MODEL_ROUTING_ENABLED` also accept the legacy `KARDEC_` prefix.
+- Short conversational requests can use the fast model. Planning/implementation phases, tool-protocol transcripts, code/path content, long requests, and software-engineering intents stay on the primary model.
+- The classifier is deterministic and local; it does not call a third-party classifier or send prompt content elsewhere.
+- If the fast model fails, the same request is retried once on the primary model. Primary-model failures are surfaced normally.
+- Each response includes `raw._kardecagent_routing` metadata with tier, selected model, reason and fallback flag. This metadata is available to logs/diagnostics without changing the task journal schema.
+- `kardec-agent doctor` verifies that both configured Ollama models are installed before reporting routing as ready.
+
+Example:
+
+```dotenv
+KARDECAGENT_LLM_PROVIDER=ollama
+KARDECAGENT_LLM_MODEL=qwen3.5:9b
+KARDECAGENT_FAST_MODEL=qwen3.5:0.8b
+KARDECAGENT_MODEL_ROUTING_ENABLED=true
+```
+
+This first milestone does not yet use benchmark scores, hardware headroom, model context metadata, multi-tier escalation, or UI overrides. Keep routing disabled until both models are installed and the selected fast model has been validated on the local agentic benchmark. The primary model remains the safe default.
