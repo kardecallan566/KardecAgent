@@ -24,6 +24,7 @@ class Settings:
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_timeout_seconds: float = 180.0
     max_iterations: int = 20
+    max_retries: int = 1
     command_timeout_seconds: float = 120.0
     max_command_output_chars: int = 20_000
     allow_dependency_installations: bool = False
@@ -41,6 +42,7 @@ class Settings:
             ollama_base_url=_env("KARDECAGENT_OLLAMA_BASE_URL", "KARDEC_OLLAMA_BASE_URL", cls.ollama_base_url).rstrip("/"),
             llm_timeout_seconds=float(_env("KARDECAGENT_LLM_TIMEOUT", "KARDEC_LLM_TIMEOUT", str(cls.llm_timeout_seconds))),
             max_iterations=int(_env("KARDECAGENT_MAX_ITERATIONS", "KARDEC_MAX_ITERATIONS", str(cls.max_iterations))),
+            max_retries=max(0, int(_env("KARDECAGENT_MAX_RETRIES", "KARDEC_MAX_RETRIES", str(cls.max_retries)))),
             command_timeout_seconds=float(_env("KARDECAGENT_COMMAND_TIMEOUT", "KARDEC_COMMAND_TIMEOUT", str(cls.command_timeout_seconds))),
             max_command_output_chars=int(_env("KARDECAGENT_MAX_COMMAND_OUTPUT", "KARDEC_MAX_COMMAND_OUTPUT", str(cls.max_command_output_chars))),
             allow_dependency_installations=_env("KARDECAGENT_ALLOW_DEPENDENCY_INSTALLATIONS", "KARDEC_ALLOW_DEPENDENCY_INSTALLATIONS", "false").lower() in {"1", "true", "yes"},
