@@ -59,7 +59,7 @@ def _repair_mojibake(value: str) -> str:
 
 def _is_date_question(message: str) -> bool:
     normalized = " ".join(message.casefold().split())
-    return bool(re.search(r"\\b(?:que dia e hoje|qual e a data de hoje|data de hoje|dia de hoje|que data e hoje)\\b", normalized))
+    return bool(re.search(r"\b(?:que dia e hoje|qual e a data de hoje|data de hoje|dia de hoje|que data e hoje)\b", normalized))
 
 
 def _project_inventory_reply(project_files: list[str], inspected: list[dict]) -> str:
@@ -345,10 +345,14 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 import re
                 fs = ProjectFilesystem(root)
                 project_files = project_snapshot(root, limit=250)
+                if _is_date_question(text):
+                    answer = "Hoje é " + _local_date_context()["date_pt_br"] + "."
+                    _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer}})
+                    continue
                 requested_paths = re.findall(r"(?<![\w])(?:[\w.-]+[\\/])*[\w.-]+\.[A-Za-z0-9_-]{1,10}", text.strip())
                 inspect_paths = list(dict.fromkeys(requested_paths))
                 analysis_request = re.search(
-                    r"\b(an[aá]lise|analisar|vis[aã]o geral|estrutura do projeto|como o projeto está organizado)\b",
+                    r"\b(an[aá]lise|analisar|vis[aã]o geral|estrutura do projeto|como o projeto está organizado|o que tem (?:nesse|neste|no) projeto|oque tem (?:nesse|neste|no) projeto|me fale sobre (?:o )?projeto|resuma (?:o )?projeto)\b",
                     text,
                     re.IGNORECASE,
                 )
