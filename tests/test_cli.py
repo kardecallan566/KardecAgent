@@ -79,6 +79,8 @@ def test_ollama_health_emits_machine_readable_json(monkeypatch, capsys):
         "version": "0.13.0",
         "models": ["qwen2.5-coder:3b"],
         "model": "qwen2.5-coder:3b",
+        "fast_model": None,
+        "routing_enabled": False,
         "response": "KARDECAGENT_OK",
     }
 
@@ -175,3 +177,29 @@ def test_doctor_rejects_routing_when_fast_ollama_model_is_not_installed(tmp_path
 
     assert _doctor(settings, tmp_path) == 1
     assert "Fast Ollama model not installed" in capsys.readouterr().out
+
+
+def test_ollama_health_requires_fast_model_when_routing_is_enabled(monkeypatch, capsys):
+    from kardecagent import cli
+
+    class FakeOllama:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def server_version(self):
+            return "0.13.0"
+
+        def list_models(self):
+            return [{"name": "qwen3.5:9b"}]
+
+    monkeypatch.setattr(cli, "OllamaClient", FakeOllama)
+    settings = Settings(
+        llm_model="qwen3.5:9b",
+        llm_fast_model="qwen3.5:0.8b",
+        llm_routing_enabled=True,
+    )
+
+    assert _ollama_health(settings) == 1
+    import json
+    payload = json.loads(capsys.readouterr().out)
+    assert "Fast model" in payload["error"]
