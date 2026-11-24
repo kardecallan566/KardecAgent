@@ -271,10 +271,11 @@ class Orchestrator:
                 resume_step=max(1, requested_resume_step),
             )
             if result_state.status.value != "completed":
+                failure_status = result_state.status.value
                 failure = diagnose_failure(
                     result_state.events,
-                    result_state.status.value,
-                    fallback_message=f"Subtask stopped with status {result_state.status.value}.",
+                    failure_status,
+                    fallback_message=f"Subtask stopped with status {failure_status}.",
                 )
                 recovery = self.recovery.recover(
                     project_root,
@@ -293,7 +294,7 @@ class Orchestrator:
                 decision = self.retry_policy.decide(
                     events=retry_history,
                     retry_event=retry_event,
-                    status=result_state.status.value,
+                    status=failure_status,
                     diagnostic=failure,
                     recovery=recovery,
                     base_iteration_limit=self.settings.max_iterations,
