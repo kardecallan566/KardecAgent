@@ -85,6 +85,17 @@ class RetryPolicy:
             return deny("recovery reported an error")
         if diagnostic.category not in self._RETRYABLE_CATEGORIES:
             return deny(f"failure category '{diagnostic.category.value}' is not retryable")
+        recovered_progress = bool(getattr(recovery, "rolled_back_events", ())) or (
+            int(getattr(recovery, "resume_step", 1)) > 1
+        )
+        if diagnostic.category is FailureCategory.TOOL_EXECUTION and not (
+            diagnostic.retryable or recovered_progress
+        ):
+            return deny("tool failure has no transient signal or recovered plan progress")
+        if diagnostic.category is FailureCategory.VERIFICATION and not (
+            diagnostic.retryable or recovered_progress
+        ):
+            return deny("verification failure has no recovered progress to resume safely")
         if diagnostic.tool == "run_command" and not diagnostic.retryable:
             return deny("non-transient command failures are not retried because commands may have external side effects")
         observed_events = list(execution_events) if execution_events is not None else event_history
