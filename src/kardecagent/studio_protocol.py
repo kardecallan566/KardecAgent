@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -38,22 +39,53 @@ def _local_date_context() -> dict[str, str]:
 
 
 def _repair_mojibake(value: str) -> str:
-    """Repair common UTF-8 bytes mis-decoded as Latin-1/Windows-1252."""
+    """Repair repeated UTF-8/Windows-1252 decoding errors."""
     current = value
-    markers = ("Ã", "Â", "â€", "ðŸ")
-    for _ in range(4):
-        if not any(marker in current for marker in markers):
+    markers = ("Ã", "Â", "â€", "ðŸ", "Æ’", "â‚¬")
+    for _ in range(6):
+        current_score = sum(current.count(marker) for marker in markers)
+        if not current_score:
             break
         try:
-            candidate = current.encode("latin-1").decode("utf-8")
+            candidate = current.encode("cp1252").decode("utf-8")
         except (UnicodeEncodeError, UnicodeDecodeError):
             break
-        current_score = sum(current.count(marker) for marker in markers)
         candidate_score = sum(candidate.count(marker) for marker in markers)
         if candidate_score >= current_score:
             break
         current = candidate
     return current
+
+
+def _is_date_question(message: str) -> bool:
+    normalized = " ".join(message.casefold().split())
+    return bool(re.search(r"\\b(?:que dia e hoje|qual e a data de hoje|data de hoje|dia de hoje|que data e hoje)\\b", normalized))
+
+
+def _project_inventory_reply(project_files: list[str], inspected: list[dict]) -> str:
+    if not project_files:
+        return "A pasta do workspace está acessível, mas não encontrei arquivos nela."
+    top_dirs = sorted({path.split("/", 1)[0] for path in project_files if "/" in path})
+    root_files = [path for path in project_files if "/" not in path]
+    extensions: dict[str, int] = {}
+    for path in project_files:
+        suffix = Path(path).suffix.lower() or "(sem extensão)"
+        extensions[suffix] = extensions.get(suffix, 0) + 1
+    common = sorted(extensions.items(), key=lambda item: (-item[1], item[0]))[:8]
+    lines = [f"Consegui acessar o workspace. Encontrei {len(project_files)} arquivos na listagem do projeto."]
+    if top_dirs:
+        lines.append("Pastas principais: " + ", ".join(top_dirs[:20]) + ".")
+    if root_files:
+        lines.append("Arquivos na raiz: " + ", ".join(root_files[:20]) + ".")
+    if common:
+        lines.append("Tipos de arquivo mais comuns: " + ", ".join(f"{ext}: {count}" for ext, count in common) + ".")
+    readme = next((item for item in inspected if item.get("path", "").lower() == "readme.md" and isinstance(item.get("content"), str)), None)
+    if readme:
+        excerpt = " ".join(readme["content"].split())[:900]
+        if excerpt:
+            lines.append("Resumo do README: " + excerpt)
+    lines.append("Esse inventário foi obtido diretamente da pasta aberta no Studio.")
+    return "\n".join(lines)
 
 
 def _write(message: dict) -> None:
