@@ -9,6 +9,7 @@ from ..config import Settings
 from ..llm import LocalLLMClient
 from ..llm.cleaner import extract_json_payload
 from ..project import project_snapshot
+from .diagnostics import diagnose_failure
 from .loop import AgentLoop
 from .plan import ExecutionPlan
 from .recovery import RecoveryManager
@@ -39,6 +40,7 @@ class SubtaskExecutionResult:
     summary: str
     evidence: list[str]
     resume_step: int = 1
+    diagnostic: dict | None = None
 
 class Orchestrator:
     """Decomposes an approved plan and executes logical subtasks with one loaded LLM."""
@@ -179,6 +181,7 @@ class Orchestrator:
                         subtask_id=subtask.id,
                         plan_steps=list(subtask.plan_steps),
                         result=result.summary,
+                        diagnostic=result.diagnostic,
                         resume_step=result.resume_step,
                         board=board.as_dict(),
                     )
@@ -219,8 +222,10 @@ class Orchestrator:
         """Execute subtasks without replanning or asking for approval again."""
         def execute(subtask: Subtask, requested_resume_step: int = 1) -> SubtaskExecutionResult:
             if not subtask.scope:
+                message = "Implementation subtasks require an explicit scope."
+                diagnostic = diagnose_failure([], "failed", fallback_message=message).as_dict()
                 return SubtaskExecutionResult(
-                    subtask.id, "failed", "Implementation subtasks require an explicit scope.", []
+                    subtask.id, "failed", message, [], diagnostic=diagnostic
                 )
             subplan = self._subtask_plan(parent_plan, subtask)
             from .state import TaskState
@@ -350,9 +355,18 @@ class Orchestrator:
                     "subtask_recovery",
                 }
             ]
+            diagnostic = None
+            if result_state.status is not TaskStatus.COMPLETED:
+                diagnostic = diagnose_failure(
+                    result_state.events,
+                    result_state.status.value,
+                    fallback_message=summary,
+                ).as_dict()
+                summary = summary + " Diagnostic: " + diagnostic["message"]
             return SubtaskExecutionResult(
                 subtask.id, result_state.status.value, summary, evidence[-10:],
                 resume_step=result_state.active_plan_step,
+                diagnostic=diagnostic,
             )
 
         return self.execute_sequentially(
