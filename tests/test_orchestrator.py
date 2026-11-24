@@ -99,12 +99,15 @@ def test_subtask_retry_normalizes_max_iterations_state(tmp_path: Path, monkeypat
     board = TaskBoard()
     board.add(Subtask("1", "Implementation", "Implement", scope=("src",), plan_steps=(1,)))
     statuses = []
+    limits = []
 
     def execute(*args, **kwargs):
         state = args[3]
         statuses.append(state.status)
+        limits.append(kwargs.get("max_iterations"))
         if len(statuses) == 1:
             state.transition(TaskStatus.MAX_ITERATIONS, reason="Test limit reached.")
+            state.record("max_iterations", "Maximum execution iterations reached.")
             return state
         assert state.status is TaskStatus.RESUMING
         state.transition(TaskStatus.RUNNING, reason="Retry started.")
@@ -128,5 +131,41 @@ def test_subtask_retry_normalizes_max_iterations_state(tmp_path: Path, monkeypat
     )
 
     assert statuses == [TaskStatus.RUNNING, TaskStatus.RESUMING]
+    assert limits == [1, 2]
     assert result.completed
 
+
+
+
+def test_subtask_does_not_retry_non_transient_command_failure(tmp_path: Path, monkeypatch):
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings(max_iterations=2))
+    parent_plan = ExecutionPlan("Large task", ["Implement"], ["tests"], [], ["done"])
+    board = TaskBoard()
+    board.add(Subtask("1", "Implementation", "Implement", scope=("src",), plan_steps=(1,)))
+    calls = []
+
+    def execute(*args, **kwargs):
+        state = args[3]
+        calls.append(state.status)
+        state.record(
+            "tool_error",
+            "run_command failed: command exited with status 1",
+            tool="run_command",
+            error="command exited with status 1",
+        )
+        state.transition(TaskStatus.FAILED, reason="Command failed.")
+        return state
+
+    monkeypatch.setattr(orchestrator.agent_loop, "execute_approved_plan", execute)
+    monkeypatch.setattr(
+        orchestrator.recovery,
+        "recover",
+        lambda *args, **kwargs: RecoveryResult(True, resume_step=1),
+    )
+
+    result = orchestrator.execute_approved_plan(tmp_path, "parent", parent_plan, board)
+
+    assert calls == [TaskStatus.RUNNING]
+    assert not result.completed
+    assert result.get("1").status is SubtaskStatus.FAILED
+    assert "external side effects" in result.get("1").result
