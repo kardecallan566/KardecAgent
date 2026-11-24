@@ -191,6 +191,11 @@ class AgentExecutor:
             return json.dumps(fs.list_files(args.get("limit", 500)), ensure_ascii=False)
         if action.tool == "read_file":
             return fs.read_file(args["path"])
+        if action.tool == "open_file":
+            relative = fs.safe_path(args["path"]).relative_to(root).as_posix()
+            if state is not None:
+                state.record("editor.open_file_requested", "Agent requested opening a project file in the Studio editor.", path=relative)
+            return json.dumps({"ok": True, "path": relative, "requested": "open_in_editor"}, ensure_ascii=False)
         if action.tool == "search_files":
             return json.dumps(search_text(root, args["query"], args.get("max_results", 50)),
                               ensure_ascii=False)
@@ -355,6 +360,8 @@ class AgentExecutor:
                      scope=list(allowed_scope or ()), subtask=bool(context))
 
         limit = max_iterations or self.settings.max_iterations
+        last_invalid_signature = None
+        repeated_invalid_count = 0
         for iteration in range(1, limit + 1):
             state.iteration = iteration
             state.record("iteration_started", f"Starting iteration {iteration}.")
@@ -365,11 +372,26 @@ class AgentExecutor:
             try:
                 action = parse_tool_call(response.content)
             except ToolCallError as exc:
-                state.record("model_error", str(exc))
+                signature = (str(exc), response.content.strip())
+                repeated_invalid_count = repeated_invalid_count + 1 if signature == last_invalid_signature else 1
+                last_invalid_signature = signature
+                state.record("model_error", str(exc), repeated_count=repeated_invalid_count)
+                if repeated_invalid_count >= 2:
+                    state.record("model_protocol_stalled",
+                                 "Execution stopped because the model repeated an invalid tool call.",
+                                 error=str(exc), repeated_count=repeated_invalid_count)
+                    state.transition(TaskStatus.FAILED,
+                                     reason="The model repeated an invalid tool call; execution stopped safely.")
+                    if persistence_callback is not None:
+                        persistence_callback(state, plan)
+                    return state
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": "Invalid tool call: " + str(exc) +
-                              ". " + tool_instructions()}]
+                              ". Do not repeat it. Use only supported tools and include plan_step for every mutating action. " +
+                              tool_instructions()}]
                 continue
+            last_invalid_signature = None
+            repeated_invalid_count = 0
 
             if action.tool == "request_plan_change":
                 if not allow_plan_changes:

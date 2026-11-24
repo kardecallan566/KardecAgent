@@ -41,7 +41,7 @@ class AgentLoop:
         self.executor = AgentExecutor(llm, settings)
         self.recovery = RecoveryManager()
 
-    def _build_context(self, root: Path, task: str) -> dict:
+    def _build_context(self, root: Path, task: str, conversation_history: list[dict] | None = None, active_editor_context: dict | None = None) -> dict:
         profile = detect_project(root)
         return {
             "task": task,
@@ -50,11 +50,14 @@ class AgentLoop:
                 "framework": profile.framework, "package_manager": profile.package_manager,
                 "commands": profile.commands,
             },
-            "project_files": project_snapshot(root),
+            "project_files": project_snapshot(root, limit=500),
+            "workspace_access": {"root": str(root), "tools": ["list_files", "read_file", "search_files", "write_file", "apply_patch", "run_command"], "path_rule": "All tool paths are relative to this workspace root."},
+            "conversation_history": conversation_history or [],
+            "active_editor": active_editor_context or None,
         }
 
-    def _create_plan(self, root: Path, task: str, state: TaskState) -> ExecutionPlan | None:
-        context = self._build_context(root, task)
+    def _create_plan(self, root: Path, task: str, state: TaskState, conversation_history: list[dict] | None = None, active_editor_context: dict | None = None) -> ExecutionPlan | None:
+        context = self._build_context(root, task, conversation_history, active_editor_context)
         base_messages = [
             {"role": "system", "content": compose_system_prompt(
                 SYSTEM_PROMPT, load_registry(root / ".kardecagent" / "harness.json"),
@@ -63,7 +66,7 @@ class AgentLoop:
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
         messages = list(base_messages)
-        for _ in range(min(5, self.settings.max_iterations)):
+        for _ in range(min(2, self.settings.max_iterations)):
             response = self.llm.chat(messages)
             state.record("plan_response", response.content)
             plan = None
@@ -84,7 +87,7 @@ class AgentLoop:
                     state.record("plan_error", str(exc))
                     messages = base_messages + [
                         {"role": "assistant", "content": response.content},
-                        {"role": "user", "content": "Invalid plan: " + str(exc) + ". " + plan_instructions()},
+                        {"role": "user", "content": "Previous output invalid. Return concise JSON with at most 8 distinct steps; do not pad or repeat. Error: " + str(exc) + ". " + plan_instructions()},
                     ]
                     continue
 
@@ -110,6 +113,8 @@ class AgentLoop:
         approval_callback=None,
         high_risk_approval_callback=None,
         event_callback=None,
+        conversation_history: list[dict] | None = None,
+        active_editor_context: dict | None = None,
     ) -> TaskState:
         root = project_root.resolve()
         state = TaskState(task, str(root), event_callback=event_callback)
@@ -119,7 +124,7 @@ class AgentLoop:
                      kind=profile.kind, language=profile.language, framework=profile.framework,
                      package_manager=profile.package_manager, commands=profile.commands)
 
-        plan = self._create_plan(root, task, state)
+        plan = self._create_plan(root, task, state, conversation_history, active_editor_context)
         if plan is None:
             state.transition(TaskStatus.FAILED, reason="Could not produce a valid execution plan.")
             state.record("plan_failed", "Could not produce a valid execution plan.")
@@ -160,7 +165,7 @@ class AgentLoop:
         else:
             state.record("checkpoint_skipped", "Project is not a Git repository.")
 
-        context = self._build_context(root, task)
+        context = self._build_context(root, task, conversation_history, active_editor_context)
         from .orchestrator import Orchestrator, OrchestrationError
         orchestrator = Orchestrator(self.llm, self.settings)
         if orchestrator.should_decompose(plan, root):

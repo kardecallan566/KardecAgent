@@ -1,4 +1,5 @@
 import pytest
+from kardecagent.llm.cleaner import extract_json_payload
 from kardecagent.agent.tools_schema import ToolCallError, parse_tool_call
 def test_valid(): assert parse_tool_call('{"tool":"read_file","arguments":{"path":"a.py"}}').tool == 'read_file'
 def test_unknown_tool():
@@ -17,13 +18,13 @@ def test_fence_accepted():
 
 def test_validate_kind():
     assert parse_tool_call(
-        '{"tool":"run_checks","arguments":{"kind":"validate"}}'
+        '{"tool":"run_checks","arguments":{"kind":"validate"},"plan_step":1}'
     ).arguments["kind"] == "validate"
 
 
 def test_invalid_check_kind():
     with pytest.raises(ToolCallError, match="must be one of"):
-        parse_tool_call('{"tool":"run_checks","arguments":{"kind":"deploy"}}')
+        parse_tool_call('{"tool":"run_checks","arguments":{"kind":"deploy"},"plan_step":1}')
 
 
 def test_mutating_tool_requires_plan_step():
@@ -68,3 +69,24 @@ def test_finish_requires_completion_evidence():
 def test_finish_accepts_completion_evidence():
     action = parse_tool_call('{"tool":"finish","arguments":{"reason":"ok","criteria_evidence":["tests passed"]}}')
     assert action.arguments["criteria_evidence"] == ["tests passed"]
+
+
+def test_tool_json_with_literal_newlines_inside_file_content():
+    raw = '{"tool":"write_file","plan_step":1,"arguments":{"path":"loucura.py","content":"def main():\n    print(\'ola\')\n"}}'
+    action = parse_tool_call(raw.replace("\\n", "\n"))
+    assert action.arguments["content"] == "def main():\n    print('ola')\n"
+
+
+def test_tool_json_with_literal_tabs_inside_file_content():
+    raw = '{"tool":"write_file","plan_step":1,"arguments":{"path":"a.py","content":"def main():\tpass"}}'
+    action = parse_tool_call(raw.replace("\\t", "\t"))
+    assert action.arguments["content"] == "def main():\tpass"
+
+
+
+def test_open_file_requires_approved_plan_step():
+    with pytest.raises(ToolCallError, match="plan_step is required"):
+        parse_tool_call('{"tool":"open_file","arguments":{"path":"src/main.py"}}')
+    action = parse_tool_call('{"tool":"open_file","arguments":{"path":"src/main.py"},"plan_step":1}')
+    assert action.tool == "open_file"
+    assert action.arguments["path"] == "src/main.py"

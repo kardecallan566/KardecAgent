@@ -7,7 +7,7 @@ import {
   Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
   Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
   ListTodo, Plus, Search, ShieldCheck, Workflow, Save,
-  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square
+  Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square, IndentIncrease
 } from "lucide-react";
 
 type NavItem = "explorer" | "agent" | "tasks" | "approvals";
@@ -126,6 +126,12 @@ function App() {
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [fileSearchOpen, setFileSearchOpen] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [fileSearchResults, setFileSearchResults] = useState<Array<{ path: string; name: string; line: number; preview: string }>>([]);
+  const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const [fileSearchError, setFileSearchError] = useState<string | null>(null);
+
   const [openedPath, setOpenedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [fileDirty, setFileDirty] = useState(false);
@@ -175,6 +181,22 @@ function App() {
   }, [googleFontRevision]);
 
   useEffect(() => () => { if (startupTimer.current) window.clearTimeout(startupTimer.current); }, []);
+  useEffect(() => {
+    function handleWorkspaceSearchShortcut(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        if (projectRoot) {
+          setFileSearchOpen(true);
+          setFileSearchError(null);
+        }
+      } else if (event.key === "Escape") {
+        setFileSearchOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleWorkspaceSearchShortcut);
+    return () => window.removeEventListener("keydown", handleWorkspaceSearchShortcut);
+  }, [projectRoot]);
+
 
   useEffect(() => {
     let active = true;
@@ -227,6 +249,12 @@ function App() {
         const coreType = message.payload?.event_type || "core.event";
         const eventData = message.payload?.data || {};
         const board = eventData.board;
+        if (coreType === "editor.open_file_requested" && typeof eventData.path === "string") {
+          const requestedPath = eventData.path.split(String.fromCharCode(92)).join("/");
+          const entry = projectEntries.find(item => !item.is_dir && item.path.split(String.fromCharCode(92)).join("/") === requestedPath)
+            || { name: requestedPath.split("/").pop() || requestedPath, path: requestedPath, is_dir: false };
+          void openEntry(entry);
+        }
         if (coreType === "plan_created" && Array.isArray(eventData.plan?.steps)) {
           setRuntimePlanSteps(eventData.plan.steps.map((title: string, index: number) => ({ step: index + 1, title, status: "pending" })));
         }
@@ -264,7 +292,8 @@ function App() {
         }
         setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
       } else if (message.type === "task.created") {
-        setRuntimeBusy(true);
+        // Restored records are history only; they are not live executions.
+        setRuntimeBusy(!message.payload?.restored);
         setRuntimeSubtasks([]);
         setRuntimePlanSteps([]);
         setActiveRuntimeSubtask(null);
@@ -272,15 +301,29 @@ function App() {
         setRuntimeTasks(items => [...items, { id: message.task_id, executionId: message.execution_id, title: message.payload.title, status: message.payload?.resumed ? "Retomando" : message.payload?.restored ? "Restaurada" : "Recebida", recoverable: false }].slice(-50));
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: message.payload.title }].slice(-100));
       } else if (message.type === "task.completed" || message.type === "task.failed") {
-        setRuntimeBusy(false);
-        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: message.type === "task.completed" ? "Concluída" : message.payload?.recoverable ? "Recuperável" : "Falhou", recoverable: message.type === "task.failed" && Boolean(message.payload?.recoverable) } : task));
+        // Startup history replay is informational; it must not look like a new
+        // assistant answer or alter the state of a task currently running.
+        if (!message.payload?.restored) {
+          setRuntimeBusy(false);
+          setChatMessages(items => [...items, {
+            id: message.event_id || crypto.randomUUID(),
+            role: "assistant" as const,
+            text: message.payload?.result_summary || message.payload?.message ||
+              (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.")
+          }].slice(-100));
+          setPendingApproval(null);
+          setApprovalSubmitting(false);
+        }
+        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? {
+          ...task,
+          status: message.type === "task.completed" ? "Concluída" : message.payload?.recoverable ? "Recuperável" : "Falhou",
+          recoverable: message.type === "task.failed" && Boolean(message.payload?.recoverable)
+        } : task));
         setActiveRuntimeSubtask(null);
         setActiveRuntimeStep(null);
-        const terminalSummary = message.payload?.result_summary || message.payload?.message || (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
-        setChatMessages(items => [...items, { id: message.event_id || crypto.randomUUID(), role: "assistant" as const, text: terminalSummary }].slice(-100));
+        const terminalSummary = message.payload?.result_summary || message.payload?.message ||
+          (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
         setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: terminalSummary }].slice(-100));
-        setPendingApproval(null);
-        setApprovalSubmitting(false);
       } else if (message.type === "command.accepted" && message.command_id === pendingInstructionCommandId.current) {
         const acceptedId = pendingInstructionCommandId.current;
         pendingInstructionCommandId.current = null;
@@ -289,6 +332,13 @@ function App() {
         setMemoryItems(message.payload?.items || []);
         setMemoryLoading(false);
         setMemoryError(null);
+      } else if (message.type === "chat.failed") {
+        setRuntimeBusy(false);
+        const failure = message.payload?.message || "Falha ao responder. Tente novamente.";
+        const failureId = "chat-error-" + (message.command_id || crypto.randomUUID());
+        setChatMessages(items => [...items, { id: failureId, role: "assistant" as const, text: failure }].slice(-100));
+        setRuntimeError(null);
+        setRuntimeEvents(items => [...items, { id: failureId, type: "chat.failed", message: failure }].slice(-100));
       } else if (message.type === "assistant.response") {
         const responseText = message.payload?.message || "Não consegui formular uma resposta para essa mensagem.";
         const responseId = "chat-" + (message.command_id || crypto.randomUUID());
@@ -366,17 +416,36 @@ function App() {
   }, []);
 
 
+  // Persist the current workspace transcript independently from startup restoration.
   useEffect(() => {
+    if (!projectRoot) return;
+    try {
+      const key = "kardecagent.studio.workspace." + projectRoot;
+      localStorage.setItem(key, JSON.stringify({
+        version: 1, savedAt: new Date().toISOString(),
+        chatMessages: chatMessages.slice(-100), runtimeTasks: runtimeTasks.slice(-50),
+        runtimeEvents: runtimeEvents.slice(-100), runtimePlanSteps: runtimePlanSteps.slice(0, 100),
+        runtimeSubtasks: runtimeSubtasks.slice(0, 100)
+      }));
+    } catch (error) {
+      console.warn("Não foi possível persistir o histórico local do workspace.", error);
+    }
+  }, [projectRoot, chatMessages, runtimeTasks, runtimeEvents, runtimePlanSteps, runtimeSubtasks]);
+
+  // Restore the last opened project once, after the component has mounted.
+  useEffect(() => {
+    let active = true;
     const lastProject = localStorage.getItem("kardecagent.studio.lastProject");
     if (!lastProject) return;
     void (async () => {
       const restored = await activateProject(lastProject);
-      if (!restored) return;
+      if (!active || !restored) return;
       setRuntimeEvents(items => [
         ...items,
         { id: crypto.randomUUID(), type: "workspace.restored", message: "Último projeto restaurado: " + lastProject }
       ].slice(-100));
     })();
+    return () => { active = false; };
   }, []);
 
   async function startTerminal() {
@@ -482,7 +551,17 @@ function App() {
       setProjectRoot(selected); setProjectEntries(entries); setProjectError(null);
       try { localStorage.setItem("kardecagent.studio.lastProject", selected); } catch { /* local preference storage may be unavailable */ }
       setOpenedPath(null); setSelectedFile(""); setFileContent(""); setFileDirty(false); setOpenTabs([]); setRunOutput(null);
-      setRuntimeEvents([]); setApprovalHistory([]); setRuntimeTasks([]); setRuntimeSubtasks([]); setRuntimePlanSteps([]); setChatMessages([]); pendingInstructionCommandId.current = null;
+      const workspaceSnapshot = (() => {
+        try {
+          const saved = JSON.parse(localStorage.getItem("kardecagent.studio.workspace." + selected) || "null");
+          return saved && saved.version === 1 ? saved : null;
+        } catch { return null; }
+      })();
+      setRuntimeEvents(Array.isArray(workspaceSnapshot?.runtimeEvents) ? workspaceSnapshot.runtimeEvents.slice(-100) : []); setApprovalHistory([]);
+      setRuntimeTasks(Array.isArray(workspaceSnapshot?.runtimeTasks) ? workspaceSnapshot.runtimeTasks.slice(-50) : []);
+      setRuntimeSubtasks(Array.isArray(workspaceSnapshot?.runtimeSubtasks) ? workspaceSnapshot.runtimeSubtasks.slice(-100) : []);
+      setRuntimePlanSteps(Array.isArray(workspaceSnapshot?.runtimePlanSteps) ? workspaceSnapshot.runtimePlanSteps.slice(0, 100) : []);
+      setChatMessages(Array.isArray(workspaceSnapshot?.chatMessages) ? workspaceSnapshot.chatMessages.slice(-100) : []); pendingInstructionCommandId.current = null;
       setMemoryItems([]); setMemoryError(null); setMemoryLoading(false);
       setActiveRuntimeSubtask(null); setActiveRuntimeStep(null); setRuntimeLimits(null);
       setRuntimeBusy(false); setPendingApproval(null); setApprovalSubmitting(false);
@@ -574,6 +653,24 @@ function App() {
     setProjectEntries(entries);
   }
 
+  async function searchWorkspaceFiles() {
+    if (!projectRoot || !fileSearchQuery.trim() || fileSearchLoading) return;
+    setFileSearchLoading(true);
+    setFileSearchError(null);
+    try {
+      const results = await invoke<Array<{ path: string; name: string; line: number; preview: string }>>(
+        "search_project_files", { projectRoot, query: fileSearchQuery.trim() }
+      );
+      setFileSearchResults(results);
+    } catch (error) {
+      setFileSearchError(String(error));
+      setFileSearchResults([]);
+    } finally {
+      setFileSearchLoading(false);
+    }
+  }
+
+
   async function createProjectItem(kind: "file" | "directory") {
     if (!projectRoot) { setProjectError("Abra um projeto antes de criar arquivos ou pastas."); return; }
     const relativePath = window.prompt(kind === "file" ? "Caminho do novo arquivo (relativo ao projeto):" : "Caminho da nova pasta (relativo ao projeto):");
@@ -641,6 +738,36 @@ function App() {
     }
   }
 
+  async function formatCurrentFile() {
+    if (!projectRoot || !openedPath || qualityBusy) return;
+    if (!window.confirm("Formatar e corrigir a indentação deste arquivo?\n\n" + openedPath + "\n\nA IDE usará o formatador já disponível no projeto. Nenhuma dependência será instalada.")) return;
+    setQualityBusy(true);
+    setQualityOutput(null);
+    setProjectError(null);
+    try {
+      if (fileDirty) {
+        await invoke("write_project_file", { projectRoot, filePath: openedPath, content: fileContent });
+        setFileDirty(false);
+        setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: fileContent, dirty: false } : tab));
+      }
+      const result = await invoke<{ file: string; language: string; tool: string; available: boolean; exit_code: number; output: string; fixed: boolean }>(
+        "format_project_file", { projectRoot, filePath: openedPath, approved: true }
+      );
+      setQualityOutput(result);
+      setBottomPanel("Output");
+      if (result.fixed) {
+        const updated = await invoke<string>("read_project_file", { projectRoot, filePath: openedPath });
+        setFileContent(updated);
+        setFileDirty(false);
+        setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: updated, dirty: false } : tab));
+      }
+    } catch (error) {
+      setProjectError("Falha ao formatar arquivo: " + String(error));
+    } finally {
+      setQualityBusy(false);
+    }
+  }
+
   async function saveCurrentFile() {
     if (!projectRoot || !openedPath || !fileDirty || fileSaving) return;
     setFileSaving(true);
@@ -663,9 +790,51 @@ function App() {
     setRuntimeBusy(true);
     setRuntimeError(null);
     try {
-      await invoke("send_runtime_command", { message: {
+      const normalizedInstruction = instruction.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      // Opening a file is a navigation request, not a code-generation task.
+      // Resolve and read it through the same workspace-constrained Tauri API
+      // used by the explorer, then select it in the editor immediately.
+      const openRequest = instruction.match(/\b(?:abra|abrir|abre|open)\s+(?:o\s+)?arquivo\s+["'\`]?([^"' \`\n]+)["'\`]?/i);
+      if (openRequest?.[1]) {
+        const requestedPath = openRequest[1].replace(/[.,;:!?]+$/, "").replaceAll("\\", "/");
+        const targetPath = requestedPath.includes(":") || requestedPath.startsWith("/")
+          ? requestedPath
+          : projectRoot.replaceAll("\\", "/").replace(/\/$/, "") + "/" + requestedPath;
+        const content = await invoke<string>("read_project_file", { projectRoot, filePath: targetPath });
+        const name = requestedPath.split("/").pop() || requestedPath;
+        const existingTab = openTabs.find(tab => tab.path === targetPath);
+        setOpenTabs(tabs => existingTab
+          ? tabs.map(tab => tab.path === targetPath ? { ...tab, content: existingTab.dirty ? existingTab.content : content } : tab)
+          : [...tabs, { path: targetPath, name, content, dirty: false }]);
+        setFileContent(existingTab?.dirty ? existingTab.content : content);
+        setOpenedPath(targetPath);
+        setSelectedFile(name);
+        setFileDirty(Boolean(existingTab?.dirty));
+        setActiveNav("explorer");
+        pendingInstructionCommandId.current = null;
+        setChatMessages(items => [...items, { id: "opened-" + commandId, role: "assistant" as const, text: "Abri **" + requestedPath + "** no editor." }].slice(-100));
+        setInstructionDraft("");
+        setRuntimeBusy(false);
+        setRuntimeError(null);
+        return;
+      }
+      const explicitAction = /\b(crie|criar|implemente|implementar|corrija|corrigir|altere|alterar|modifique|modificar|execute|executar|rode|rodar|instale|instalar|remova|remover|adicione|adicionar|atualize|atualizar|refatore|refatorar|gere|gerar|escreva|escrever|construa|construir|desenvolva|desenvolver|configure|configurar|delete|build|run|implement|fix|create|update)\b/.test(normalizedInstruction);
+      const explicitPlanExecution = /\b(use|siga|continue|implemente|execute|comece|inicie|fa[cç]a a cria[cç][aã]o|construa|desenvolva)\b/.test(normalizedInstruction) && /\b(plano|planejamento|jogo|projeto|implementa[cç][aã]o)\b/.test(normalizedInstruction);
+      const asksHow = /^(como|por que|porque|o que|qual|quais|explique|me explique|analise|analisa)\b/.test(normalizedInstruction);
+      const actionRequest = explicitPlanExecution || (explicitAction && !asksHow && !/\b(fazer|montar|criar) um plano\b/.test(normalizedInstruction));
+      const history = chatMessages.slice(-16).map(item => ({ role: item.role, content: item.text.slice(0, 4000) }));
+      const taskHistory = [...history.slice(-15), { role: "user" as const, content: instruction.slice(0, 4000) }];
+      await invoke("send_runtime_command", { message: actionRequest ? {
         type: "task.submit", schema_version: 1, command_id: commandId,
-        payload: { instruction, project_root: projectRoot }
+        payload: { instruction, project_root: projectRoot, history: taskHistory, active_editor: openedPath ? { path: openedPath, content: fileContent.slice(0, 16000), dirty: fileDirty } : null }
+      } : {
+        type: "chat.message", schema_version: 1, command_id: commandId,
+        payload: {
+          message: instruction,
+          project_root: projectRoot,
+          history,
+          active_editor: openedPath ? { path: openedPath.startsWith(projectRoot) ? openedPath.slice(projectRoot.length).replace(/^[/\\\\]+/, "") : openedPath, content: fileContent.slice(0, 16000), dirty: fileDirty } : null
+        }
       }});
       setInstructionDraft("");
     } catch (error) {
@@ -778,7 +947,7 @@ function App() {
                 {projectEntries.map(entry => <ExplorerEntry key={entry.path} entry={entry} projectRoot={projectRoot!} onOpenFile={openEntry}/>) }
                 {projectError && <div className="tree-row" role="alert">{projectError}</div>}
               </div>
-              <div className="sidebar-bottom"><Search size={14}/> Buscar nos arquivos <span className="shortcut">⌘P</span></div>
+              <button className="sidebar-bottom workspace-search-trigger" onClick={() => { setFileSearchOpen(true); setFileSearchError(null); }} disabled={!projectRoot}><Search size={14}/> Buscar nos arquivos <span className="shortcut">Ctrl+P</span></button>
             </>
           ) : activeNav === "tasks" ? (
             <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
@@ -856,7 +1025,7 @@ function App() {
             </div>
           ) : (
             <>
-              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button" onClick={() => void runQuality(false)} disabled={qualityBusy}><Activity size={13}/>{qualityBusy ? "Analisando..." : "Lint"}</button><button className="save-file-button" onClick={() => void runQuality(true)} disabled={qualityBusy}><Zap size={13}/>{qualityBusy ? "Corrigindo..." : "Corrigir"}</button><button className="save-file-button" onClick={runCurrentFile} disabled={runningFile}><Play size={13}/>{runningFile ? "Executando..." : "Executar"}</button><button className="save-file-button" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving}><Save size={13}/>{fileSaving ? "Salvando..." : "Salvar"}</button></>}</div>
+              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
               <div className="editor">
                 {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
@@ -1038,6 +1207,36 @@ function App() {
               else void (async () => { try { await invoke("stop_runtime"); setRuntimeStatus("offline"); await refreshCoreDiagnostics(); } catch (error) { setRuntimeError(String(error)); } })();
             }
           }}><CheckCircle2 size={14}/> Salvar preferências</button></footer>
+        </section>
+      </div>}
+      {fileSearchOpen && <div className="workspace-search-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setFileSearchOpen(false); }}>
+        <section className="workspace-search-dialog" role="dialog" aria-modal="true" aria-label="Buscar nos arquivos">
+          <div className="workspace-search-input-row">
+            <Search size={17}/>
+            <input
+              autoFocus
+              value={fileSearchQuery}
+              placeholder="Buscar texto ou nome de arquivo no projeto..."
+              onChange={event => { setFileSearchQuery(event.target.value); setFileSearchResults([]); setFileSearchError(null); }}
+              onKeyDown={event => { if (event.key === "Enter") void searchWorkspaceFiles(); }}
+            />
+            <button onClick={() => void searchWorkspaceFiles()} disabled={!fileSearchQuery.trim() || fileSearchLoading}>{fileSearchLoading ? "Buscando..." : "Buscar"}</button>
+            <button className="workspace-search-close" onClick={() => setFileSearchOpen(false)} title="Fechar (Esc)"><X size={16}/></button>
+          </div>
+          {fileSearchError && <div className="workspace-search-error">{fileSearchError}</div>}
+          <div className="workspace-search-results">
+            {fileSearchResults.map((result, index) => <button className="workspace-search-result" key={result.path + ":" + result.line + ":" + index} onClick={() => {
+              void openEntry({ name: result.name.split("/").pop() || result.name, path: result.path, is_dir: false });
+              setFileSearchOpen(false);
+            }}>
+              <span className="workspace-search-result-heading"><FileCode2 size={14}/><strong>{result.name}</strong><small>{result.line > 0 ? ":" + result.line : "nome"}</small></span>
+              <span className="workspace-search-result-preview">{result.preview || " "}</span>
+            </button>)}
+            {!fileSearchLoading && fileSearchQuery.trim() && !fileSearchError && fileSearchResults.length === 0 && <div className="workspace-search-empty">Nenhum resultado encontrado.</div>}
+            {!fileSearchQuery.trim() && <div className="workspace-search-empty">Digite um termo para pesquisar no conteúdo e nos nomes dos arquivos.</div>}
+            {fileSearchResults.length === 100 && <div className="workspace-search-limit">Exibindo os primeiros 100 resultados.</div>}
+          </div>
+          <div className="workspace-search-footer">Pesquisa local · ignora dependências, builds e arquivos binários · Esc para fechar</div>
         </section>
       </div>}
       <footer className="statusbar"><div><GitBranch size={12}/> feat/kardecagent-studio <span>·</span><CheckCircle2 size={12}/> {projectRoot ? "Projeto aberto" : "Workspace local"}</div><div><span className="status-indicator"/> Studio <span>·</span> {runtimeStatus === "online" ? "Runtime conectado" : runtimeStatus === "connecting" ? "Conectando runtime" : "Runtime offline"}</div></footer>

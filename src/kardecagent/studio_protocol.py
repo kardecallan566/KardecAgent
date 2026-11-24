@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -22,8 +23,103 @@ class StudioProtocolError(ValueError):
     pass
 
 
+_PT_MONTHS = (
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+)
+
+
+def _local_date_context() -> dict[str, str]:
+    now = datetime.now().astimezone()
+    return {
+        "iso_datetime": now.isoformat(timespec="seconds"),
+        "date_pt_br": f"{now.day:02d} de {_PT_MONTHS[now.month - 1]} de {now.year}",
+        "timezone": now.tzname() or "fuso horário local",
+    }
+
+
+def _repair_mojibake(value: str) -> str:
+    """Repair repeated UTF-8/Windows-1252 decoding errors, including mixed text."""
+    markers = ("Ã", "Â", "â€", "ðŸ", "Æ’", "â‚¬")
+    proper_accents = set("áàãéêíóôõúüçÁÀÉÊÍÓÔÕÚÜÇ")
+    
+    def repair_fragment(fragment: str) -> str:
+        current = fragment
+        for _ in range(6):
+            score = sum(current.count(marker) for marker in markers)
+            if not score:
+                break
+            try:
+                candidate = current.encode("cp1252").decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                fragments: list[str] = []
+                pending: list[str] = []
+                for char in current:
+                    if char in proper_accents:
+                        if pending:
+                            fragments.append(repair_fragment("".join(pending)))
+                            pending = []
+                        fragments.append(char)
+                    else:
+                        pending.append(char)
+                if pending:
+                    fragments.append(repair_fragment("".join(pending)))
+                return "".join(fragments)
+            if sum(candidate.count(marker) for marker in markers) >= score:
+                break
+            current = candidate
+        return current
+
+    # Preserve correctly decoded Portuguese accents as boundaries so one
+    # already-correct character cannot block repair of adjacent corrupted text.
+    pieces: list[str] = []
+    fragment = []
+    for char in value:
+        if char in proper_accents:
+            if fragment:
+                pieces.append(repair_fragment("".join(fragment)))
+                fragment = []
+            pieces.append(char)
+        else:
+            fragment.append(char)
+    if fragment:
+        pieces.append(repair_fragment("".join(fragment)))
+    return "".join(pieces)
+
+
+def _is_date_question(message: str) -> bool:
+    normalized = " ".join(message.casefold().split())
+    return bool(re.search(r"\b(?:que dia [eé] hoje|qual [eé] a data de hoje|data de hoje|dia de hoje|que data [eé] hoje)\b", normalized))
+
+
+def _project_inventory_reply(project_files: list[str], inspected: list[dict]) -> str:
+    if not project_files:
+        return "A pasta do workspace está acessível, mas não encontrei arquivos nela."
+    top_dirs = sorted({path.split("/", 1)[0] for path in project_files if "/" in path})
+    root_files = [path for path in project_files if "/" not in path]
+    extensions: dict[str, int] = {}
+    for path in project_files:
+        suffix = Path(path).suffix.lower() or "(sem extensão)"
+        extensions[suffix] = extensions.get(suffix, 0) + 1
+    common = sorted(extensions.items(), key=lambda item: (-item[1], item[0]))[:8]
+    lines = [f"Consegui acessar o workspace. Encontrei {len(project_files)} arquivos na listagem do projeto."]
+    if top_dirs:
+        lines.append("Pastas principais: " + ", ".join(top_dirs[:20]) + ".")
+    if root_files:
+        lines.append("Arquivos na raiz: " + ", ".join(root_files[:20]) + ".")
+    if common:
+        lines.append("Tipos de arquivo mais comuns: " + ", ".join(f"{ext}: {count}" for ext, count in common) + ".")
+    readme = next((item for item in inspected if item.get("path", "").lower() == "readme.md" and isinstance(item.get("content"), str)), None)
+    if readme:
+        excerpt = " ".join(readme["content"].split())[:900]
+        if excerpt:
+            lines.append("Resumo do README: " + excerpt)
+    lines.append("Esse inventário foi obtido diretamente da pasta aberta no Studio.")
+    return "\n".join(lines)
+
+
 def _write(message: dict) -> None:
-    encoded = json.dumps(message, ensure_ascii=False, separators=(",", ":"), default=str)
+    encoded = json.dumps(message, ensure_ascii=True, separators=(",", ":"), default=str)
     if len(encoded.encode("utf-8")) > MAX_EVENT_BYTES:
         bounded = dict(message)
         payload = bounded.get("payload")
@@ -37,7 +133,7 @@ def _write(message: dict) -> None:
             bounded["payload"] = payload
         if isinstance(bounded.get("message"), str):
             bounded["message"] = bounded["message"][:4000]
-        encoded = json.dumps(bounded, ensure_ascii=False, separators=(",", ":"), default=str)
+        encoded = json.dumps(bounded, ensure_ascii=True, separators=(",", ":"), default=str)
     sys.stdout.write(encoded + "\n")
     sys.stdout.flush()
 
@@ -214,7 +310,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 "task_id": persisted_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "payload": {
-                    "message": "Execução interrompida antes de encerrar. A tarefa permanece disponível para recuperação." if interrupted else f"Tarefa encerrada com estado {persisted_state.status.value}.",
+                    "message": "Esta é uma tarefa anterior que foi pausada quando o KardecAgent foi encerrado. Ela permanece disponível para recuperação; esta conversa não foi interrompida." if interrupted else f"Tarefa encerrada com estado {persisted_state.status.value}.",
                     "recoverable": persisted_state.status.value in {"running", "verifying", "resuming", "recovering", "failed", "max_iterations"},
                     "restored": True,
                 },
@@ -229,6 +325,128 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
             continue
 
+        if message.get("schema_version") == 1 and message.get("type") == "chat.message":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            text = payload.get("message")
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            # Conversational messages are handled by this already workspace-bound
+            # runtime process. The client path is not an authority for chat and may
+            # differ in representation (case, separators, symlinks) on Windows.
+            # Keep workspace validation on task/resume commands that can access files.
+            if not isinstance(text, str) or not text.strip() or len(text) > 8000:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "message must contain 1-8000 characters."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            history = payload.get("history", [])
+            if not isinstance(history, list):
+                history = []
+            safe_history = [{"role": item["role"], "content": item["content"][:4000]} for item in history[-16:] if isinstance(item, dict) and item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str)]
+            raw_editor = payload.get("active_editor")
+            active_editor = None
+            if isinstance(raw_editor, dict):
+                editor_path = raw_editor.get("path")
+                editor_content = raw_editor.get("content", "")
+                if (
+                    isinstance(editor_path, str) and editor_path.strip()
+                    and not Path(editor_path).is_absolute()
+                    and ".." not in Path(editor_path).parts
+                    and isinstance(editor_content, str)
+                ):
+                    active_editor = {
+                        "path": editor_path.replace(chr(92), "/")[:500],
+                        "content": editor_content[:16000],
+                        "dirty": bool(raw_editor.get("dirty", False)),
+                    }
+            _write({"type": "command.accepted", "schema_version": 1, "command_id": command_identifier, "accepted": True})
+            try:
+                # Conversational answers are workspace-aware too: inspect the actual
+                # project tree and explicitly requested files before asking the model.
+                from .tools.filesystem import ProjectFilesystem
+                from .project.context import project_snapshot
+                import re
+                fs = ProjectFilesystem(root)
+                project_files = project_snapshot(root, limit=250)
+                if _is_date_question(text):
+                    answer = "Hoje é " + _local_date_context()["date_pt_br"] + "."
+                    _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer}})
+                    continue
+                requested_paths = re.findall(r"(?<![\w])(?:[\w.-]+[\\/])*[\w.-]+\.[A-Za-z0-9_-]{1,10}", text.strip())
+                inspect_paths = list(dict.fromkeys(requested_paths))
+                analysis_request = re.search(
+                    r"\b(an[aá]lise|analisar|vis[aã]o geral|estrutura do projeto|como o projeto está organizado|o que tem (?:nesse|neste|no) projeto|oque tem (?:nesse|neste|no) projeto|me fale sobre (?:o )?projeto|resuma (?:o )?projeto)\b",
+                    text,
+                    re.IGNORECASE,
+                )
+                if analysis_request:
+                    # A tree alone is insufficient to explain an application.
+                    # Read metadata and likely entry points as evidence.
+                    candidates = (
+                        "README.md", "pyproject.toml", "package.json", "Cargo.toml",
+                        "requirements.txt", "main.py", "app.py", "manage.py",
+                        "src/main.py", "src/app.py", "src/__main__.py",
+                        "src/kardecagent/__init__.py", "frontend/src/App.tsx",
+                        "frontend/package.json", "index.js", "src/index.ts",
+                    )
+                    for candidate in candidates:
+                        if candidate in project_files and candidate not in inspect_paths:
+                            inspect_paths.append(candidate)
+                inspected = []
+                for relative in inspect_paths[:8]:
+                    try:
+                        content = fs.read_file(relative)
+                        inspected.append({"path": relative, "content": content[:12000], "truncated": len(content) > 12000})
+                    except (OSError, ValueError):
+                        inspected.append({"path": relative, "error": "Arquivo não encontrado ou não pode ser lido dentro do workspace."})
+                clock_context = _local_date_context()
+                workspace_context = {
+                    "current_local_datetime": clock_context,
+                    "workspace_root": str(root),
+                    "project_files": project_files,
+                    "inspected_files": inspected,
+                    "active_editor": active_editor,
+                    "instruction": "Estes dados foram lidos diretamente do workspace ativo. Use-os como evidência; nunca diga que não tem acesso aos arquivos. Se um arquivo não estiver listado ou não puder ser lido, informe isso com precisão.",
+                }
+                if analysis_request:
+                    answer = _project_inventory_reply(project_files, inspected)
+                    _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer}})
+                    continue
+
+                access_only = (
+                    re.search(r"\b(?:consegue|pode|tem como)\s+(?:acessar|ver|ler|abrir)\b", text, re.IGNORECASE)
+                    and not re.search(r"\b(?:o que|explique|resuma|analise|mostre|conteúdo|conteudo)\b", text, re.IGNORECASE)
+                )
+                if access_only and inspected:
+                    target = inspected[0]
+                    if "error" in target:
+                        answer = f"Não consegui ler o arquivo {target['path']} dentro do workspace ativo."
+                    else:
+                        answer = f"Sim. Consegui acessar {target['path']} no workspace ativo e ler seu conteúdo."
+                    _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer}})
+                    continue
+
+                response = agent.llm.chat([
+                    {"role": "system", "content": "Você é o KardecAgent, assistente técnico da IDE e está conectado ao workspace local. Você recebe abaixo uma listagem real de arquivos e, quando solicitado, conteúdo real dos arquivos. Use esse contexto para responder perguntas sobre o projeto. Se pedirem para ver um arquivo específico, baseie a resposta em inspected_files. Se perguntarem sobre o arquivo aberto no editor, use active_editor, que pode conter alterações ainda não salvas e tem precedência sobre a cópia em disco. Se pedirem análise do projeto, analise a árvore e os arquivos de configuração/README fornecidos; não invente conteúdo não inspecionado. Para perguntas sobre a data atual, use obrigatoriamente current_local_datetime.date_pt_br presente no contexto; nunca use datas de treinamento ou invente uma data. Responda em português quando o usuário usar português. Seja objetivo: no máximo 8 itens em listas, sem etapas repetidas. Esta é uma conversa, não execute alterações nem comandos e não invente ações. Para modificar arquivos, o usuário deve pedir a tarefa de implementação."},
+                    {"role": "system", "content": "CONTEXTO REAL DO WORKSPACE (JSON): " + json.dumps(workspace_context, ensure_ascii=False)[:50000]},
+                    *safe_history,
+                    {"role": "user", "content": text.strip()},
+                ], temperature=0.3)
+                answer = _repair_mojibake(response.content.strip())
+                if not answer:
+                    raise RuntimeError("O modelo retornou uma resposta vazia.")
+                _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer[:12000]}})
+            except Exception as exc:
+                reason = "timeout" if "timeout" in type(exc).__name__.lower() else "model_error"
+                _write({"type": "chat.failed", "schema_version": 1, "command_id": command_identifier, "payload": {"reason": reason, "message": f"Falha na conversa ({reason}): {exc}", "retryable": reason == "timeout"}})
+            continue
         if message.get("schema_version") == 1 and message.get("type") == "task.resume":
             command_identifier = message.get("command_id")
             payload = message.get("payload")
@@ -385,6 +603,30 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "instruction is required."})
             continue
         instruction = instruction.strip()
+        raw_history = payload.get("history", [])
+        if not isinstance(raw_history, list):
+            raw_history = []
+        conversation_history = [
+            {"role": item["role"], "content": item["content"][:4000]}
+            for item in raw_history[-16:]
+            if isinstance(item, dict)
+            and item.get("role") in {"user", "assistant"}
+            and isinstance(item.get("content"), str)
+        ]
+        raw_editor = payload.get("active_editor")
+        active_editor = None
+        if isinstance(raw_editor, dict):
+            editor_path = raw_editor.get("path")
+            editor_content = raw_editor.get("content", "")
+            if (isinstance(editor_path, str) and editor_path.strip()
+                    and not Path(editor_path).is_absolute()
+                    and ".." not in Path(editor_path).parts
+                    and isinstance(editor_content, str)):
+                active_editor = {
+                    "path": editor_path.replace("\\", "/")[:500],
+                    "content": editor_content[:16000],
+                    "dirty": bool(raw_editor.get("dirty", False)),
+                }
         if len(instruction) > MAX_INSTRUCTION_LENGTH:
             _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "instruction exceeds 8000 characters."})
             continue
@@ -436,6 +678,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 root,
                 instruction,
                 event_callback=forward_event,
+                conversation_history=conversation_history,
+                active_editor_context=active_editor,
                 approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="plan"),
                 high_risk_approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="high_risk"),
             )

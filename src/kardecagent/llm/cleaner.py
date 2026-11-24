@@ -30,6 +30,42 @@ def repair_json_string(text: str) -> str:
     return repaired
 
 
+
+def escape_json_control_chars(text: str) -> str:
+    """Escape literal control characters inside JSON strings emitted by LLMs."""
+    output: list[str] = []
+    in_string = False
+    escaped = False
+    slash = chr(92)
+    for char in text:
+        code = ord(char)
+        if in_string:
+            if escaped:
+                output.append(char)
+                escaped = False
+            elif code == 92:
+                output.append(char)
+                escaped = True
+            elif char == '"':
+                output.append(char)
+                in_string = False
+            elif code < 0x20:
+                if code == 10:
+                    output.append(slash + "n")
+                elif code == 13:
+                    output.append(slash + "r")
+                elif code == 9:
+                    output.append(slash + "t")
+                else:
+                    output.append(slash + f"u{code:04x}")
+            else:
+                output.append(char)
+        else:
+            output.append(char)
+            if char == '"':
+                in_string = True
+    return "".join(output)
+
 def extract_json_payload(content: str) -> Any:
     """Robustly extract and parse JSON from a model response.
 
@@ -42,7 +78,7 @@ def extract_json_payload(content: str) -> Any:
 
     # 1. Direct JSON parse
     try:
-        return json.loads(cleaned)
+        return json.loads(escape_json_control_chars(cleaned))
     except json.JSONDecodeError:
         pass
 
@@ -69,7 +105,7 @@ def extract_json_payload(content: str) -> Any:
     # First attempt: parse extracted candidates directly
     for candidate in candidates:
         try:
-            return json.loads(candidate)
+            return json.loads(escape_json_control_chars(candidate))
         except json.JSONDecodeError:
             pass
 
@@ -77,17 +113,17 @@ def extract_json_payload(content: str) -> Any:
     for candidate in candidates:
         try:
             repaired = repair_json_string(candidate)
-            return json.loads(repaired)
+            return json.loads(escape_json_control_chars(repaired))
         except json.JSONDecodeError:
             pass
 
     # Third attempt: direct parse on repaired full text
     try:
-        return json.loads(repair_json_string(cleaned))
+        return json.loads(escape_json_control_chars(repair_json_string(cleaned)))
     except json.JSONDecodeError:
         pass
 
     # If all failed, re-attempt on the most promising candidate to produce a localized error
     if candidates:
-        return json.loads(candidates[0])
-    return json.loads(cleaned)
+        return json.loads(escape_json_control_chars(candidates[0]))
+    return json.loads(escape_json_control_chars(cleaned))

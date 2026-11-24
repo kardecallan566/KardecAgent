@@ -202,6 +202,127 @@ fn read_project_entries(project_root: String, project_path: String) -> Result<Ve
     Ok(entries)
 }
 
+#[derive(Serialize)]
+struct ProjectSearchResult {
+    path: String,
+    name: String,
+    line: usize,
+    preview: String,
+}
+
+#[tauri::command]
+fn search_project_files(project_root: String, query: String) -> Result<Vec<ProjectSearchResult>, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    if query.chars().count() > 200 {
+        return Err("A busca aceita no máximo 200 caracteres.".into());
+    }
+    let root = Path::new(&project_root)
+        .canonicalize()
+        .map_err(|e| format!("Não foi possível acessar a raiz do projeto: {e}"))?;
+    if !root.is_dir() {
+        return Err("A raiz do workspace não é uma pasta.".into());
+    }
+
+    const MAX_FILES: usize = 2000;
+    const MAX_RESULTS: usize = 100;
+    const MAX_FILE_BYTES: u64 = 256 * 1024;
+    const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+    const IGNORED: &[&str] = &[
+        ".git", ".hg", ".svn", ".venv", "venv", "node_modules",
+        "dist", "build", ".next", ".expo", "__pycache__",
+        ".pytest_cache", ".mypy_cache", ".kardecagent", "target",
+    ];
+    let needle = query.to_lowercase();
+    let mut pending = vec![root.clone()];
+    let mut results = Vec::new();
+    let mut visited_files = 0usize;
+    let mut scanned_bytes = 0u64;
+
+    while let Some(directory) = pending.pop() {
+        let entries = match fs::read_dir(&directory) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
+
+        for entry in entries.into_iter().rev() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let file_type = match entry.file_type() {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            // Never follow symlinks: they can escape the workspace root.
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                if !IGNORED.iter().any(|ignored| name.eq_ignore_ascii_case(ignored)) {
+                    pending.push(path);
+                }
+                continue;
+            }
+            if !file_type.is_file() || visited_files >= MAX_FILES || scanned_bytes >= MAX_TOTAL_BYTES {
+                continue;
+            }
+            visited_files += 1;
+            let relative = match path.strip_prefix(&root) {
+                Ok(value) => value.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+
+            if relative.to_lowercase().contains(&needle) {
+                results.push(ProjectSearchResult {
+                    path: path.to_string_lossy().into_owned(),
+                    name: relative.clone(),
+                    line: 0,
+                    preview: "Correspondência no nome do arquivo".into(),
+                });
+                if results.len() >= MAX_RESULTS { return Ok(results); }
+            }
+
+            let metadata = match fs::metadata(&path) {
+                Ok(value) if value.len() <= MAX_FILE_BYTES => value,
+                _ => continue,
+            };
+            let bytes = match fs::read(&path) {
+                Ok(value) if value.len() as u64 <= metadata.len() => value,
+                _ => continue,
+            };
+            scanned_bytes = scanned_bytes.saturating_add(bytes.len() as u64);
+            if scanned_bytes > MAX_TOTAL_BYTES { break; }
+            if bytes.contains(&0) { continue; }
+            let content = match String::from_utf8(bytes) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            for (index, line) in content.lines().enumerate() {
+                if line.to_lowercase().contains(&needle) {
+                    let compact = line.trim();
+                    let preview = if compact.chars().count() > 240 {
+                        format!("{}…", compact.chars().take(240).collect::<String>())
+                    } else {
+                        compact.to_string()
+                    };
+                    results.push(ProjectSearchResult {
+                        path: path.to_string_lossy().into_owned(),
+                        name: relative.clone(),
+                        line: index + 1,
+                        preview,
+                    });
+                    if results.len() >= MAX_RESULTS { return Ok(results); }
+                }
+            }
+        }
+        if visited_files >= MAX_FILES || scanned_bytes >= MAX_TOTAL_BYTES { break; }
+    }
+    Ok(results)
+}
+
 #[tauri::command]
 fn read_project_file(project_root: String, file_path: String) -> Result<String, String> {
     let path = resolve_workspace_path(&project_root, &file_path)
@@ -367,6 +488,80 @@ fn quality_project_file(
         exit_code: output.status.code().unwrap_or(-1),
         output: if combined.is_empty() { message.into() } else { combined },
         fixed: fix && success,
+    })
+}
+
+#[tauri::command]
+fn format_project_file(
+    project_root: String,
+    file_path: String,
+    approved: bool,
+) -> Result<QualityResult, String> {
+    if !approved {
+        return Err("Formatação automática não autorizada pelo usuário.".into());
+    }
+    let path = resolve_workspace_path(&project_root, &file_path)?;
+    if !path.is_file() {
+        return Err("Selecione um arquivo válido para formatar.".into());
+    }
+    let root = Path::new(&project_root).canonicalize().map_err(|e| e.to_string())?;
+    let relative = path.strip_prefix(&root).map_err(|_| "Arquivo fora do projeto.")?;
+    let relative = relative.to_string_lossy().into_owned();
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    let (language, tool, args): (&str, &str, Vec<String>) = match extension.as_str() {
+        "py" | "pyi" => ("Python", "ruff", vec!["format".into(), relative.clone()]),
+        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts" | "html" | "htm" | "css" | "scss" | "json" | "md" | "mdx" | "yaml" | "yml" => ("Web/Config", "prettier", vec!["--write".into(), relative.clone()]),
+        "go" => ("Go", "gofmt", vec!["-w".into(), relative.clone()]),
+        "rs" => ("Rust", "rustfmt", vec![relative.clone()]),
+        "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => ("C/C++", "clang-format", vec!["-i".into(), relative.clone()]),
+        "java" => ("Java", "google-java-format", vec!["-i".into(), relative.clone()]),
+        "sh" | "bash" => ("Shell", "shfmt", vec!["-w".into(), relative.clone()]),
+        _ => return Ok(QualityResult {
+            file: file_path, language: "Não identificado".into(), tool: "—".into(),
+            available: false, exit_code: -1,
+            output: "Não há formatador configurado para esta extensão. Nenhuma alteração foi feita.".into(),
+            fixed: false,
+        }),
+    };
+    let mut program = tool.to_string();
+    let mut command_args = args;
+    if tool == "prettier" {
+        let candidates = [
+            root.join("node_modules").join("prettier").join("bin").join("prettier.cjs"),
+            root.join("node_modules").join("prettier").join("bin-prettier.js"),
+        ];
+        if let Some(script) = candidates.into_iter().find(|candidate| candidate.is_file()) {
+            program = "node".into();
+            command_args.insert(0, script.to_string_lossy().into_owned());
+        }
+    } else if tool == "ruff" {
+        let candidates = [root.join(".venv").join("Scripts").join("ruff.exe"), root.join(".venv").join("bin").join("ruff")];
+        if let Some(local) = candidates.iter().find(|candidate| candidate.is_file()) {
+            program = local.to_string_lossy().into_owned();
+        }
+    }
+    let mut command = Command::new(&program);
+    configure_hidden_process(&mut command);
+    let output = match command.args(&command_args).current_dir(&root).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(QualityResult {
+            file: file_path, language: language.into(), tool: tool.into(), available: false,
+            exit_code: -1, output: format!("O formatador '{}' não está instalado ou não está no PATH. Nenhuma alteração foi feita.", tool),
+            fixed: false,
+        }),
+        Err(error) => return Err(format!("Não foi possível iniciar {}: {}", tool, error)),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = [stdout.trim(), stderr.trim()].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
+    let success = output.status.success();
+    Ok(QualityResult {
+        file: file_path, language: language.into(), tool: tool.into(), available: true,
+        exit_code: output.status.code().unwrap_or(-1),
+        output: if combined.is_empty() {
+            if success { "Formatação concluída.".into() } else { "O formatador encontrou um erro.".into() }
+        } else { combined },
+        fixed: success,
     })
 }
 
@@ -543,20 +738,14 @@ fn start_runtime(
         loop {
             match read_bounded_line(&mut reader, MAX_RUNTIME_LINE_BYTES) {
                 Ok(Some(bytes)) => {
-                    match String::from_utf8(bytes) {
-                        Ok(line) => {
-                            if let Ok(message) = serde_json::from_str::<Value>(&line) {
-                                let _ = stdout_app.emit("runtime-message", message);
-                            } else {
-                                let _ = stdout_app.emit("runtime-protocol-error", line);
-                            }
-                        }
-                        Err(error) => {
-                            let _ = stdout_app.emit(
-                                "runtime-protocol-error",
-                                format!("O Core enviou texto que não está em UTF-8 válido: {error}"),
-                            );
-                        }
+                    // A child process or native dependency may write arbitrary bytes to stdout.
+                    // Preserve valid JSON frames by replacing malformed byte sequences instead
+                    // of treating one bad byte as a fatal protocol-stream failure.
+                    let line = String::from_utf8_lossy(&bytes).into_owned();
+                    if let Ok(message) = serde_json::from_str::<Value>(&line) {
+                        let _ = stdout_app.emit("runtime-message", message);
+                    } else {
+                        let _ = stdout_app.emit("runtime-protocol-error", line);
                     }
                 }
                 Ok(None) => break,
@@ -849,12 +1038,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             read_project_entries,
+            search_project_files,
             read_project_file,
             write_project_file,
             create_project_file,
             create_project_directory,
             run_project_file,
             quality_project_file,
+            format_project_file,
             start_runtime,
             runtime_diagnostics,
             test_ollama_connection,

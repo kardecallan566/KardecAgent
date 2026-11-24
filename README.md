@@ -272,3 +272,13 @@ kardec-agent models --installed-only
 ```
 
 O catálogo inicial inclui estimativas indicativas de memória e perfis de uso, além de variantes Dolphin/Llama menos restritivas para experimentação opcional. A estimativa de pesos não representa VRAM máxima: contexto, KV cache e buffers elevam o consumo. Veja [docs/llm/MODEL_ROUTING.md](docs/llm/MODEL_ROUTING.md) para a estratégia de roteamento adaptativo, engines e critérios de benchmark.
+
+
+### Busca global de arquivos no Studio
+
+O Explorer do KardecAgent Studio oferece busca local por nome de arquivo e por conteúdo. Use **Ctrl+P** (ou **Cmd+P** no macOS), digite o termo e abra um resultado para carregar o arquivo no editor. A busca:
+- não envia o conteúdo do workspace para serviços externos;
+- ignora diretórios de dependências, builds, caches e estado interno;
+- não segue links simbólicos;
+- limita a varredura a 2.000 arquivos, 64 MiB lidos, 256 KiB por arquivo e 100 resultados;
+- pesquisa apenas arquivos de texto UTF-8, ignorando arquivos binários.
