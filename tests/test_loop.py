@@ -1,6 +1,9 @@
 from pathlib import Path
 
 from kardecagent.agent.loop import AgentLoop
+from kardecagent.agent.plan import ExecutionPlan
+from kardecagent.agent.recovery import RecoveryResult
+from kardecagent.agent.state import TaskState, TaskStatus
 from kardecagent.config import Settings
 from kardecagent.llm.client import LLMResponse
 
@@ -199,3 +202,76 @@ def test_finish_requires_evidence_for_every_completion_criterion(tmp_path: Path)
     )
     assert state.status.value == "completed"
     assert any(event.event_type == "completion_criteria_failed" for event in state.events)
+
+
+
+def test_approved_plan_retry_is_bounded_and_increases_iteration_budget(tmp_path: Path, monkeypatch):
+    loop = AgentLoop(FakeLLM([]), Settings(max_iterations=1))
+    plan = ExecutionPlan("Approved", ["Implement"], ["tests"], [], ["done"])
+    state = TaskState("task", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    limits = []
+
+    def execute(*args, **kwargs):
+        current = args[3]
+        limits.append(kwargs.get("max_iterations"))
+        if len(limits) == 1:
+            current.transition(TaskStatus.MAX_ITERATIONS, reason="Limit reached.")
+            current.record("max_iterations", "Maximum execution iterations reached.")
+        else:
+            assert current.status is TaskStatus.RESUMING
+            current.transition(TaskStatus.RUNNING, reason="Retry started.")
+            current.transition(TaskStatus.VERIFYING, reason="Verification started.")
+            current.transition(TaskStatus.VERIFIED, reason="Verification passed.")
+            current.transition(TaskStatus.COMPLETED, reason="Completed.")
+        return current
+
+    def recover(root, current, **kwargs):
+        current.transition(TaskStatus.RESUMING, reason="Recovery completed.")
+        return RecoveryResult(True, resume_step=1)
+
+    monkeypatch.setattr(loop.executor, "execute", execute)
+    monkeypatch.setattr(loop.recovery, "recover", recover)
+
+    result = loop.execute_approved_plan(tmp_path, "task", plan, state)
+
+    assert result.status is TaskStatus.COMPLETED
+    assert limits == [None, 2]
+    assert any(
+        event.event_type == "retry_decision" and event.data.get("allowed") is True
+        for event in result.events
+    )
+
+
+def test_approved_plan_does_not_retry_non_transient_run_command_failure(tmp_path: Path, monkeypatch):
+    loop = AgentLoop(FakeLLM([]), Settings(max_iterations=2))
+    plan = ExecutionPlan("Approved", ["Implement"], ["tests"], [], ["done"])
+    state = TaskState("task", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    calls = []
+
+    def execute(*args, **kwargs):
+        current = args[3]
+        calls.append(current.status)
+        current.record(
+            "tool_error",
+            "run_command failed: command exited with status 1",
+            tool="run_command",
+            error="command exited with status 1",
+        )
+        current.transition(TaskStatus.FAILED, reason="Command failed.")
+        return current
+
+    def recover(root, current, **kwargs):
+        current.transition(TaskStatus.RESUMING, reason="Workspace unchanged.")
+        return RecoveryResult(True, resume_step=1)
+
+    monkeypatch.setattr(loop.executor, "execute", execute)
+    monkeypatch.setattr(loop.recovery, "recover", recover)
+
+    result = loop.execute_approved_plan(tmp_path, "task", plan, state)
+
+    assert calls == [TaskStatus.RUNNING]
+    decision = next(event for event in result.events if event.event_type == "retry_decision")
+    assert decision.data["allowed"] is False
+    assert "external side effects" in decision.data["reason"]
