@@ -131,3 +131,19 @@ def test_primary_model_failure_is_not_hidden_by_another_fallback():
 
     with pytest.raises(RuntimeError, match="primary failed"):
         client.chat([{"role": "user", "content": "implement a feature"}])
+
+
+def test_fast_model_is_not_retried_for_every_request_after_failure():
+    primary = FakeClient("qwen-coder:9b", content="primary response")
+    fast = FakeClient("qwen-fast:1b", error=RuntimeError("model not loaded"))
+    client = AdaptiveLLMClient(primary, fast)
+    messages = [{"role": "user", "content": "quanto é 5+3?"}]
+
+    first = client.chat(messages)
+    second = client.chat(messages)
+
+    assert len(fast.calls) == 1
+    assert len(primary.calls) == 2
+    assert first.raw["_kardecagent_routing"]["fallback"] is True
+    assert second.raw["_kardecagent_routing"]["fallback"] is True
+    assert "disabled after an earlier failure" in second.raw["_kardecagent_routing"]["reason"]
