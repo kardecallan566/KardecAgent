@@ -191,3 +191,63 @@ def test_audited_rollback_refuses_concurrent_modification(tmp_path: Path):
         assert "rollback conflict" in str(exc)
     else:
         raise AssertionError("expected rollback conflict")
+
+
+def test_finish_rejects_missing_criterion_evidence_before_accepting_complete_evidence(tmp_path: Path):
+    (tmp_path / "index.html").write_text(
+        "<!doctype html><html lang='pt-BR'><head>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Site</title></head><body>OK</body></html>",
+        encoding="utf-8",
+    )
+    llm = FakeLLM([
+        '{"tool":"complete_step","arguments":{"step":1,"evidence":"implemented"},"plan_step":1}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":'
+        '[{"criterion":"Page validates","evidence":"validator passed"}]}}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":'
+        '[{"criterion":"Page validates","evidence":"validator passed"},'
+        '{"criterion":"Mobile viewport exists","evidence":"viewport meta tag is present"}]}}',
+    ])
+    loop = AgentLoop(llm, Settings(max_iterations=3))
+    plan = ExecutionPlan(
+        "Approved",
+        ["Validate"],
+        ["validator"],
+        [],
+        ["Page validates", "Mobile viewport exists"],
+    )
+    result = loop.execute_approved_plan(tmp_path, "parent", plan, make_state(tmp_path))
+
+    assert result.status.value == "completed"
+    rejected = [event for event in result.events if event.event_type == "completion_criteria_failed"]
+    assert len(rejected) == 1
+    assert rejected[0].data["missing"] == ["Mobile viewport exists"]
+    completed = next(event for event in result.events if event.event_type == "completed")
+    assert len(completed.data["criteria_evidence"]) == 2
+
+
+def test_verify_includes_structured_check_summary_without_rerunning_checks(tmp_path: Path, monkeypatch):
+    loop = AgentLoop(FakeLLM([]), Settings())
+    results = iter([
+        {"kind": "test", "available": True, "passed": True, "summary": "3 passed"},
+        {"kind": "typecheck", "available": False},
+        {"kind": "lint", "available": True, "passed": False, "summary": "lint errors"},
+        {"kind": "build", "available": False},
+        {"kind": "validate", "available": False},
+    ])
+    monkeypatch.setattr(loop.executor, "_run_check", lambda root, kind: next(results))
+
+    report = loop.executor.verify(tmp_path)
+
+    assert not report["verified"]
+    assert report["summary"] == {
+        "verified": False,
+        "total": 5,
+        "available": 2,
+        "passed": 1,
+        "failed": 1,
+        "skipped": 3,
+    }
+    assert [check["status"] for check in report["checks"]] == [
+        "passed", "skipped", "failed", "skipped", "skipped"
+    ]
