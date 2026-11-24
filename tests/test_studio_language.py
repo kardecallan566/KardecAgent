@@ -1,0 +1,57 @@
+from pathlib import Path
+
+import pytest
+
+from kardecagent.studio.language import python_semantic_request
+
+
+def test_rejects_paths_outside_workspace(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("value = 1", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="inside the project"):
+        python_semantic_request("definition", "value = 1", str(outside), str(root), 1, 0)
+
+
+def test_rejects_unsupported_actions_and_languages(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    source = root / "main.js"
+    source.write_text("const value = 1", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unsupported semantic action"):
+        python_semantic_request("rename", "", str(source), str(root), 1, 0)
+    with pytest.raises(ValueError, match="Python files"):
+        python_semantic_request("complete", "", str(source), str(root), 1, 0)
+
+
+def test_rejects_oversized_source(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    source = root / "main.py"
+    source.write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="1 MB"):
+        python_semantic_request("complete", "x" * 1_000_001, str(source), str(root), 1, 0)
+
+
+def test_missing_jedi_is_a_supported_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import builtins
+
+    root = tmp_path / "project"
+    root.mkdir()
+    source = root / "main.py"
+    source.write_text("value = 1", encoding="utf-8")
+    real_import = builtins.__import__
+
+    def without_jedi(name, *args, **kwargs):
+        if name == "jedi":
+            raise ImportError("not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_jedi)
+    result = python_semantic_request("complete", "value = 1", str(source), str(root), 1, 5)
+    assert result["available"] is False
+    assert result["items"] == []
