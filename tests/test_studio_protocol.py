@@ -235,6 +235,67 @@ def test_chat_confirms_file_access_only_after_successful_workspace_read(monkeypa
     assert "Sim. Consegui acessar loucura.py" in answer["payload"]["message"]
 
 
+
+def test_repair_mojibake_handles_repeated_windows_1252_corruption():
+    assert studio_protocol._repair_mojibake("Hoje ÃƒÂ© dia 01 de janeiro.") == "Hoje é dia 01 de janeiro."
+    assert studio_protocol._repair_mojibake("nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o tenho") == "não tenho"
+    corrupted = "ExecuÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o"
+    assert studio_protocol._repair_mojibake(corrupted) == "Execução"
+
+
+def test_date_question_uses_local_clock_without_calling_model(monkeypatch, tmp_path):
+    command = {
+        "type": "chat.message", "schema_version": 1, "command_id": "date-question",
+        "payload": {"message": "que dia é hoje?"},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeLLM:
+        def chat(self, *args, **kwargs):
+            raise AssertionError("A data deve vir do relógio local, não do modelo.")
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+        llm = FakeLLM()
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    answer = next(item for item in messages if item["type"] == "assistant.response")
+    assert answer["payload"]["message"] == "Hoje é " + studio_protocol._local_date_context()["date_pt_br"] + "."
+
+
+def test_project_overview_returns_real_workspace_inventory(monkeypatch, tmp_path):
+    (tmp_path / "README.md").write_text("# Projeto de teste\\nUm app local.", encoding="utf-8")
+    (tmp_path / "loucura.py").write_text("print('olá')\\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def main(): pass\\n", encoding="utf-8")
+    command = {
+        "type": "chat.message", "schema_version": 1, "command_id": "project-overview",
+        "payload": {"message": "oque tem nesse projeto?"},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeLLM:
+        def chat(self, *args, **kwargs):
+            raise AssertionError("O inventário do workspace deve ser respondido com dados reais.")
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+        llm = FakeLLM()
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    answer = next(item for item in messages if item["type"] == "assistant.response")
+    assert "Consegui acessar o workspace" in answer["payload"]["message"]
+    assert "README.md" in answer["payload"]["message"]
+    assert "src" in answer["payload"]["message"]
+    assert "Resumo do README" in answer["payload"]["message"]
+
+
 def test_chat_message_includes_real_workspace_tree_and_requested_file(monkeypatch, tmp_path):
     target = tmp_path / "loucura.py"
     target.write_text("def soma(a, b):\n    return a + b\n", encoding="utf-8")
