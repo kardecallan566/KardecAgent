@@ -40,7 +40,7 @@ export function getEditorCompletions(
   projectFiles: string[] = [],
   force = false,
 ): { items: EditorCompletion[]; start: number; end: number } {
-  const prefixMatch = source.slice(0, cursor).match(/[A-Za-z_$][\\w$]*$/);
+  const prefixMatch = source.slice(0, cursor).match(/[A-Za-z_$][\w$]*$/);
   const prefix = prefixMatch?.[0] ?? "";
   const start = cursor - prefix.length;
   if (!force && prefix.length < 2) return { items: [], start, end: cursor };
@@ -55,7 +55,7 @@ export function getEditorCompletions(
     });
   }
 
-  const declarations = /\\b(?:def|class|function|const|let|var|type|interface|enum|struct|fn|func)\\s+([A-Za-z_$][\\w$]*)/g;
+  const declarations = /\b(?:def|class|function|const|let|var|type|interface|enum|struct|fn|func)\s+([A-Za-z_$][\w$]*)/g;
   for (const match of source.matchAll(declarations)) {
     const name = match[1];
     if (name && !candidates.has(name)) {
@@ -68,7 +68,7 @@ export function getEditorCompletions(
 
   for (const file of projectFiles) {
     const name = file.split(/[\\/]/).pop() || file;
-    const stem = name.replace(/\\.[^.]+$/, "");
+    const stem = name.replace(/\.[^.]+$/, "");
     if (stem && !candidates.has(stem)) {
       candidates.set(stem, {
         label: stem, insertText: stem, detail: "Arquivo do projeto · " + file,
@@ -99,13 +99,13 @@ export function getLiveEditorDiagnostics(
     return [];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const position = Number(message.match(/position\\s+(\\d+)/i)?.[1] ?? 0);
+    const position = Number(message.match(/position\s+(\d+)/i)?.[1] ?? 0);
     const bounded = Math.max(0, Math.min(source.length, position));
     const before = source.slice(0, bounded);
     return [{
       file,
-      line: before.split("\\n").length,
-      column: (before.length - before.lastIndexOf("\\n")),
+      line: before.split("\n").length,
+      column: (before.length - before.lastIndexOf("\n")),
       severity: "error",
       code: "JSON",
       message,
@@ -116,7 +116,7 @@ export function getLiveEditorDiagnostics(
 
 export function parseToolDiagnostics(output: string, file: string): EditorDiagnostic[] {
   const diagnostics: EditorDiagnostic[] = [];
-  const ruff = /^(.+?):(\\d+):(\\d+):\\s+([A-Z]\\d+)\\s+(.+)$/gm;
+  const ruff = /^(.+?):(\d+):(\d+):\s+([A-Z]\d+)\s+(.+)$/gm;
   for (const match of output.matchAll(ruff)) {
     diagnostics.push({
       file: match[1] || file,
@@ -128,7 +128,7 @@ export function parseToolDiagnostics(output: string, file: string): EditorDiagno
       source: "ruff",
     });
   }
-  const eslint = /^\\s*(\\d+):(\\d+)\\s+(error|warning)\\s+(.+?)(?:\\s{2,}([@\\w./-]+))?\\s*$/gm;
+  const eslint = /^\s*(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}([@\w./-]+))?\s*$/gm;
   for (const match of output.matchAll(eslint)) {
     diagnostics.push({
       file,
