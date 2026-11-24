@@ -343,7 +343,7 @@ def test_run_stdio_emits_heartbeat_while_agent_execution_is_blocked(monkeypatch,
         "command_id": "heartbeat-command",
         "payload": {"instruction": "do work", "project_root": str(tmp_path)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
     monkeypatch.setattr(studio_protocol, "_approval", lambda *args, **kwargs: True)
