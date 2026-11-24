@@ -70,11 +70,12 @@ def diagnose_failure(
     """
     event_list = list(events)
     priorities = (
-        ("recovery_failed", FailureCategory.RECOVERY_CONFLICT),
-        ("verification_failed", FailureCategory.VERIFICATION),
+        # Prefer the underlying execution failure over a later rollback failure.
         ("model_protocol_stalled", FailureCategory.MODEL_PROTOCOL),
         ("tool_error", FailureCategory.TOOL_EXECUTION),
         ("model_error", FailureCategory.MODEL_PROTOCOL),
+        ("verification_failed", FailureCategory.VERIFICATION),
+        ("recovery_failed", FailureCategory.RECOVERY_CONFLICT),
         ("max_iterations", FailureCategory.ITERATION_LIMIT),
         ("plan_error", FailureCategory.PLAN),
     )
