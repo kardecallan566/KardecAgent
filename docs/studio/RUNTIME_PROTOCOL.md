@@ -66,6 +66,7 @@ A response is accepted only for the currently pending approval ID. While approva
 ## Events
 
 - `runtime.ready`: process initialized, workspace fixed and resource limits announced (max concurrency, subtask, LLM iteration and output caps). After this event, the runtime replays a bounded history of up to 20 persisted tasks as `task.created`, their last 100 `core.event` records and a terminal event.
+- `runtime.heartbeat`: emitted every five seconds by a daemon thread independent from the command/LLM execution loop. Heartbeat frames share a write lock with normal protocol events, so a long model request does not look like a dead Core and JSONL messages cannot interleave.
 - `command.accepted` / `command.rejected`: command acknowledgement.
 - `task.created`: task accepted by the manager. On startup restoration, `payload.restored` is `true` and the event represents historical work, not a new execution.
 - `core.event`: bounded lifecycle envelope from `TaskState.record`, including event type, sequence, iteration, message and event data. The UI uses `plan_created`, `plan_step_started`, `plan_step_completed` and subtask board snapshots to build the live task map. Events carry both the persisted task ID and a per-execution ID so repeated runs of the same task remain distinct.
@@ -85,3 +86,16 @@ Event IDs are unique per runtime execution; task IDs remain the Python persisten
 - These are application-level workload limits, not hard operating-system CPU/RAM quotas; process isolation will be evaluated with profiling before workers are enabled.
 - Startup restoration loads up to 20 most recently updated persisted tasks from the project's `TaskStore`, replaying at most 100 events per task. Interrupted tasks are marked recoverable in the UI; they are never resumed automatically, so opening the Studio cannot unexpectedly modify files. Only approved tasks already written to the durable store are included; approvals waiting before persistence are not yet recoverable.
 - Cancellation, pause commands, durable approval inbox recovery and concurrent submissions are not yet implemented.
+
+
+## Core supervision and recovery
+
+The Studio UI starts a 20-second heartbeat watchdog after `runtime.ready`. It checks every five seconds and also queries the native child-process diagnostics when the heartbeat expires.
+
+- A stale heartbeat marks the connection offline and surfaces the child PID/exit diagnostics.
+- The Studio never restarts a Core automatically after a lost stream or stale heartbeat. A task may still be executing or writing files; automatic restart could duplicate side effects.
+- If the child process is still alive but its stdout stream is closed, the UI reports a degraded connection and preserves the busy/task state instead of claiming that the task stopped.
+- If the child has exited, the UI clears live execution state but keeps the persisted task history available for explicit recovery.
+- Closing the Studio terminates its child process; persisted task state and the execution journal remain the recovery source on the next launch.
+
+The heartbeat is a liveness signal, not a guarantee that the model provider is healthy or that the current task is making progress. Provider errors and task lifecycle events remain separate.
