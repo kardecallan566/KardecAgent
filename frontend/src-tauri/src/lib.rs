@@ -1557,3 +1557,45 @@ mod git_status_tests {
         assert!(status.files[2].untracked);
     }
 }
+
+
+#[cfg(test)]
+mod workspace_file_tests {
+    use super::{resolve_new_workspace_path, write_workspace_file};
+    use std::{fs, path::PathBuf};
+
+    fn temporary_workspace() -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("kardecagent-workspace-test-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn new_file_path_creates_nested_parent_directories_inside_workspace() {
+        let root = temporary_workspace();
+        let path = resolve_new_workspace_path(root.to_str().unwrap(), "src/features/editor/main.py").unwrap();
+        assert!(path.parent().unwrap().is_dir());
+        fs::write(&path, "print('ok')").unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "print('ok')");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_write_replaces_existing_file_with_complete_content() {
+        let root = temporary_workspace();
+        let path = root.join("notes.txt");
+        fs::write(&path, "old content").unwrap();
+        write_workspace_file(&path, b"new content").unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "new content");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn new_file_path_rejects_parent_traversal() {
+        let root = temporary_workspace();
+        assert!(resolve_new_workspace_path(root.to_str().unwrap(), "../escape.txt").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
