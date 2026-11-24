@@ -992,6 +992,7 @@ struct GitStatusResult {
     ahead: usize,
     behind: usize,
     files: Vec<GitFileChange>,
+    truncated: bool,
 }
 
 #[derive(Serialize)]
@@ -1028,6 +1029,7 @@ fn parse_git_status_text(output: &str) -> GitStatusResult {
     let mut ahead = 0usize;
     let mut behind = 0usize;
     let mut files = Vec::new();
+    let mut truncated = false;
     for line in output.lines() {
         if let Some(header) = line.strip_prefix("## ") {
             branch = header.split("...").next().unwrap_or(header).to_string();
@@ -1049,6 +1051,7 @@ fn parse_git_status_text(output: &str) -> GitStatusResult {
         let path = raw_path.rsplit_once(" -> ").map(|(_, new)| new).unwrap_or(raw_path);
         if path.is_empty() { continue; }
         let status = format!("{index}{worktree}");
+        if files.len() >= 5000 { truncated = true; break; }
         files.push(GitFileChange {
             path: path.to_string(),
             status: status.clone(),
@@ -1057,7 +1060,7 @@ fn parse_git_status_text(output: &str) -> GitStatusResult {
             untracked: status == "??",
         });
     }
-    GitStatusResult { is_repo: true, branch, ahead, behind, files }
+    GitStatusResult { is_repo: true, branch, ahead, behind, files, truncated }
 }
 
 fn git_command(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
