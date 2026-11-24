@@ -1045,7 +1045,7 @@ fn parse_git_status_text(output: &str) -> GitStatusResult {
         if line.len() < 4 { continue; }
         let index = line.chars().next().unwrap_or(' ');
         let worktree = line.chars().nth(1).unwrap_or(' ');
-        let raw_path = line.get(3..).unwrap_or("").trim();
+        let raw_path = line.get(3..).unwrap_or("");
         let path = raw_path.rsplit_once(" -> ").map(|(_, new)| new).unwrap_or(raw_path);
         if path.is_empty() { continue; }
         let status = format!("{index}{worktree}");
@@ -1118,7 +1118,10 @@ fn bounded_git_text(bytes: &[u8]) -> String {
 fn git_status(project_root: String) -> Result<GitStatusResult, String> {
     let root = canonical_git_root(&project_root)?;
     let output = git_command(&root, &["-c", "core.quotepath=false", "status", "--short", "--branch", "--untracked-files=all"])?;
-    let text = ensure_git_success(output)?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
     Ok(parse_git_status_text(&text))
 }
 
