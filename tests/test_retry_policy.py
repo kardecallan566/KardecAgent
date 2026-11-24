@@ -164,3 +164,21 @@ def test_subtask_retry_count_is_scoped_to_its_subtask():
 
     assert decision.allowed
     assert decision.attempt == 1
+
+
+
+def test_denies_retry_when_a_command_already_returned_a_result():
+    decision = RetryPolicy().decide(
+        events=[],
+        execution_events=[
+            event("tool_result", tool="run_command", result='{"returncode":0}'),
+        ],
+        retry_event="resume_retry_started",
+        status="max_iterations",
+        diagnostic=diagnostic(FailureCategory.ITERATION_LIMIT),
+        recovery=recovery(),
+        base_iteration_limit=10,
+    )
+
+    assert not decision.allowed
+    assert "external side effects" in decision.reason
