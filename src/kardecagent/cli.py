@@ -188,6 +188,14 @@ def _ollama_health(settings: Settings) -> int:
                 f"Configured model '{settings.llm_model}' is not installed. "
                 "Installed models: " + (", ".join(names) if names else "(none)")
             )
+        if settings.llm_routing_enabled:
+            if not settings.llm_fast_model:
+                raise RuntimeError("Model routing is enabled but KARDECAGENT_FAST_MODEL is empty.")
+            if settings.llm_fast_model not in names:
+                raise RuntimeError(
+                    f"Fast model '{settings.llm_fast_model}' is not installed. "
+                    "Installed models: " + (", ".join(names) if names else "(none)")
+                )
         response = client.health_check()
         if response.content.strip() != "KARDECAGENT_OK":
             raise RuntimeError("Ollama responded, but the health-check content was unexpected.")
@@ -195,6 +203,8 @@ def _ollama_health(settings: Settings) -> int:
             "version": version,
             "models": names,
             "model": settings.llm_model,
+            "fast_model": settings.llm_fast_model or None,
+            "routing_enabled": settings.llm_routing_enabled,
             "response": response.content.strip(),
         }, ensure_ascii=True))
         return 0
