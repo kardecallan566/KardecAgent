@@ -135,6 +135,22 @@ class AdaptiveLLMClient:
         self.fast = fast
         self.model = primary.model
         self.router = ModelRouter(primary.model, fast.model)
+        self.fast_disabled_reason: str | None = None
 
     def chat(self, messages: list[dict[str, Any]], *, temperature: float = 0.2):
-        return self.router.chat(self.primary, self.fast, messages, temperature=temperature)
+        decision = self.router.decide(messages)
+        if decision.tier == "fast" and self.fast_disabled_reason:
+            response = self.primary.chat(messages, temperature=temperature)
+            raw = dict(getattr(response, "raw", {}) or {})
+            raw["_kardecagent_routing"] = {
+                "tier": "primary",
+                "model": self.primary.model,
+                "reason": "fast model disabled after an earlier failure: " + self.fast_disabled_reason,
+                "fallback": True,
+            }
+            return replace(response, raw=raw)
+        response = self.router.chat(self.primary, self.fast, messages, temperature=temperature)
+        route = getattr(response, "raw", {}).get("_kardecagent_routing", {})
+        if route.get("fallback"):
+            self.fast_disabled_reason = str(route.get("reason") or "fast model unavailable")
+        return response
