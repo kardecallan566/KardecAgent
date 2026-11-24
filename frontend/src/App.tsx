@@ -19,6 +19,7 @@ type StudioSettings = {
 };
 type SettingsSection = "core" | "editor" | "appearance" | "terminal" | "memory" | "diagnostics";
 type CoreDiagnostics = { running: boolean; pid: number | null; python_executable: string | null; launch_mode: string | null; project_root: string | null; last_exit_code: number | null };
+type TerminalDiagnostics = { running: boolean; pid: number | null; last_exit_code: number | null };
 const DEFAULT_SETTINGS: StudioSettings = {
   ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "", autoStartCore: true,
   editorFontSize: 13, editorFontFamily: "Shantell Sans", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
@@ -120,6 +121,7 @@ function App() {
   const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[] } | null>(null);
   const [ollamaTesting, setOllamaTesting] = useState(false);
   const [terminalReady, setTerminalReady] = useState(false);
+  const [terminalDiagnostics, setTerminalDiagnostics] = useState<TerminalDiagnostics | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
   const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState("App.tsx");
@@ -205,7 +207,22 @@ function App() {
       if (active) setTerminalOutput(items => [...items, event.payload].slice(-1000));
     });
     const exited = listen("terminal-exited", () => {
-      if (active) { setTerminalReady(false); setTerminalOutput(items => [...items, "[Processo do terminal encerrado.]"]); }
+      if (active) {
+        void invoke<TerminalDiagnostics>("terminal_diagnostics").then(diagnostics => {
+          if (!active) return;
+          setTerminalDiagnostics(diagnostics);
+          setTerminalReady(diagnostics.running);
+          setTerminalOutput(items => [...items, diagnostics.running
+            ? "[A saída do terminal foi fechada; o processo ainda aparece ativo.]"
+            : "[Terminal encerrado · código " + (diagnostics.last_exit_code ?? "desconhecido") + "]"
+          ].slice(-1000));
+        }).catch(error => {
+          if (active) {
+            setTerminalReady(false);
+            setTerminalOutput(items => [...items, "[Falha ao consultar o terminal: " + String(error) + "]"].slice(-1000));
+          }
+        });
+      }
     });
     return () => {
       active = false;
@@ -494,8 +511,10 @@ function App() {
     if (!projectRoot) { setProjectError("Abra um projeto antes de iniciar o terminal."); return; }
     try {
       await invoke("start_integrated_terminal", { projectPath: projectRoot, shellName: settings.shell });
-      setTerminalReady(true);
-      setTerminalOutput(items => [...items, "[Terminal iniciado em " + projectRoot + "]"]);
+      const diagnostics = await invoke<TerminalDiagnostics>("terminal_diagnostics");
+      setTerminalDiagnostics(diagnostics);
+      setTerminalReady(diagnostics.running);
+      setTerminalOutput(items => [...items, "[Terminal iniciado em " + projectRoot + " · PID " + (diagnostics.pid ?? "—") + "]"].slice(-1000));
       setBottomPanel("Terminal");
     } catch (error) { setProjectError("Não foi possível iniciar o terminal: " + String(error)); }
   }
@@ -508,7 +527,14 @@ function App() {
     catch (error) { setTerminalOutput(items => [...items, "Erro: " + String(error)]); }
   }
   async function stopTerminal() {
-    try { await invoke("stop_integrated_terminal"); } catch { /* terminal may already have exited */ }
+    try {
+      await invoke("stop_integrated_terminal");
+      const diagnostics = await invoke<TerminalDiagnostics>("terminal_diagnostics");
+      setTerminalDiagnostics(diagnostics);
+      setTerminalOutput(items => [...items, "[Terminal encerrado · código " + (diagnostics.last_exit_code ?? "desconhecido") + "]"].slice(-1000));
+    } catch (error) {
+      setTerminalOutput(items => [...items, "[Falha ao encerrar terminal: " + String(error) + "]"].slice(-1000));
+    }
     setTerminalReady(false);
   }
 
@@ -1073,7 +1099,7 @@ function App() {
               <div className="editor">
                 {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); }} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); } if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); } }} aria-label="Editor de código" /></div></div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
-              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Terminal" ? <div className="integrated-terminal" style={{ fontSize: settings.terminalFontSize + "px" }}><div className="terminal-toolbar"><span><Terminal size={13}/> {terminalReady ? "Terminal ativo" : "Terminal parado"}</span><div><button onClick={() => void startTerminal()} disabled={terminalReady || !projectRoot}>Novo terminal</button><button onClick={() => void stopTerminal()} disabled={!terminalReady}><Square size={11}/> Encerrar</button></div></div><div className="terminal-screen">{terminalOutput.map((line,index) => <div key={index}>{line}</div>)}</div><form className="terminal-command" onSubmit={event => { event.preventDefault(); void sendTerminalCommand(); }}><span>{settings.shell === "cmd" ? ">" : "PS>"}</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} placeholder={terminalReady ? "Digite um comando e pressione Enter..." : "Inicie um terminal para executar comandos"} disabled={!terminalReady}/><button type="submit" disabled={!terminalReady || !terminalInput.trim()}><Send size={13}/></button></form></div> : bottomPanel === "Output" && qualityOutput ? <div className="run-output"><div className="run-output-header"><strong>{qualityOutput.language} · {qualityOutput.file} · {qualityOutput.tool}</strong><span className={qualityOutput.available && qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "run-success" : "run-failure"}>{!qualityOutput.available ? "Ferramenta indisponível" : qualityOutput.fixed ? "Correções aplicadas" : qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "Sem problemas" : qualityOutput.exit_code === 0 ? "Ajustes sugeridos" : "Problemas encontrados"}</span></div><pre>{qualityOutput.output}</pre></div> : bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
+              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Terminal" ? <div className="integrated-terminal" style={{ fontSize: settings.terminalFontSize + "px" }}><div className="terminal-toolbar"><span><Terminal size={13}/> {terminalReady ? "Terminal ativo · PID " + (terminalDiagnostics?.pid ?? "—") : terminalDiagnostics?.last_exit_code !== null && terminalDiagnostics?.last_exit_code !== undefined ? "Terminal encerrado · código " + terminalDiagnostics.last_exit_code : "Terminal parado"}</span><div><button onClick={() => setTerminalOutput([])} disabled={!terminalOutput.length}>Limpar</button><button onClick={() => void startTerminal()} disabled={terminalReady || !projectRoot}>Novo terminal</button><button onClick={() => void stopTerminal()} disabled={!terminalReady}><Square size={11}/> Encerrar</button></div></div><div className="terminal-screen">{terminalOutput.map((line,index) => <div key={index}>{line}</div>)}</div><form className="terminal-command" onSubmit={event => { event.preventDefault(); void sendTerminalCommand(); }}><span>{settings.shell === "cmd" ? ">" : "PS>"}</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} placeholder={terminalReady ? "Digite um comando e pressione Enter..." : "Inicie um terminal para executar comandos"} disabled={!terminalReady}/><button type="submit" disabled={!terminalReady || !terminalInput.trim()}><Send size={13}/></button></form></div> : bottomPanel === "Output" && qualityOutput ? <div className="run-output"><div className="run-output-header"><strong>{qualityOutput.language} · {qualityOutput.file} · {qualityOutput.tool}</strong><span className={qualityOutput.available && qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "run-success" : "run-failure"}>{!qualityOutput.available ? "Ferramenta indisponível" : qualityOutput.fixed ? "Correções aplicadas" : qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "Sem problemas" : qualityOutput.exit_code === 0 ? "Ajustes sugeridos" : "Problemas encontrados"}</span></div><pre>{qualityOutput.output}</pre></div> : bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
             </>
           )}
         </section>
