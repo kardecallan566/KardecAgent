@@ -1152,7 +1152,16 @@ fn git_unstage(project_root: String, file_path: String) -> Result<GitStatusResul
     let output = Command::new("git").args(["restore", "--staged", "--"]).arg(&relative)
         .current_dir(&root).output()
         .map_err(|error| format!("Não foi possível iniciar git restore: {error}"))?;
-    ensure_git_success(output)?;
+    if !output.status.success() {
+        // An unborn repository has no HEAD for git restore to read. Removing only
+        // the index entry is the safe equivalent for a newly-added file.
+        let fallback = Command::new("git").args(["rm", "--cached", "--"]).arg(&relative)
+            .current_dir(&root).output()
+            .map_err(|error| format!("Não foi possível iniciar git rm --cached: {error}"))?;
+        if !fallback.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+    }
     git_status(project_root)
 }
 
@@ -1445,5 +1454,30 @@ mod terminal_io_tests {
         let mut reader = BufReader::new(Cursor::new(b"last line"));
         assert_eq!(read_bounded_line(&mut reader, 32).unwrap(), Some(b"last line".to_vec()));
         assert_eq!(read_bounded_line(&mut reader, 32).unwrap(), None);
+    }
+}
+
+
+#[cfg(test)]
+mod git_status_tests {
+    use super::parse_git_status_text;
+
+    #[test]
+    fn parses_branch_tracking_and_staged_unstaged_and_untracked_files() {
+        let status = parse_git_status_text(
+            "## feature/editor...origin/feature/editor [ahead 2, behind 1]\\nM  src/main.rs\\n M README.md\\n?? new file.txt\\n",
+        );
+        assert_eq!(status.branch, "feature/editor");
+        assert_eq!(status.ahead, 2);
+        assert_eq!(status.behind, 1);
+        assert_eq!(status.files.len(), 3);
+        assert_eq!(status.files[0].status, "M ");
+        assert!(status.files[0].staged);
+        assert!(!status.files[0].unstaged);
+        assert_eq!(status.files[1].status, " M");
+        assert!(!status.files[1].staged);
+        assert!(status.files[1].unstaged);
+        assert_eq!(status.files[2].path, "new file.txt");
+        assert!(status.files[2].untracked);
     }
 }
