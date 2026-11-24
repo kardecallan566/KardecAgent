@@ -59,7 +59,7 @@ def _repair_mojibake(value: str) -> str:
 
 def _is_date_question(message: str) -> bool:
     normalized = " ".join(message.casefold().split())
-    return bool(re.search(r"\b(?:que dia e hoje|qual e a data de hoje|data de hoje|dia de hoje|que data e hoje)\b", normalized))
+    return bool(re.search(r"\b(?:que dia [eé] hoje|qual [eé] a data de hoje|data de hoje|dia de hoje|que data [eé] hoje)\b", normalized))
 
 
 def _project_inventory_reply(project_files: list[str], inspected: list[dict]) -> str:
@@ -385,6 +385,11 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     "active_editor": active_editor,
                     "instruction": "Estes dados foram lidos diretamente do workspace ativo. Use-os como evidência; nunca diga que não tem acesso aos arquivos. Se um arquivo não estiver listado ou não puder ser lido, informe isso com precisão.",
                 }
+                if analysis_request:
+                    answer = _project_inventory_reply(project_files, inspected)
+                    _write({"type": "assistant.response", "schema_version": 1, "command_id": command_identifier, "payload": {"message": answer}})
+                    continue
+
                 access_only = (
                     re.search(r"\b(?:consegue|pode|tem como)\s+(?:acessar|ver|ler|abrir)\b", text, re.IGNORECASE)
                     and not re.search(r"\b(?:o que|explique|resuma|analise|mostre|conteúdo|conteudo)\b", text, re.IGNORECASE)
