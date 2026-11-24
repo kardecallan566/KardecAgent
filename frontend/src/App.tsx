@@ -511,6 +511,10 @@ function App() {
     if (bottomPanel === "Alterações" && projectRoot) void refreshGitStatus();
   }, [projectRoot]);
 
+  useEffect(() => {
+    if (bottomPanel === "Alterações" && projectRoot && !runtimeBusy) void refreshGitStatus();
+  }, [runtimeBusy, bottomPanel, projectRoot]);
+
   // Persist the current workspace transcript independently from startup restoration.
   useEffect(() => {
     if (!projectRoot) return;
