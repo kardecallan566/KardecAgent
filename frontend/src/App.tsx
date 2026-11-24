@@ -21,6 +21,9 @@ type StudioSettings = {
 type SettingsSection = "core" | "editor" | "appearance" | "terminal" | "memory" | "diagnostics";
 type CoreDiagnostics = { running: boolean; pid: number | null; python_executable: string | null; launch_mode: string | null; project_root: string | null; last_exit_code: number | null };
 type TerminalDiagnostics = { running: boolean; pid: number | null; last_exit_code: number | null };
+type GitFileChange = { path: string; status: string; staged: boolean; unstaged: boolean; untracked: boolean };
+type GitStatus = { is_repo: boolean; branch: string; ahead: number; behind: number; files: GitFileChange[] };
+type GitDiff = { staged: string; working: string };
 const DEFAULT_SETTINGS: StudioSettings = {
   ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "", autoStartCore: true,
   editorFontSize: 13, editorFontFamily: "Shantell Sans", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
@@ -125,6 +128,13 @@ function App() {
   const [terminalDiagnostics, setTerminalDiagnostics] = useState<TerminalDiagnostics | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
   const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+  const [gitSelectedFile, setGitSelectedFile] = useState<string | null>(null);
+  const [gitDiff, setGitDiff] = useState<GitDiff | null>(null);
+  const [gitLoading, setGitLoading] = useState(false);
+  const [gitError, setGitError] = useState<string | null>(null);
+  const [gitCommitMessage, setGitCommitMessage] = useState("");
+  const [gitCommitBusy, setGitCommitBusy] = useState(false);
   const [selectedFile, setSelectedFile] = useState("App.tsx");
   const [bottomPanel, setBottomPanel] = useState("Atividades");
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
@@ -595,6 +605,92 @@ function App() {
     const cursor = Math.min(fileContent.length, lineOffset + Math.max(0, diagnostic.column - 1));
     editorRef.current.focus();
     editorRef.current.setSelectionRange(cursor, cursor);
+  }
+
+  async function loadGitDiff(filePath: string) {
+    if (!projectRoot) return;
+    try {
+      const diff = await invoke<GitDiff>("git_diff", { projectRoot, filePath });
+      setGitSelectedFile(filePath);
+      setGitDiff(diff);
+    } catch (error) {
+      setGitSelectedFile(filePath);
+      setGitDiff(null);
+      setGitError(String(error));
+    }
+  }
+
+  async function refreshGitStatus() {
+    if (!projectRoot) {
+      setGitStatus(null);
+      setGitError("Abra um projeto para consultar as alterações Git.");
+      return;
+    }
+    setGitLoading(true);
+    setGitError(null);
+    try {
+      const status = await invoke<GitStatus>("git_status", { projectRoot });
+      setGitStatus(status);
+      if (gitSelectedFile && status.files.some(file => file.path === gitSelectedFile)) {
+        const diff = await invoke<GitDiff>("git_diff", { projectRoot, filePath: gitSelectedFile });
+        setGitDiff(diff);
+      } else {
+        setGitSelectedFile(status.files[0]?.path || null);
+        setGitDiff(status.files[0]
+          ? await invoke<GitDiff>("git_diff", { projectRoot, filePath: status.files[0].path })
+          : null);
+      }
+    } catch (error) {
+      setGitStatus(null);
+      setGitDiff(null);
+      setGitError(String(error));
+    } finally {
+      setGitLoading(false);
+    }
+  }
+
+  async function stageGitFile(filePath: string) {
+    if (!projectRoot || gitLoading) return;
+    setGitLoading(true);
+    setGitError(null);
+    try {
+      const status = await invoke<GitStatus>("git_stage", { projectRoot, filePath });
+      setGitStatus(status);
+      const diff = await invoke<GitDiff>("git_diff", { projectRoot, filePath });
+      setGitSelectedFile(filePath);
+      setGitDiff(diff);
+    } catch (error) { setGitError(String(error)); }
+    finally { setGitLoading(false); }
+  }
+
+  async function unstageGitFile(filePath: string) {
+    if (!projectRoot || gitLoading) return;
+    setGitLoading(true);
+    setGitError(null);
+    try {
+      const status = await invoke<GitStatus>("git_unstage", { projectRoot, filePath });
+      setGitStatus(status);
+      const diff = await invoke<GitDiff>("git_diff", { projectRoot, filePath });
+      setGitSelectedFile(filePath);
+      setGitDiff(diff);
+    } catch (error) { setGitError(String(error)); }
+    finally { setGitLoading(false); }
+  }
+
+  async function commitGitChanges() {
+    if (!projectRoot || !gitCommitMessage.trim() || gitCommitBusy) return;
+    setGitCommitBusy(true);
+    setGitError(null);
+    try {
+      const status = await invoke<GitStatus>("git_commit", { projectRoot, message: gitCommitMessage });
+      setGitStatus(status);
+      setGitCommitMessage("");
+      setGitSelectedFile(status.files[0]?.path || null);
+      setGitDiff(status.files[0]
+        ? await invoke<GitDiff>("git_diff", { projectRoot, filePath: status.files[0].path })
+        : null);
+    } catch (error) { setGitError(String(error)); }
+    finally { setGitCommitBusy(false); }
   }
 
   async function openEntry(entry: ProjectEntry) {
@@ -1167,7 +1263,18 @@ function App() {
                   if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); }
                 }} aria-label="Editor de código" /></div>{editorCompletions.length > 0 && <div className="editor-completions" role="listbox" aria-label="Sugestões de código">{editorCompletions.map((item, index) => <button key={item.kind + ":" + item.label} className={index === activeCompletionIndex ? "selected" : ""} role="option" aria-selected={index === activeCompletionIndex} onMouseDown={event => { event.preventDefault(); applyEditorCompletion(item); }}><span className={"completion-kind " + item.kind}>{item.kind === "keyword" ? "K" : item.kind === "symbol" ? "ƒ" : "F"}</span><strong>{item.label}</strong><small>{item.detail}</small></button>)}</div>}</div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
-              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Problemas","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Problemas" ? <div className="editor-problems">{editorDiagnostics.length ? editorDiagnostics.map((diagnostic, index) => <button key={diagnostic.source + ":" + diagnostic.line + ":" + diagnostic.column + ":" + index} className={"editor-problem " + diagnostic.severity} onClick={() => jumpToEditorDiagnostic(diagnostic)}><span>{diagnostic.severity === "error" ? "E" : "W"}</span><strong>{diagnostic.code || diagnostic.source.toUpperCase()}</strong><small>{diagnostic.line}:{diagnostic.column}</small><p>{diagnostic.message}</p></button>) : <div className="editor-problems-empty"><CheckCircle2 size={15}/>{openedPath ? "Nenhum diagnóstico registrado. Execute a análise de código para verificar este arquivo." : "Abra um arquivo para ver diagnósticos."}</div>}</div> : bottomPanel === "Terminal" ? <div className="integrated-terminal" style={{ fontSize: settings.terminalFontSize + "px" }}><div className="terminal-toolbar"><span><Terminal size={13}/> {terminalReady ? "Terminal ativo · PID " + (terminalDiagnostics?.pid ?? "—") : terminalDiagnostics?.running ? "Canal fechado · processo PID " + (terminalDiagnostics.pid ?? "—") : terminalDiagnostics?.last_exit_code !== null && terminalDiagnostics?.last_exit_code !== undefined ? "Terminal encerrado · código " + terminalDiagnostics.last_exit_code : "Terminal parado"}</span><div><button onClick={() => setTerminalOutput([])} disabled={!terminalOutput.length}>Limpar</button><button onClick={() => void startTerminal()} disabled={terminalReady || Boolean(terminalDiagnostics?.running) || !projectRoot}>Novo terminal</button><button onClick={() => void stopTerminal()} disabled={!terminalDiagnostics?.running}><Square size={11}/> Encerrar</button></div></div><div className="terminal-screen">{terminalOutput.map((line,index) => <div key={index}>{line}</div>)}</div><form className="terminal-command" onSubmit={event => { event.preventDefault(); void sendTerminalCommand(); }}><span>{settings.shell === "cmd" ? ">" : "PS>"}</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} placeholder={terminalReady ? "Digite um comando e pressione Enter..." : "Inicie um terminal para executar comandos"} disabled={!terminalReady}/><button type="submit" disabled={!terminalReady || !terminalInput.trim()}><Send size={13}/></button></form></div> : bottomPanel === "Output" && qualityOutput ? <div className="run-output"><div className="run-output-header"><strong>{qualityOutput.language} · {qualityOutput.file} · {qualityOutput.tool}</strong><span className={qualityOutput.available && qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "run-success" : "run-failure"}>{!qualityOutput.available ? "Ferramenta indisponível" : qualityOutput.fixed ? "Correções aplicadas" : qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "Sem problemas" : qualityOutput.exit_code === 0 ? "Ajustes sugeridos" : "Problemas encontrados"}</span></div><pre>{qualityOutput.output}</pre></div> : bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
+              <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Problemas","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => { setBottomPanel(tab); if (tab === "Alterações") void refreshGitStatus(); }}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Alterações" ? <div className="git-panel">
+                <div className="git-toolbar"><div><strong>{gitStatus?.branch || "Git"}</strong><small>{gitStatus ? gitStatus.ahead + " à frente · " + gitStatus.behind + " atrás" : "Estado do repositório"}</small></div><button onClick={() => void refreshGitStatus()} disabled={gitLoading}><RefreshCw size={13}/>{gitLoading ? "Atualizando..." : "Atualizar"}</button></div>
+                {gitError && <div className="git-error" role="alert">{gitError}</div>}
+                {gitStatus && <div className="git-workspace"><div className="git-file-list">
+                  <div className="git-file-list-head"><strong>Alterações</strong><span>{gitStatus.files.length}</span></div>
+                  {gitStatus.files.length ? gitStatus.files.map(file => <button key={file.path} className={gitSelectedFile === file.path ? "git-file selected" : "git-file"} onClick={() => void loadGitDiff(file.path)}><span className="git-file-status">{file.status}</span><span>{file.path}</span><small>{file.untracked ? "Novo" : file.staged && file.unstaged ? "Index + local" : file.staged ? "Preparado" : "Modificado"}</small></button>) : <p className="git-empty">Nenhuma alteração pendente.</p>}
+                </div><div className="git-diff-view">
+                  {gitSelectedFile ? <><div className="git-diff-head"><strong>{gitSelectedFile}</strong><div>{gitStatus.files.find(file => file.path === gitSelectedFile)?.unstaged || gitStatus.files.find(file => file.path === gitSelectedFile)?.untracked ? <button onClick={() => void stageGitFile(gitSelectedFile)} disabled={gitLoading}>Preparar</button> : null}{gitStatus.files.find(file => file.path === gitSelectedFile)?.staged ? <button onClick={() => void unstageGitFile(gitSelectedFile)} disabled={gitLoading}>Desfazer stage</button> : null}</div></div><pre>{[gitDiff?.staged ? "=== STAGED ===\n" + gitDiff.staged : "", gitDiff?.working ? "=== WORKING TREE ===\n" + gitDiff.working : ""].filter(Boolean).join("\n") || (gitStatus.files.find(file => file.path === gitSelectedFile)?.untracked ? "Arquivo novo. Prepare-o para visualizar o diff." : "Nenhum diff textual disponível para este arquivo.")}</pre></> : <div className="git-empty">Selecione um arquivo para visualizar o diff.</div>}
+                </div></div>}
+                <form className="git-commit-form" onSubmit={event => { event.preventDefault(); void commitGitChanges(); }}><input value={gitCommitMessage} onChange={event => setGitCommitMessage(event.target.value)} placeholder="Mensagem do commit..." maxLength={2000}/><button type="submit" disabled={gitCommitBusy || !gitCommitMessage.trim() || !gitStatus?.files.some(file => file.staged)}>{gitCommitBusy ? "Commitando..." : "Commit"}</button></form>
+                <div className="git-footer-note">Ações locais · nenhum push ou envio remoto é realizado automaticamente.</div>
+              </div> : bottomPanel === "Problemas" ? <div className="editor-problems">{editorDiagnostics.length ? editorDiagnostics.map((diagnostic, index) => <button key={diagnostic.source + ":" + diagnostic.line + ":" + diagnostic.column + ":" + index} className={"editor-problem " + diagnostic.severity} onClick={() => jumpToEditorDiagnostic(diagnostic)}><span>{diagnostic.severity === "error" ? "E" : "W"}</span><strong>{diagnostic.code || diagnostic.source.toUpperCase()}</strong><small>{diagnostic.line}:{diagnostic.column}</small><p>{diagnostic.message}</p></button>) : <div className="editor-problems-empty"><CheckCircle2 size={15}/>{openedPath ? "Nenhum diagnóstico registrado. Execute a análise de código para verificar este arquivo." : "Abra um arquivo para ver diagnósticos."}</div>}</div> : bottomPanel === "Terminal" ? <div className="integrated-terminal" style={{ fontSize: settings.terminalFontSize + "px" }}><div className="terminal-toolbar"><span><Terminal size={13}/> {terminalReady ? "Terminal ativo · PID " + (terminalDiagnostics?.pid ?? "—") : terminalDiagnostics?.running ? "Canal fechado · processo PID " + (terminalDiagnostics.pid ?? "—") : terminalDiagnostics?.last_exit_code !== null && terminalDiagnostics?.last_exit_code !== undefined ? "Terminal encerrado · código " + terminalDiagnostics.last_exit_code : "Terminal parado"}</span><div><button onClick={() => setTerminalOutput([])} disabled={!terminalOutput.length}>Limpar</button><button onClick={() => void startTerminal()} disabled={terminalReady || Boolean(terminalDiagnostics?.running) || !projectRoot}>Novo terminal</button><button onClick={() => void stopTerminal()} disabled={!terminalDiagnostics?.running}><Square size={11}/> Encerrar</button></div></div><div className="terminal-screen">{terminalOutput.map((line,index) => <div key={index}>{line}</div>)}</div><form className="terminal-command" onSubmit={event => { event.preventDefault(); void sendTerminalCommand(); }}><span>{settings.shell === "cmd" ? ">" : "PS>"}</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} placeholder={terminalReady ? "Digite um comando e pressione Enter..." : "Inicie um terminal para executar comandos"} disabled={!terminalReady}/><button type="submit" disabled={!terminalReady || !terminalInput.trim()}><Send size={13}/></button></form></div> : bottomPanel === "Output" && qualityOutput ? <div className="run-output"><div className="run-output-header"><strong>{qualityOutput.language} · {qualityOutput.file} · {qualityOutput.tool}</strong><span className={qualityOutput.available && qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "run-success" : "run-failure"}>{!qualityOutput.available ? "Ferramenta indisponível" : qualityOutput.fixed ? "Correções aplicadas" : qualityOutput.exit_code === 0 && !qualityOutput.output.trim() ? "Sem problemas" : qualityOutput.exit_code === 0 ? "Ajustes sugeridos" : "Problemas encontrados"}</span></div><pre>{qualityOutput.output}</pre></div> : bottomPanel === "Output" && runOutput ? <div className="run-output"><div className="run-output-header"><strong>{runOutput.language} · {runOutput.file}</strong><span className={runOutput.exit_code === 0 && !runOutput.timed_out ? "run-success" : "run-failure"}>{runOutput.timed_out ? "Tempo esgotado" : "Código de saída: " + runOutput.exit_code}</span></div><pre>{[runOutput.stdout, runOutput.stderr].filter(Boolean).join("\n") || "(sem saída)"}</pre></div> : <><Clock3 size={14}/><span>{bottomPanel === "Output" ? "A saída dos programas executados aparecerá aqui." : bottomPanel === "Alterações" ? "As alterações de arquivos serão exibidas aqui." : "Eventos do runtime aparecerão aqui, sem polling contínuo."}</span></>}</div></div>
             </>
           )}
         </section>
