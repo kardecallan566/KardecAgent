@@ -93,7 +93,7 @@ class ModelRouter:
         if len(task) > 600 or task.count("\n") >= 4 or _CODE_OR_PATH.search(task):
             return RoutingDecision("primary", self.primary_model, "long or code-oriented request")
 
-        signal = next((word for word in _COMPLEX_SIGNALS if word in normalized), None)
+        signal = next((word for word in _COMPLEX_SIGNALS if re.search(r"\\b" + re.escape(word) + r"\\b", normalized)), None)
         if signal:
             return RoutingDecision("primary", self.primary_model, f"software-work signal: {signal}")
 
