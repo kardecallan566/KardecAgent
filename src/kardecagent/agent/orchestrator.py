@@ -13,6 +13,7 @@ from .diagnostics import diagnose_failure
 from .loop import AgentLoop
 from .plan import ExecutionPlan
 from .recovery import RecoveryManager
+from .retry_policy import RetryPolicy
 from .state import TaskStatus
 from ..tasks import Subtask, SubtaskManager, TaskBoard, SubtaskStatus
 
@@ -50,6 +51,7 @@ class Orchestrator:
         self.settings = settings
         self.agent_loop = AgentLoop(llm, settings)
         self.recovery = RecoveryManager()
+        self.retry_policy = RetryPolicy()
 
     def should_decompose(self, plan: ExecutionPlan, project_root: Path) -> bool:
         manager = SubtaskManager(project_root)
@@ -269,6 +271,11 @@ class Orchestrator:
                 resume_step=max(1, requested_resume_step),
             )
             if result_state.status.value != "completed":
+                failure = diagnose_failure(
+                    result_state.events,
+                    result_state.status.value,
+                    fallback_message=f"Subtask stopped with status {result_state.status.value}.",
+                )
                 recovery = self.recovery.recover(
                     project_root,
                     result_state,
@@ -281,8 +288,40 @@ class Orchestrator:
                     rolled_back_files=list(recovery.rolled_back_files),
                     conflict_paths=list(recovery.conflict_paths),
                 )
-                if recovery.recovered:
-                    # A successful recovery must leave the state resumable before retry.
+                retry_history = parent_state.events if parent_state is not None else result_state.events
+                retry_event = "subtask_retry_started" if parent_state is not None else "subtask_resume_retry_started"
+                decision = self.retry_policy.decide(
+                    events=retry_history,
+                    retry_event=retry_event,
+                    status=result_state.status.value,
+                    diagnostic=failure,
+                    recovery=recovery,
+                    base_iteration_limit=self.settings.max_iterations,
+                    max_retries=self.settings.max_retries,
+                    subtask_id=subtask.id if parent_state is not None else None,
+                )
+                result_state.record(
+                    "subtask_retry_decision",
+                    "Bounded retry policy evaluated the recovered subtask.",
+                    allowed=decision.allowed,
+                    reason=decision.reason,
+                    attempt=decision.attempt,
+                    iteration_limit=decision.iteration_limit,
+                    failure_category=failure.category.value,
+                )
+                if parent_state is not None:
+                    parent_state.record(
+                        "subtask_retry_decision",
+                        "Bounded retry policy evaluated the logical subtask.",
+                        subtask_id=subtask.id,
+                        allowed=decision.allowed,
+                        reason=decision.reason,
+                        attempt=decision.attempt,
+                        iteration_limit=decision.iteration_limit,
+                        failure_category=failure.category.value,
+                    )
+                if decision.allowed:
+                    # Recovery must finish before the approved plan can resume.
                     if result_state.status in {
                         TaskStatus.FAILED,
                         TaskStatus.MAX_ITERATIONS,
@@ -297,6 +336,8 @@ class Orchestrator:
                         "subtask_resume_retry_started",
                         "Retrying the approved subtask plan from the last consistent step.",
                         resume_step=recovery.resume_step,
+                        attempt=decision.attempt,
+                        iteration_limit=decision.iteration_limit,
                     )
                     if parent_state is not None:
                         parent_state.record(
@@ -304,6 +345,8 @@ class Orchestrator:
                             "Logical subtask retry started from the last consistent plan step.",
                             subtask_id=subtask.id,
                             resume_step=recovery.resume_step,
+                            attempt=decision.attempt,
+                            iteration_limit=decision.iteration_limit,
                             parent_plan_step=(
                                 subtask.plan_steps[recovery.resume_step - 1]
                                 if 1 <= recovery.resume_step <= len(subtask.plan_steps)
@@ -324,7 +367,7 @@ class Orchestrator:
                             "subtask": subtask.as_dict(),
                         },
                         allowed_scope=subtask.scope,
-                        max_iterations=self.settings.max_iterations,
+                        max_iterations=decision.iteration_limit,
                         allow_plan_changes=False,
                         persistence_callback=persist_subtask_progress,
                         resume_step=recovery.resume_step,
@@ -334,15 +377,10 @@ class Orchestrator:
                         if result_state.status is TaskStatus.COMPLETED
                         else f"Subtask retry stopped with status {result_state.status.value}."
                     )
-                elif not recovery.recovered:
-                    summary = (
-                        f"Subtask stopped with status {result_state.status.value}; "
-                        "recovery was blocked by workspace conflicts."
-                    )
                 else:
                     summary = (
                         f"Subtask stopped with status {result_state.status.value}; "
-                        "there were no audited changes to retry."
+                        f"retry not performed: {decision.reason}."
                     )
             else:
                 summary = "Subtask completed and verified."
