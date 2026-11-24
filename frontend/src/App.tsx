@@ -108,6 +108,7 @@ function App() {
   });
   const [coreDiagnostics, setCoreDiagnostics] = useState<CoreDiagnostics | null>(null);
   const startupTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const lastRuntimeHeartbeatAt = useRef<number | null>(null);
   const [googleFontUrl, setGoogleFontUrl] = useState("https://fonts.google.com/specimen/Shantell+Sans");
   const [googleFontStatus, setGoogleFontStatus] = useState<string | null>(null);
   const [googleFontBusy, setGoogleFontBusy] = useState(false);
@@ -227,7 +228,12 @@ function App() {
           if (oldest) seenEventIds.current.delete(oldest);
         }
       }
+      if (message.type === "runtime.heartbeat") {
+        lastRuntimeHeartbeatAt.current = Date.now();
+        return;
+      }
       if (message.type === "runtime.ready") {
+        lastRuntimeHeartbeatAt.current = Date.now();
         if (startupTimer.current) window.clearTimeout(startupTimer.current);
         startupTimer.current = null;
         setRuntimeStatus("online");
@@ -375,19 +381,23 @@ function App() {
         startupTimer.current = null;
         void invoke<CoreDiagnostics>("runtime_diagnostics").then(diagnostics => {
           setCoreDiagnostics(diagnostics);
-          if (diagnostics.running) return;
+          lastRuntimeHeartbeatAt.current = null;
           setRuntimeStatus("offline");
-          setRuntimeBusy(false);
-          setRuntimeSubtasks([]);
-          setRuntimePlanSteps([]);
-          setActiveRuntimeSubtask(null);
-          setActiveRuntimeStep(null);
-          setPendingApproval(null);
-          setApprovalSubmitting(false);
-          approvalCommandId.current = null;
-          setRuntimeError(current => current || (diagnostics.last_exit_code === null
-            ? "O processo Python encerrou a conexão."
-            : "O processo Python encerrou com código " + diagnostics.last_exit_code + "."));
+          if (!diagnostics.running) {
+            setRuntimeBusy(false);
+            setRuntimeSubtasks([]);
+            setRuntimePlanSteps([]);
+            setActiveRuntimeSubtask(null);
+            setActiveRuntimeStep(null);
+            setPendingApproval(null);
+            setApprovalSubmitting(false);
+            approvalCommandId.current = null;
+          }
+          setRuntimeError(current => current || (diagnostics.running
+            ? "O canal de saída do Core foi fechado, mas o processo ainda está ativo. A tarefa não foi reiniciada; feche o Studio para encerrar o processo com segurança e recupere a tarefa ao reabrir."
+            : diagnostics.last_exit_code === null
+              ? "O processo Python encerrou a conexão."
+              : "O processo Python encerrou com código " + diagnostics.last_exit_code + "."));
         }).catch(error => {
           setRuntimeStatus("offline");
           setRuntimeError("Não foi possível consultar o estado do Core: " + String(error));
@@ -415,6 +425,38 @@ function App() {
     };
   }, []);
 
+
+  // A live child process must keep sending heartbeats even while an LLM call blocks
+  // the command loop. A stale stream is marked offline, never restarted automatically.
+  useEffect(() => {
+    if (runtimeStatus !== "online") return;
+    const watchdog = window.setInterval(() => {
+      const last = lastRuntimeHeartbeatAt.current;
+      if (last === null || Date.now() - last <= 20000) return;
+      lastRuntimeHeartbeatAt.current = null;
+      void invoke<CoreDiagnostics>("runtime_diagnostics").then(diagnostics => {
+        setCoreDiagnostics(diagnostics);
+        setRuntimeStatus("offline");
+        if (!diagnostics.running) {
+          setRuntimeBusy(false);
+          setRuntimeSubtasks([]);
+          setRuntimePlanSteps([]);
+          setActiveRuntimeSubtask(null);
+          setActiveRuntimeStep(null);
+          setPendingApproval(null);
+          setApprovalSubmitting(false);
+          approvalCommandId.current = null;
+        }
+        setRuntimeError(diagnostics.running
+          ? "O Core continua ativo, mas não envia heartbeats há mais de 20 segundos. Nenhuma reinicialização automática foi feita para não interromper uma possível gravação. Feche o Studio para encerrar o processo com segurança; a tarefa persistida poderá ser recuperada."
+          : "O Core parou de responder e o processo foi encerrado. Consulte Configurações → Diagnóstico.");
+      }).catch(error => {
+        setRuntimeStatus("offline");
+        setRuntimeError("O heartbeat do Core expirou e o diagnóstico falhou: " + String(error));
+      });
+    }, 5000);
+    return () => window.clearInterval(watchdog);
+  }, [runtimeStatus]);
 
   // Persist the current workspace transcript independently from startup restoration.
   useEffect(() => {
@@ -512,6 +554,7 @@ function App() {
       setRuntimeStatus("connecting");
       setRuntimeError(null);
       await invoke("stop_runtime");
+      lastRuntimeHeartbeatAt.current = null;
       await runtimeListenersReady.current;
       armCoreStartupTimeout();
       await invoke("start_runtime", {
@@ -573,6 +616,7 @@ function App() {
         await invoke("switch_runtime_workspace", { projectPath: selected });
       } else if (settings.autoStartCore) {
         setRuntimeStatus("connecting");
+        lastRuntimeHeartbeatAt.current = null;
         await runtimeListenersReady.current;
         armCoreStartupTimeout();
         await invoke("start_runtime", {
