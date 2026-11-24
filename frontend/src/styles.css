@@ -507,3 +507,37 @@ body { min-width:900px; }
 .workspace-search-limit{padding:9px;color:#c6a66e}
 .workspace-search-error{padding:9px 14px;color:#f1a2a2;font-size:11px;border-bottom:1px solid #30333e}
 .workspace-search-footer{padding:9px 14px;border-top:1px solid #30333e;color:#737b89;font-size:10px}
+
+
+/* Lightweight editor intelligence: local completions and actionable diagnostics. */
+.file-view { position:relative; }
+.editor-completions {
+  position:absolute;z-index:40;left:58px;bottom:16px;width:min(420px,calc(100% - 80px));
+  max-height:230px;overflow:auto;padding:5px;border:1px solid #51456d;border-radius:8px;
+  background:#1b1925;box-shadow:0 12px 32px rgba(0,0,0,.42);display:grid;gap:2px;
+}
+.editor-completions button {
+  display:grid;grid-template-columns:22px minmax(90px,auto) 1fr;align-items:center;gap:9px;
+  min-width:0;padding:7px 8px;border:0;border-radius:5px;background:transparent;color:#e5e0ef;
+  text-align:left;cursor:pointer;
+}
+.editor-completions button.selected,.editor-completions button:hover { background:#39304d; }
+.editor-completions button strong { font:600 11px ui-monospace,SFMono-Regular,monospace; }
+.editor-completions button small { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a9a1b8;font-size:10px; }
+.completion-kind { display:grid;place-items:center;width:19px;height:19px;border-radius:4px;background:#363044;color:#c9b7ff;font-size:10px;font-weight:700; }
+.completion-kind.symbol { background:#263c37;color:#9cdbc0; }
+.completion-kind.file { background:#283b4c;color:#a9d7f7; }
+.editor-problems { display:grid;align-content:start;gap:5px;max-height:100%;overflow:auto;padding:8px 12px; }
+.editor-problem { display:grid;grid-template-columns:20px auto 48px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:7px 9px;border:1px solid #332f3d;border-radius:5px;background:#17151e;color:#d9d5e2;text-align:left;cursor:pointer; }
+.editor-problem:hover { border-color:#71608f;background:#211d2b; }
+.editor-problem > span { display:grid;place-items:center;width:17px;height:17px;border-radius:50%;font-size:9px;font-weight:700;background:#59313a;color:#ffc3c9; }
+.editor-problem.warning > span { background:#514329;color:#f4d59a; }
+.editor-problem strong { color:#bdb0e7;font:600 10px ui-monospace,SFMono-Regular,monospace; }
+.editor-problem small { color:#9b94a8;font:10px ui-monospace,SFMono-Regular,monospace; }
+.editor-problem p { overflow:hidden;margin:0;color:#d0cbd9;font-size:11px;text-overflow:ellipsis;white-space:nowrap; }
+.editor-problems-empty { display:flex;align-items:center;gap:8px;padding:14px;color:#9f98ad;font-size:11px; }
+.app-shell[data-theme="light"] .editor-completions { background:#fff;border-color:#c6bfd7;box-shadow:0 10px 28px rgba(20,25,40,.18); }
+.app-shell[data-theme="light"] .editor-completions button { color:#273449; }
+.app-shell[data-theme="light"] .editor-completions button.selected,.app-shell[data-theme="light"] .editor-completions button:hover { background:#e8e2f5; }
+.app-shell[data-theme="light"] .editor-problem { background:#fff;border-color:#d8dce5;color:#263449; }
+.app-shell[data-theme="light"] .editor-problem p { color:#39475b; }
