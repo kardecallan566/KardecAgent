@@ -80,3 +80,27 @@ def test_diagnose_uses_latest_event_of_same_category():
     )
 
     assert result.error == "second"
+
+
+
+def test_diagnose_uses_only_the_final_retry_attempt():
+    result = diagnose_failure(
+        [
+            event("tool_error", "temporary failure", error="connection timed out"),
+            event("subtask_resume_retry_started", "retry started"),
+            event("max_iterations", "Maximum execution iterations reached."),
+        ],
+        "max_iterations",
+    )
+
+    assert result.category is FailureCategory.ITERATION_LIMIT
+    assert result.source_event == "max_iterations"
+    assert result.retryable is False
+
+
+def test_diagnose_accepts_one_shot_iterables():
+    events = iter([event("tool_error", "command failed", error="permission denied")])
+    result = diagnose_failure(events, "failed")
+
+    assert result.category is FailureCategory.TOOL_EXECUTION
+    assert result.error == "permission denied"
