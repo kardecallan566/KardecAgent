@@ -427,7 +427,13 @@ fn resolve_new_workspace_path(project_root: &str, requested_path: &str) -> Resul
 fn create_project_file(project_root: String, relative_path: String, content: String) -> Result<(), String> {
     if content.len() > 1_000_000 { return Err("Arquivo maior que 1 MB.".into()); }
     let path = resolve_new_workspace_path(&project_root, &relative_path)?;
-    fs::write(path, content.as_bytes()).map_err(|e| format!("Falha ao criar arquivo: {e}"))
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&path)
+        .map_err(|e| format!("Falha ao criar arquivo sem sobrescrever um destino existente: {e}"))?;
+    if let Err(error) = file.write_all(content.as_bytes()).and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(&path);
+        return Err(format!("Falha ao gravar novo arquivo: {error}"));
+    }
+    Ok(())
 }
 
 #[tauri::command]
