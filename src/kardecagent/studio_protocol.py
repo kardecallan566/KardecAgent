@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import threading
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ MAX_MESSAGE_BYTES = 64 * 1024
 MAX_EVENT_BYTES = 256 * 1024
 MAX_INSTRUCTION_LENGTH = 8000
 MAX_SEEN_COMMAND_IDS = 1000
+RUNTIME_HEARTBEAT_INTERVAL_SECONDS = 5.0
+_WRITE_LOCK = threading.Lock()
 
 
 class StudioProtocolError(ValueError):
@@ -134,8 +137,11 @@ def _write(message: dict) -> None:
         if isinstance(bounded.get("message"), str):
             bounded["message"] = bounded["message"][:4000]
         encoded = json.dumps(bounded, ensure_ascii=True, separators=(",", ":"), default=str)
-    sys.stdout.write(encoded + "\n")
-    sys.stdout.flush()
+    # Heartbeats are emitted from a daemon thread while the main thread may be
+    # blocked in an LLM request. Serialize writes so JSONL frames never interleave.
+    with _WRITE_LOCK:
+        sys.stdout.write(encoded + "\n")
+        sys.stdout.flush()
 
 
 def _read_message() -> dict:
@@ -250,6 +256,27 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         },
     })
 
+    heartbeat_stop = threading.Event()
+
+    def emit_heartbeats() -> None:
+        while not heartbeat_stop.wait(RUNTIME_HEARTBEAT_INTERVAL_SECONDS):
+            try:
+                _write({
+                    "type": "runtime.heartbeat",
+                    "schema_version": 1,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            except (BrokenPipeError, OSError, ValueError):
+                heartbeat_stop.set()
+                return
+
+    heartbeat_thread = threading.Thread(
+        target=emit_heartbeats,
+        name="kardecagent-studio-heartbeat",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+
     # Restore a bounded view of persisted work before accepting new commands.
     # Restored executions are historical UI records; they are never resumed
     # automatically and therefore cannot unexpectedly modify project files.
@@ -320,6 +347,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         try:
             message = _read_message()
         except EOFError:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1.0)
             return 0
         except StudioProtocolError as exc:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
