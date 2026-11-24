@@ -68,7 +68,8 @@ def diagnose_failure(
     The retryable flag is advisory only; this function never retries or changes
     task state. Callers remain responsible for approval and side-effect safety.
     """
-    event_list = list(events)
+    all_events = list(events)
+    event_list = list(all_events)
     retry_markers = [
         index for index, event in enumerate(event_list)
         if getattr(event, "event_type", None) in {
@@ -109,7 +110,7 @@ def diagnose_failure(
         if key in data:
             details[key] = data[key]
     related_recovery = next(
-        (event for event in reversed(list(events))
+        (event for event in reversed(all_events)
          if getattr(event, "event_type", None) == "recovery_failed"),
         None,
     )
