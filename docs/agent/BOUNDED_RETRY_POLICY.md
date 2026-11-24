@@ -18,7 +18,7 @@ A retry is denied when:
 - the retry budget is exhausted; or
 - a `run_command` failure is not classified as transient.
 
-Transient command failures may be retried only after successful workspace recovery. This does not prove that external side effects were reversed; the command policy therefore remains conservative.
+A transient `run_command` tool error may be retried only after successful workspace recovery and only when no command result was recorded for that attempt. If a command already ran and returned a result, the policy refuses to replay the plan automatically because external side effects cannot be rolled back reliably.
 
 ## Audit trail
 
