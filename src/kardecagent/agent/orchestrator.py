@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..config import Settings
-from ..llm import LocalLLMClient
+from ..llm.router import ChatClient
 from ..llm.cleaner import extract_json_payload
 from ..project import project_snapshot
 from .diagnostics import diagnose_failure
@@ -46,7 +46,7 @@ class SubtaskExecutionResult:
 class Orchestrator:
     """Decomposes an approved plan and executes logical subtasks with one loaded LLM."""
 
-    def __init__(self, llm: LocalLLMClient, settings: Settings) -> None:
+    def __init__(self, llm: ChatClient, settings: Settings) -> None:
         self.llm = llm
         self.settings = settings
         self.agent_loop = AgentLoop(llm, settings)
