@@ -28,4 +28,6 @@ The optional Python path in Studio settings is intended for development and trou
 
 ## Diagnostics
 
+The Studio's Ollama connection test invokes the Core executable with the dedicated `ollama-health` command. This command returns one JSON response on stdout, verifies the configured model and a small inference request, and exits independently; it does not send shutdown input to, restart, or replace the already-running Studio Core. An invalid explicit Python override now returns an actionable error instead of silently falling back to another interpreter.
+
 Open **Settings → Diagnostics** to inspect the real child-process PID, launch mode, executable path, workspace, exit code, and recent stderr output. A successful Ollama connection test alone does not prove that the Core process has started; the UI reports the Core as connected only after receiving `runtime.ready`.
