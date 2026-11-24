@@ -25,6 +25,7 @@ from .security_review import (
 )
 from .state import TaskState, TaskStatus
 from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
+from .verification import evaluate_completion_evidence, summarize_check_results
 
 CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate")
 RISK_RANK = {"normal": 0, "low_risk": 1, "sensitive": 2, "high_risk": 3}
@@ -103,9 +104,13 @@ class AgentExecutor:
         if security_required:
             checks += [self._run_check(root, "security"),
                        self._run_check(root, "dependency_audit")]
-        available = [c for c in checks if c["available"]]
-        failures = [c for c in available if not c["passed"]]
-        result = {"verified": bool(available) and not failures, "checks": checks, "git": None}
+        summary = summarize_check_results(checks)
+        result = {
+            "verified": summary["verified"],
+            "summary": {key: value for key, value in summary.items() if key != "checks"},
+            "checks": summary["checks"],
+            "git": None,
+        }
         if git_is_repo(root):
             status, diff = git_status(root), git_diff(root)
             result["git"] = {
@@ -478,18 +483,28 @@ class AgentExecutor:
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "Complete every approved plan step before finishing."}]
                     continue
-                evidence = action.arguments.get("criteria_evidence", [])
-                if isinstance(evidence, str):
-                    evidence = [evidence]
-                accumulated = getattr(state, "_accumulated_criteria_evidence", [])
-                accumulated.extend(evidence)
-                setattr(state, "_accumulated_criteria_evidence", accumulated)
-                if not accumulated or len(accumulated) < len(plan.completion_criteria):
-                    state.record("completion_criteria_failed", "Finish requires completion evidence.")
-                    messages += [{"role": "assistant", "content": response.content},
-                                 {"role": "user", "content": "Provide non-empty evidence for the completion criteria."}]
+                evidence_result = evaluate_completion_evidence(
+                    plan.completion_criteria,
+                    action.arguments.get("criteria_evidence", []),
+                )
+                if not evidence_result["valid"]:
+                    state.record(
+                        "completion_criteria_failed",
+                        "Finish was rejected because completion evidence does not cover the approved criteria.",
+                        missing=evidence_result["missing"],
+                        unexpected=evidence_result["unexpected"],
+                        reason=evidence_result["reason"],
+                    )
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "completion_criteria": plan.completion_criteria,
+                            "evidence_validation": evidence_result,
+                            "instruction": "Provide exactly one concrete evidence item for every approved criterion. Prefer explicit criterion/evidence objects and do not repeat or omit criteria.",
+                        }, ensure_ascii=False)},
+                    ]
                     continue
-                evidence = accumulated
+                evidence = evidence_result["items"]
                 security_required = plan.security_level in {"sensitive", "high_risk"}
                 state.transition(TaskStatus.VERIFYING, reason="Completion verification started.")
                 verification = self.verify(root, security_required=security_required)
