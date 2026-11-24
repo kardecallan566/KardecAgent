@@ -1,0 +1,82 @@
+from types import SimpleNamespace
+
+from kardecagent.agent.diagnostics import FailureCategory, diagnose_failure
+
+
+def event(kind, message, **data):
+    return SimpleNamespace(
+        event_type=kind,
+        message=message,
+        data=data,
+        iteration=3,
+    )
+
+
+def test_diagnose_preserves_original_tool_error_and_marks_transient():
+    result = diagnose_failure(
+        [
+            event("tool_error", "run_command failed", tool="run_command",
+                  error="connection timed out", plan_step=2),
+            event("recovery_failed", "Rollback blocked", conflict_paths=["src/a.py"]),
+        ],
+        "failed",
+    )
+
+    assert result.category is FailureCategory.TOOL_EXECUTION
+    assert result.error == "connection timed out"
+    assert result.tool == "run_command"
+    assert result.plan_step == 2
+    assert result.retryable is True
+
+
+def test_diagnose_marks_workspace_conflict_as_non_retryable():
+    result = diagnose_failure(
+        [event("recovery_failed", "Recovery blocked", conflict_paths=["src/a.py"])],
+        "failed",
+    )
+
+    assert result.category is FailureCategory.RECOVERY_CONFLICT
+    assert result.retryable is False
+    assert result.details["conflict_paths"] == ["src/a.py"]
+
+
+def test_diagnose_verification_failure_is_not_automatically_retryable():
+    result = diagnose_failure(
+        [event("verification_failed", "Tests failed", error="2 tests failed")],
+        "failed",
+    )
+
+    assert result.category is FailureCategory.VERIFICATION
+    assert result.message == "2 tests failed"
+    assert result.retryable is False
+
+
+def test_diagnose_iteration_limit_has_a_specific_category():
+    result = diagnose_failure(
+        [event("max_iterations", "Maximum execution iterations reached.")],
+        "max_iterations",
+    )
+
+    assert result.category is FailureCategory.ITERATION_LIMIT
+    assert result.source_event == "max_iterations"
+    assert result.retryable is False
+
+
+def test_diagnose_has_safe_fallback_when_no_failure_event_exists():
+    result = diagnose_failure([], "failed", fallback_message="Subtask scope is missing.")
+
+    assert result.category is FailureCategory.UNKNOWN
+    assert result.message == "Subtask scope is missing."
+    assert result.as_dict()["category"] == "unknown"
+
+
+def test_diagnose_uses_latest_event_of_same_category():
+    result = diagnose_failure(
+        [
+            event("tool_error", "first error", error="first"),
+            event("tool_error", "second error", error="second"),
+        ],
+        "failed",
+    )
+
+    assert result.error == "second"
