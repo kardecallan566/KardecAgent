@@ -300,6 +300,7 @@ class Orchestrator:
                     base_iteration_limit=self.settings.max_iterations,
                     max_retries=self.settings.max_retries,
                     subtask_id=subtask.id if parent_state is not None else None,
+                    execution_events=result_state.events,
                 )
                 result_state.record(
                     "subtask_retry_decision",
