@@ -374,6 +374,8 @@ class AgentLoop:
                     status=result.status.value,
                     events_from_index=retry_start_index,
                 )
+                if persistence_callback is not None:
+                    persistence_callback(result, plan)
             else:
                 if result.status is TaskStatus.RESUMING:
                     result.transition(
