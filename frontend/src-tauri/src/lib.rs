@@ -33,7 +33,7 @@ fn resolve_python_command(python_override: Option<&str>) -> Result<(std::ffi::Os
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(std::ffi::OsString::from)
-        .or_else(|| std::env::var_os("KARDECAGENT_PYTHON"));
+        .or_else(|| std::env::var_os("KARDECAGENT_PYTHON").filter(|value| !value.is_empty()));
     let candidates: Vec<(std::ffi::OsString, Vec<String>)> = if let Some(path) = explicit {
         vec![(path, Vec::new())]
     } else if cfg!(windows) {
@@ -691,7 +691,7 @@ fn start_runtime(
     let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
         || std::env::var_os("KARDECAGENT_PYTHON").is_some();
     let preferred_python = if has_python_override {
-        resolve_python_command(python_executable.as_deref()).ok()
+        Some(resolve_python_command(python_executable.as_deref())?)
     } else {
         None
     };
@@ -824,7 +824,7 @@ fn test_ollama_connection(
     let has_python_override = python_executable.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_some()
         || std::env::var_os("KARDECAGENT_PYTHON").is_some();
     let preferred_python = if has_python_override {
-        resolve_python_command(python_executable.as_deref()).ok()
+        Some(resolve_python_command(python_executable.as_deref())?)
     } else {
         None
     };
@@ -853,18 +853,32 @@ fn test_ollama_connection(
         .output()
         .map_err(|error| format!("Falha ao executar o diagnóstico do Ollama: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let result: Value = serde_json::from_str(stdout.trim())
-        .map_err(|_| format!("Resposta inválida do diagnóstico do Ollama: {}", String::from_utf8_lossy(&output.stderr)))?;
+    let result: Value = serde_json::from_str(stdout.trim()).map_err(|_| {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !output.status.success() && !stderr.trim().is_empty() {
+            format!("Diagnóstico do Ollama falhou: {}", stderr.trim())
+        } else {
+            format!("Resposta inválida do diagnóstico do Ollama (código {}): {}",
+                output.status.code().unwrap_or(-1), stderr.trim())
+        }
+    })?;
     if !output.status.success() {
-        return Err(result.get("error").and_then(Value::as_str).unwrap_or("Falha no teste do Ollama.").to_string());
+        return Err(result.get("error").and_then(Value::as_str)
+            .unwrap_or("Falha no teste do Ollama.").to_string());
     }
     let models = result.get("models").and_then(Value::as_array).ok_or("Lista de modelos inválida.")?
         .iter().filter_map(Value::as_str).map(str::to_string).collect();
+    let version = result.get("version").and_then(Value::as_str)
+        .filter(|value| !value.is_empty()).ok_or("Versão do Ollama ausente.")?;
+    let model = result.get("model").and_then(Value::as_str)
+        .filter(|value| !value.is_empty()).ok_or("Modelo configurado ausente.")?;
+    let response = result.get("response").and_then(Value::as_str)
+        .filter(|value| *value == "KARDECAGENT_OK").ok_or("Resposta de saúde do Ollama inválida.")?;
     Ok(OllamaTestResult {
-        version: result.get("version").and_then(Value::as_str).unwrap_or("unknown").to_string(),
+        version: version.to_string(),
         models,
-        model: result.get("model").and_then(Value::as_str).unwrap_or("").to_string(),
-        response: result.get("response").and_then(Value::as_str).unwrap_or("OK").to_string(),
+        model: model.to_string(),
+        response: response.to_string(),
     })
 }
 

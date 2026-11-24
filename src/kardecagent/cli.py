@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
 from .agent import AgentLoop
@@ -40,6 +41,7 @@ def build_parser():
     tasks.add_argument("--project", required=True)
     studio = subs.add_parser("studio", help="Run the JSONL desktop Studio runtime.")
     studio.add_argument("--project", required=True)
+    subs.add_parser("ollama-health", help="Return a machine-readable Ollama health check for the desktop Studio.")
     models = subs.add_parser("models", help="List installed Ollama models and a curated local catalog.")
     models.add_argument("--installed-only", action="store_true", help="Show only models installed in Ollama.")
     models.add_argument("--inspect", default=None, help="Inspect metadata for an installed model tag.")
@@ -138,6 +140,44 @@ def _doctor(settings: Settings, root) -> int:
         return 0
     except Exception as exc:
         print(f"[FAIL] Local LLM: {exc}")
+        return 1
+
+
+
+def _ollama_health(settings: Settings) -> int:
+    """Emit exactly one JSON object for the Tauri health-check bridge."""
+    try:
+        if settings.llm_provider != "ollama":
+            raise RuntimeError("The Studio health check currently requires the Ollama provider.")
+        client = OllamaClient(
+            settings.ollama_base_url,
+            settings.llm_model,
+            settings.llm_timeout_seconds,
+        )
+        version = client.server_version()
+        models = client.list_models()
+        names = sorted({
+            str(item.get("name"))
+            for item in models
+            if isinstance(item, dict) and item.get("name")
+        })
+        if settings.llm_model not in names:
+            raise RuntimeError(
+                f"Configured model '{settings.llm_model}' is not installed. "
+                "Installed models: " + (", ".join(names) if names else "(none)")
+            )
+        response = client.health_check()
+        if response.content.strip() != "KARDECAGENT_OK":
+            raise RuntimeError("Ollama responded, but the health-check content was unexpected.")
+        print(json.dumps({
+            "version": version,
+            "models": names,
+            "model": settings.llm_model,
+            "response": response.content.strip(),
+        }, ensure_ascii=True))
+        return 0
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}, ensure_ascii=True))
         return 1
 
 
@@ -423,6 +463,8 @@ def main() -> int:
         from .studio_protocol import run_stdio
         root = resolve_project_root(args.project)
         return run_stdio(root, AgentLoop(_build_llm(settings), settings))
+    if args.command == "ollama-health":
+        return _ollama_health(settings)
     if args.command == "benchmark":
         return _benchmark(settings, args.models, args.timeout, args.level)
 

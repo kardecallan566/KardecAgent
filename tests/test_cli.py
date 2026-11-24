@@ -1,6 +1,7 @@
 from pathlib import Path
+from types import SimpleNamespace
 
-from kardecagent.cli import _doctor, _models, _tasks, build_parser
+from kardecagent.cli import _doctor, _models, _ollama_health, _tasks, build_parser
 from kardecagent.config import Settings
 
 
@@ -13,6 +14,7 @@ def test_cli_exposes_first_version_commands():
     assert parser.parse_args(["resume", "--project", ".", "--task", "x"]).command == "resume"
     assert parser.parse_args(["doctor", "--project", "."]).command == "doctor"
     assert parser.parse_args(["tasks", "--project", "."]).command == "tasks"
+    assert parser.parse_args(["ollama-health"]).command == "ollama-health"
     assert parser.parse_args(["models"]).command == "models"
     assert parser.parse_args(["models", "--installed-only"]).installed_only
     assert parser.parse_args(["models", "--inspect", "qwen3.5:4b"]).inspect == "qwen3.5:4b"
@@ -49,3 +51,53 @@ def test_models_command_lists_installed_and_catalog(monkeypatch, capsys):
     assert "[installed]" in output
     assert "qwen3.8-flash-next:125b-mlx" in output
     assert "NOT a lightweight GPU model" in output
+
+
+def test_ollama_health_emits_machine_readable_json(monkeypatch, capsys):
+    from kardecagent import cli
+
+    class FakeOllama:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def server_version(self):
+            return "0.13.0"
+
+        def list_models(self):
+            return [{"name": "qwen2.5-coder:3b"}]
+
+        def health_check(self):
+            return SimpleNamespace(content="KARDECAGENT_OK")
+
+    monkeypatch.setattr(cli, "OllamaClient", FakeOllama)
+
+    assert _ollama_health(Settings()) == 0
+    import json
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "version": "0.13.0",
+        "models": ["qwen2.5-coder:3b"],
+        "model": "qwen2.5-coder:3b",
+        "response": "KARDECAGENT_OK",
+    }
+
+
+def test_ollama_health_returns_json_error_when_model_is_missing(monkeypatch, capsys):
+    from kardecagent import cli
+
+    class FakeOllama:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def server_version(self):
+            return "0.13.0"
+
+        def list_models(self):
+            return [{"name": "other-model"}]
+
+    monkeypatch.setattr(cli, "OllamaClient", FakeOllama)
+
+    assert _ollama_health(Settings()) == 1
+    import json
+    payload = json.loads(capsys.readouterr().out)
+    assert "not installed" in payload["error"]
