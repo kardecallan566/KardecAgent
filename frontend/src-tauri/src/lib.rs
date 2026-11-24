@@ -976,6 +976,200 @@ fn stop_runtime(state: State<'_, RuntimeState>) -> Result<(), String> {
 }
 
 
+#[derive(Serialize)]
+struct GitFileChange {
+    path: String,
+    status: String,
+    staged: bool,
+    unstaged: bool,
+    untracked: bool,
+}
+
+#[derive(Serialize)]
+struct GitStatusResult {
+    is_repo: bool,
+    branch: String,
+    ahead: usize,
+    behind: usize,
+    files: Vec<GitFileChange>,
+}
+
+#[derive(Serialize)]
+struct GitDiffResult {
+    staged: String,
+    working: String,
+}
+
+fn canonical_git_root(project_root: &str) -> Result<std::path::PathBuf, String> {
+    let root = Path::new(project_root).canonicalize()
+        .map_err(|error| format!("Projeto Git inválido: {error}"))?;
+    if !root.is_dir() {
+        return Err("O workspace Git precisa ser uma pasta.".into());
+    }
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&root)
+        .output()
+        .map_err(|error| format!("Git não está disponível: {error}"))?;
+    if !output.status.success() {
+        return Err("A pasta aberta não pertence a um repositório Git.".into());
+    }
+    let repository = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let repository = Path::new(&repository).canonicalize()
+        .map_err(|error| format!("Não foi possível resolver a raiz Git: {error}"))?;
+    if repository != root {
+        return Err("Abra a raiz do repositório Git para usar o painel de alterações.".into());
+    }
+    Ok(root)
+}
+
+fn parse_git_status_text(output: &str) -> GitStatusResult {
+    let mut branch = "HEAD".to_string();
+    let mut ahead = 0usize;
+    let mut behind = 0usize;
+    let mut files = Vec::new();
+    for line in output.lines() {
+        if let Some(header) = line.strip_prefix("## ") {
+            branch = header.split("...").next().unwrap_or(header).to_string();
+            if let Some((_, tracking)) = header.split_once('[') {
+                for part in tracking.trim_end_matches(']').split(", ") {
+                    if let Some(value) = part.strip_prefix("ahead ") {
+                        ahead = value.parse().unwrap_or(0);
+                    } else if let Some(value) = part.strip_prefix("behind ") {
+                        behind = value.parse().unwrap_or(0);
+                    }
+                }
+            }
+            continue;
+        }
+        if line.len() < 4 { continue; }
+        let index = line.chars().next().unwrap_or(' ');
+        let worktree = line.chars().nth(1).unwrap_or(' ');
+        let raw_path = line.get(3..).unwrap_or("").trim();
+        let path = raw_path.rsplit_once(" -> ").map(|(_, new)| new).unwrap_or(raw_path);
+        if path.is_empty() { continue; }
+        let status = format!("{index}{worktree}");
+        files.push(GitFileChange {
+            path: path.to_string(),
+            status: status.clone(),
+            staged: index != ' ' && index != '?',
+            unstaged: worktree != ' ' && worktree != '?',
+            untracked: status == "??",
+        });
+    }
+    GitStatusResult { is_repo: true, branch, ahead, behind, files }
+}
+
+fn git_command(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("Não foi possível iniciar Git: {error}"))
+}
+
+fn ensure_git_success(output: std::process::Output) -> Result<String, String> {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() { format!("Git encerrou com código {}.", output.status.code().unwrap_or(-1)) } else { stderr })
+}
+
+fn git_relative_path(root: &Path, requested: &str) -> Result<String, String> {
+    let relative = Path::new(requested);
+    if requested.trim().is_empty()
+        || relative.is_absolute()
+        || relative.components().any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("Caminho Git relativo inválido.".into());
+    }
+    let candidate = root.join(relative);
+    let parent = candidate.parent().ok_or("Caminho Git sem pasta pai.")?;
+    let canonical_parent = parent.canonicalize()
+        .map_err(|error| format!("Pasta do arquivo não está disponível: {error}"))?;
+    if !canonical_parent.starts_with(root) {
+        return Err("O caminho Git está fora do workspace.".into());
+    }
+    if candidate.exists() {
+        let canonical_file = candidate.canonicalize()
+            .map_err(|error| format!("Não foi possível validar o arquivo: {error}"))?;
+        if !canonical_file.starts_with(root) {
+            return Err("O arquivo Git aponta para fora do workspace.".into());
+        }
+    }
+    Ok(relative.to_string_lossy().into_owned())
+}
+
+fn bounded_git_text(bytes: &[u8]) -> String {
+    const MAX_GIT_OUTPUT_CHARS: usize = 250_000;
+    let text = String::from_utf8_lossy(bytes);
+    if text.chars().count() <= MAX_GIT_OUTPUT_CHARS {
+        text.into_owned()
+    } else {
+        let mut bounded = text.chars().take(MAX_GIT_OUTPUT_CHARS).collect::<String>();
+        bounded.push_str("\n\n[Diff truncado após 250.000 caracteres.]");
+        bounded
+    }
+}
+
+#[tauri::command]
+fn git_status(project_root: String) -> Result<GitStatusResult, String> {
+    let root = canonical_git_root(&project_root)?;
+    let output = git_command(&root, &["-c", "core.quotepath=false", "status", "--short", "--branch", "--untracked-files=all"])?;
+    let text = ensure_git_success(output)?;
+    Ok(parse_git_status_text(&text))
+}
+
+#[tauri::command]
+fn git_diff(project_root: String, file_path: String) -> Result<GitDiffResult, String> {
+    let root = canonical_git_root(&project_root)?;
+    let relative = git_relative_path(&root, &file_path)?;
+    let staged = git_command(&root, &["diff", "--cached", "--no-ext-diff", "--no-color", "--unified=3", "--", &relative])?;
+    let working = git_command(&root, &["diff", "--no-ext-diff", "--no-color", "--unified=3", "--", &relative])?;
+    Ok(GitDiffResult {
+        staged: bounded_git_text(&staged.stdout),
+        working: bounded_git_text(&working.stdout),
+    })
+}
+
+#[tauri::command]
+fn git_stage(project_root: String, file_path: String) -> Result<GitStatusResult, String> {
+    let root = canonical_git_root(&project_root)?;
+    let relative = git_relative_path(&root, &file_path)?;
+    let output = Command::new("git").args(["add", "--"]).arg(&relative)
+        .current_dir(&root).output()
+        .map_err(|error| format!("Não foi possível iniciar git add: {error}"))?;
+    ensure_git_success(output)?;
+    git_status(project_root)
+}
+
+#[tauri::command]
+fn git_unstage(project_root: String, file_path: String) -> Result<GitStatusResult, String> {
+    let root = canonical_git_root(&project_root)?;
+    let relative = git_relative_path(&root, &file_path)?;
+    let output = Command::new("git").args(["restore", "--staged", "--"]).arg(&relative)
+        .current_dir(&root).output()
+        .map_err(|error| format!("Não foi possível iniciar git restore: {error}"))?;
+    ensure_git_success(output)?;
+    git_status(project_root)
+}
+
+#[tauri::command]
+fn git_commit(project_root: String, message: String) -> Result<GitStatusResult, String> {
+    let root = canonical_git_root(&project_root)?;
+    let message = message.trim();
+    if message.is_empty() || message.chars().count() > 2000 {
+        return Err("A mensagem do commit deve conter entre 1 e 2.000 caracteres.".into());
+    }
+    let output = Command::new("git").arg("commit").arg("-m").arg(message)
+        .current_dir(&root).output()
+        .map_err(|error| format!("Não foi possível iniciar git commit: {error}"))?;
+    ensure_git_success(output)?;
+    git_status(project_root)
+}
+
 struct TerminalProcess {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -1216,6 +1410,11 @@ pub fn run() {
             switch_runtime_workspace,
             send_runtime_command,
             stop_runtime,
+            git_status,
+            git_diff,
+            git_stage,
+            git_unstage,
+            git_commit,
             start_integrated_terminal,
             terminal_diagnostics,
             write_integrated_terminal,
