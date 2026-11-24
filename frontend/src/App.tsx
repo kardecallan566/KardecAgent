@@ -503,6 +503,14 @@ function App() {
     setToolEditorDiagnostics([]);
   }, [fileContent]);
 
+  useEffect(() => {
+    setGitStatus(null);
+    setGitSelectedFile(null);
+    setGitDiff(null);
+    setGitError(null);
+    if (bottomPanel === "Alterações" && projectRoot) void refreshGitStatus();
+  }, [projectRoot]);
+
   // Persist the current workspace transcript independently from startup restoration.
   useEffect(() => {
     if (!projectRoot) return;
