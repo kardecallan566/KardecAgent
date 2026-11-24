@@ -541,3 +541,40 @@ body { min-width:900px; }
 .app-shell[data-theme="light"] .editor-completions button.selected,.app-shell[data-theme="light"] .editor-completions button:hover { background:#e8e2f5; }
 .app-shell[data-theme="light"] .editor-problem { background:#fff;border-color:#d8dce5;color:#263449; }
 .app-shell[data-theme="light"] .editor-problem p { color:#39475b; }
+
+
+/* Native Git changes panel */
+.git-panel { display:flex;flex-direction:column;gap:8px;height:100%;min-height:0;padding:8px 10px; }
+.git-toolbar,.git-file-list-head,.git-diff-head { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+.git-toolbar > div { display:flex;align-items:center;gap:12px;min-width:0; }
+.git-toolbar strong { color:#d8d1e7;font-size:11px; }
+.git-toolbar small,.git-footer-note { color:#928b9e;font-size:10px; }
+.git-toolbar button,.git-diff-head button,.git-commit-form button { display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border:1px solid #494052;border-radius:5px;background:#262230;color:#dcd6e8;font-size:10px;cursor:pointer; }
+.git-toolbar button:disabled,.git-diff-head button:disabled,.git-commit-form button:disabled { opacity:.45;cursor:not-allowed; }
+.git-error { padding:7px 9px;border:1px solid #71434a;border-radius:5px;background:#301d25;color:#f0b9c0;font-size:10px; }
+.git-workspace { display:grid;grid-template-columns:minmax(180px,28%) minmax(0,1fr);gap:8px;flex:1;min-height:0; }
+.git-file-list,.git-diff-view { min-height:0;overflow:auto;border:1px solid #332f3d;border-radius:6px;background:#14131b; }
+.git-file-list-head { position:sticky;top:0;padding:8px 9px;border-bottom:1px solid #332f3d;background:#191722;color:#bcb4cb;font-size:10px; }
+.git-file-list-head span { color:#9e94b1; }
+.git-file { display:grid;grid-template-columns:28px minmax(0,1fr);gap:5px 7px;align-items:center;width:100%;padding:7px 8px;border:0;border-bottom:1px solid #272430;background:transparent;color:#d7d1e0;text-align:left;cursor:pointer; }
+.git-file:hover,.git-file.selected { background:#282334; }
+.git-file > span:nth-child(2) { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px; }
+.git-file small { grid-column:2;color:#928b9e;font-size:9px; }
+.git-file-status { grid-row:span 2;color:#c7b4f3;font:600 10px ui-monospace,SFMono-Regular,monospace; }
+.git-diff-view { display:flex;flex-direction:column; }
+.git-diff-head { position:sticky;top:0;padding:7px 9px;border-bottom:1px solid #332f3d;background:#191722; }
+.git-diff-head strong { overflow:hidden;color:#d8d1e7;font-size:10px;text-overflow:ellipsis;white-space:nowrap; }
+.git-diff-head div { display:flex;gap:5px;flex-shrink:0; }
+.git-diff-view pre { overflow:auto;margin:0;padding:9px;color:#c8c2d2;font:10px/1.55 ui-monospace,SFMono-Regular,monospace;white-space:pre; }
+.git-empty { padding:14px;color:#8f899b;font-size:10px; }
+.git-commit-form { display:flex;gap:7px; }
+.git-commit-form input { flex:1;min-width:0;padding:7px 9px;border:1px solid #40394c;border-radius:5px;background:#17151e;color:#e0dbe9;font-size:10px; }
+.git-commit-form button { background:#514071;border-color:#66548b;color:#fff;font-weight:600; }
+.app-shell[data-theme="light"] .git-file-list,.app-shell[data-theme="light"] .git-diff-view { background:#fff;border-color:#d7dce5; }
+.app-shell[data-theme="light"] .git-file { color:#263449;border-color:#e5e8ee; }
+.app-shell[data-theme="light"] .git-file:hover,.app-shell[data-theme="light"] .git-file.selected { background:#e8eaf4; }
+.app-shell[data-theme="light"] .git-diff-view pre { color:#34435a; }
+.app-shell[data-theme="light"] .git-toolbar strong,.app-shell[data-theme="light"] .git-diff-head strong { color:#263449; }
+@media (max-width: 900px) {
+  .git-workspace { grid-template-columns:minmax(130px,36%) minmax(0,1fr); }
+}
