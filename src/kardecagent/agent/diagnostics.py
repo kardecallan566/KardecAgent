@@ -69,6 +69,14 @@ def diagnose_failure(
     task state. Callers remain responsible for approval and side-effect safety.
     """
     event_list = list(events)
+    retry_markers = [
+        index for index, event in enumerate(event_list)
+        if getattr(event, "event_type", None) in {
+            "subtask_resume_retry_started", "resume_retry_started"
+        }
+    ]
+    if retry_markers:
+        event_list = event_list[retry_markers[-1] + 1:]
     priorities = (
         # Prefer the underlying execution failure over a later rollback failure.
         ("model_protocol_stalled", FailureCategory.MODEL_PROTOCOL),
@@ -100,6 +108,15 @@ def diagnose_failure(
     for key in ("repeated_count", "conflict_paths", "recovery_id", "limit", "resume_step"):
         if key in data:
             details[key] = data[key]
+    related_recovery = next(
+        (event for event in reversed(list(events))
+         if getattr(event, "event_type", None) == "recovery_failed"),
+        None,
+    )
+    if related_recovery is not None and related_recovery is not selected:
+        recovery_data = getattr(related_recovery, "data", {}) or {}
+        if recovery_data.get("conflict_paths"):
+            details["recovery_conflict_paths"] = recovery_data["conflict_paths"]
 
     return FailureDiagnostic(
         category=category,
