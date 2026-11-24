@@ -39,22 +39,40 @@ def _local_date_context() -> dict[str, str]:
 
 
 def _repair_mojibake(value: str) -> str:
-    """Repair repeated UTF-8/Windows-1252 decoding errors."""
-    current = value
+    """Repair repeated UTF-8/Windows-1252 decoding errors, including mixed text."""
     markers = ("Ã", "Â", "â€", "ðŸ", "Æ’", "â‚¬")
-    for _ in range(6):
-        current_score = sum(current.count(marker) for marker in markers)
-        if not current_score:
-            break
-        try:
-            candidate = current.encode("cp1252").decode("utf-8")
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            break
-        candidate_score = sum(candidate.count(marker) for marker in markers)
-        if candidate_score >= current_score:
-            break
-        current = candidate
-    return current
+    proper_accents = set("áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ")
+    
+    def repair_fragment(fragment: str) -> str:
+        current = fragment
+        for _ in range(6):
+            score = sum(current.count(marker) for marker in markers)
+            if not score:
+                break
+            try:
+                candidate = current.encode("cp1252").decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                break
+            if sum(candidate.count(marker) for marker in markers) >= score:
+                break
+            current = candidate
+        return current
+
+    # Preserve correctly decoded Portuguese accents as boundaries so one
+    # already-correct character cannot block repair of adjacent corrupted text.
+    pieces: list[str] = []
+    fragment = []
+    for char in value:
+        if char in proper_accents:
+            if fragment:
+                pieces.append(repair_fragment("".join(fragment)))
+                fragment = []
+            pieces.append(char)
+        else:
+            fragment.append(char)
+    if fragment:
+        pieces.append(repair_fragment("".join(fragment)))
+    return "".join(pieces)
 
 
 def _is_date_question(message: str) -> bool:
