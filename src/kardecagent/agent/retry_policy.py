@@ -65,7 +65,8 @@ class RetryPolicy:
         execution_events: Iterable[object] | None = None,
     ) -> RetryDecision:
         """Return a conservative decision and the bounded next iteration limit."""
-        previous_retries = self._count_retries(events, retry_event, subtask_id)
+        event_history = list(events)
+        previous_retries = self._count_retries(event_history, retry_event, subtask_id)
         attempt = previous_retries + 1
         base_limit = max(1, int(base_iteration_limit))
 
@@ -86,7 +87,7 @@ class RetryPolicy:
             return deny(f"failure category '{diagnostic.category.value}' is not retryable")
         if diagnostic.tool == "run_command" and not diagnostic.retryable:
             return deny("non-transient command failures are not retried because commands may have external side effects")
-        observed_events = execution_events if execution_events is not None else events
+        observed_events = list(execution_events) if execution_events is not None else event_history
         if any(
             getattr(event, "event_type", None) == "tool_result"
             and (getattr(event, "data", {}) or {}).get("tool") == "run_command"
