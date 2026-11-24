@@ -336,6 +336,7 @@ class AgentLoop:
                 recovery=recovery,
                 base_iteration_limit=max_iterations or self.settings.max_iterations,
                 max_retries=self.settings.max_retries,
+                execution_events=result.events[recovery_start_index:],
             )
             result.record(
                 "retry_decision",
