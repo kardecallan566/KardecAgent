@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ..config import Settings
-from ..llm import LocalLLMClient
+from ..llm.router import ChatClient
 from ..project import detect_project, project_snapshot
 from ..tools import create_checkpoint, git_current_branch, git_has_uncommitted_changes, git_is_repo
 from .executor import AgentExecutor
@@ -37,7 +37,7 @@ SYSTEM_PROMPT = (
 class AgentLoop:
     """Public task workflow: inspect, plan, obtain approval, then execute."""
 
-    def __init__(self, llm: LocalLLMClient, settings: Settings) -> None:
+    def __init__(self, llm: ChatClient, settings: Settings) -> None:
         self.llm = llm
         self.settings = settings
         self.executor = AgentExecutor(llm, settings)

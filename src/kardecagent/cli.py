@@ -6,7 +6,7 @@ import logging
 
 from .agent import AgentLoop
 from .config import Settings, resolve_project_root
-from .llm import LocalLLMClient, OllamaClient
+from .llm import AdaptiveLLMClient, LocalLLMClient, OllamaClient
 from .llm.benchmark import default_models, run_benchmark, run_agentic_benchmark
 from .llm.catalog import LOCAL_MODEL_CATALOG
 from .project import detect_project
@@ -82,20 +82,33 @@ def _approve_high_risk(plan) -> bool:
 
 
 def _build_llm(settings: Settings):
-    if settings.llm_provider == "ollama":
-        return OllamaClient(
-            settings.ollama_base_url,
-            settings.llm_model,
-            settings.llm_timeout_seconds,
+    def build_client(model: str):
+        if settings.llm_provider == "ollama":
+            return OllamaClient(
+                settings.ollama_base_url,
+                model,
+                settings.llm_timeout_seconds,
+            )
+        if settings.llm_provider in {"openai-compatible", "local"}:
+            return LocalLLMClient(
+                settings.llm_base_url,
+                model,
+                settings.llm_api_key,
+                settings.llm_timeout_seconds,
+            )
+        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+
+    primary = build_client(settings.llm_model)
+    if not settings.llm_routing_enabled:
+        return primary
+    if not settings.llm_fast_model:
+        raise ValueError(
+            "Model routing is enabled but KARDECAGENT_FAST_MODEL is empty. "
+            "Configure a fast model or disable KARDECAGENT_MODEL_ROUTING_ENABLED."
         )
-    if settings.llm_provider in {"openai-compatible", "local"}:
-        return LocalLLMClient(
-            settings.llm_base_url,
-            settings.llm_model,
-            settings.llm_api_key,
-            settings.llm_timeout_seconds,
-        )
-    raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+    if settings.llm_fast_model == settings.llm_model:
+        return primary
+    return AdaptiveLLMClient(primary, build_client(settings.llm_fast_model))
 
 
 def _doctor(settings: Settings, root) -> int:
@@ -122,6 +135,15 @@ def _doctor(settings: Settings, root) -> int:
                 print(f"[FAIL] Ollama model not installed: {settings.llm_model}")
                 print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
                 return 1
+            if settings.llm_routing_enabled:
+                if not settings.llm_fast_model:
+                    print("[FAIL] Model routing enabled but no fast model is configured.")
+                    return 1
+                if settings.llm_fast_model not in names:
+                    print(f"[FAIL] Fast Ollama model not installed: {settings.llm_fast_model}")
+                    print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
+                    return 1
+                print(f"[OK] Adaptive routing: {settings.llm_fast_model} for simple requests; {settings.llm_model} for engineering work")
             response = client.health_check()
         else:
             client = _build_llm(settings)
@@ -166,6 +188,14 @@ def _ollama_health(settings: Settings) -> int:
                 f"Configured model '{settings.llm_model}' is not installed. "
                 "Installed models: " + (", ".join(names) if names else "(none)")
             )
+        if settings.llm_routing_enabled:
+            if not settings.llm_fast_model:
+                raise RuntimeError("Model routing is enabled but KARDECAGENT_FAST_MODEL is empty.")
+            if settings.llm_fast_model not in names:
+                raise RuntimeError(
+                    f"Fast model '{settings.llm_fast_model}' is not installed. "
+                    "Installed models: " + (", ".join(names) if names else "(none)")
+                )
         response = client.health_check()
         if response.content.strip() != "KARDECAGENT_OK":
             raise RuntimeError("Ollama responded, but the health-check content was unexpected.")
@@ -173,6 +203,8 @@ def _ollama_health(settings: Settings) -> int:
             "version": version,
             "models": names,
             "model": settings.llm_model,
+            "fast_model": settings.llm_fast_model or None,
+            "routing_enabled": settings.llm_routing_enabled,
             "response": response.content.strip(),
         }, ensure_ascii=True))
         return 0

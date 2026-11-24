@@ -31,3 +31,27 @@ def test_max_retries_environment_value_cannot_be_negative(monkeypatch):
     monkeypatch.setenv("KARDECAGENT_MAX_RETRIES", "-4")
 
     assert Settings.from_env().max_retries == 0
+
+
+def test_fast_model_and_routing_can_be_enabled_from_environment(monkeypatch):
+    from kardecagent.config import Settings
+
+    monkeypatch.setenv("KARDECAGENT_FAST_MODEL", "qwen3.5:0.8b")
+    monkeypatch.setenv("KARDECAGENT_MODEL_ROUTING_ENABLED", "true")
+    settings = Settings.from_env()
+
+    assert settings.llm_fast_model == "qwen3.5:0.8b"
+    assert settings.llm_routing_enabled is True
+
+
+def test_routing_supports_legacy_environment_prefix(monkeypatch):
+    from kardecagent.config import Settings
+
+    monkeypatch.delenv("KARDECAGENT_FAST_MODEL", raising=False)
+    monkeypatch.delenv("KARDECAGENT_MODEL_ROUTING_ENABLED", raising=False)
+    monkeypatch.setenv("KARDEC_FAST_MODEL", "granite4:3b")
+    monkeypatch.setenv("KARDEC_MODEL_ROUTING_ENABLED", "yes")
+    settings = Settings.from_env()
+
+    assert settings.llm_fast_model == "granite4:3b"
+    assert settings.llm_routing_enabled is True

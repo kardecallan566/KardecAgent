@@ -620,3 +620,8 @@ body { min-width:900px; }
   .project-card { align-items:flex-start;flex-wrap:wrap; }
   .project-card-actions { margin-left:50px; }
 }
+
+
+.settings-toggle { display:flex;align-items:center;gap:9px;color:#c9c3d4;font-size:11px; }
+.settings-toggle input { width:14px;height:14px;accent-color:#9a7ee0; }
+.app-shell[data-theme="light"] .settings-toggle { color:#34435a; }

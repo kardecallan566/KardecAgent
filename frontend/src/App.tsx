@@ -13,7 +13,7 @@ import {
 
 type NavItem = "explorer" | "projects" | "agent" | "tasks" | "approvals";
 type StudioSettings = {
-  ollamaUrl: string; model: string; timeout: number; pythonPath: string; autoStartCore: boolean;
+  ollamaUrl: string; model: string; fastModel: string; modelRoutingEnabled: boolean; timeout: number; pythonPath: string; autoStartCore: boolean;
   editorFontSize: number; editorFontFamily: string; lineHeight: number; tabSize: number; wordWrap: boolean; showLineNumbers: boolean;
   shell: "powershell" | "cmd"; terminalFontSize: number;
   uiTheme: "dark" | "midnight" | "light"; uiFontFamily: string; uiFontSize: number; accentColor: "violet" | "cyan" | "blue" | "green";
@@ -25,7 +25,7 @@ type GitFileChange = { path: string; status: string; staged: boolean; unstaged: 
 type GitStatus = { is_repo: boolean; branch: string; ahead: number; behind: number; files: GitFileChange[]; truncated: boolean };
 type GitDiff = { staged: string; working: string };
 const DEFAULT_SETTINGS: StudioSettings = {
-  ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", timeout: 180, pythonPath: "", autoStartCore: true,
+  ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", fastModel: "", modelRoutingEnabled: false, timeout: 180, pythonPath: "", autoStartCore: true,
   editorFontSize: 13, editorFontFamily: "Shantell Sans", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
   shell: "powershell", terminalFontSize: 12,
   uiTheme: "dark", uiFontFamily: "Shantell Sans", uiFontSize: 13, accentColor: "violet"
@@ -123,7 +123,7 @@ function App() {
   const [memoryItems, setMemoryItems] = useState<Array<{ id: string; scope: "user" | "project"; category: string; content: string; updated_at: string }>>([]);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState<string | null>(null);
-  const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[] } | null>(null);
+  const [ollamaTest, setOllamaTest] = useState<{ ok: boolean; message: string; version?: string; models?: string[]; fastModel?: string | null; routingEnabled?: boolean } | null>(null);
   const [ollamaTesting, setOllamaTesting] = useState(false);
   const [terminalReady, setTerminalReady] = useState(false);
   const [terminalDiagnostics, setTerminalDiagnostics] = useState<TerminalDiagnostics | null>(null);
@@ -749,6 +749,7 @@ function App() {
 
   async function restartCore() {
     if (!projectRoot) { setRuntimeError("Abra um projeto antes de iniciar o Core."); return; }
+    if (settings.modelRoutingEnabled && !settings.fastModel.trim()) { setRuntimeError("Informe o modelo rápido ou desative o roteamento adaptativo."); return; }
     if (runtimeBusy) { setRuntimeError("Aguarde a tarefa atual terminar antes de reiniciar o Core."); return; }
     try {
       setRuntimeStatus("connecting");
@@ -759,6 +760,7 @@ function App() {
       armCoreStartupTimeout();
       await invoke("start_runtime", {
         projectPath: projectRoot, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
+        fastModel: settings.fastModel, modelRoutingEnabled: settings.modelRoutingEnabled,
         llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
       });
       await refreshCoreDiagnostics();
@@ -843,6 +845,7 @@ function App() {
         armCoreStartupTimeout();
         await invoke("start_runtime", {
           projectPath: selected, ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model,
+          fastModel: settings.fastModel, modelRoutingEnabled: settings.modelRoutingEnabled,
           llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null
         });
       } else setRuntimeStatus("offline");
@@ -1411,16 +1414,20 @@ function App() {
                   <div className="settings-section-title"><Wifi size={16}/><strong>Conexão com Ollama</strong></div>
                   <label>Endereço do servidor<input value={settings.ollamaUrl} onChange={event => setSettings(current => ({ ...current, ollamaUrl: event.target.value }))} placeholder="http://127.0.0.1:11434"/></label>
                   <label>Modelo local<input value={settings.model} onChange={event => setSettings(current => ({ ...current, model: event.target.value }))} placeholder="qwen2.5-coder:3b"/></label>
+                  <label>Modelo rápido (opcional)<input value={settings.fastModel} onChange={event => setSettings(current => ({ ...current, fastModel: event.target.value }))} placeholder="qwen3.5:0.8b"/></label>
+                  <label className="settings-toggle"><input type="checkbox" checked={settings.modelRoutingEnabled} onChange={event => setSettings(current => ({ ...current, modelRoutingEnabled: event.target.checked }))}/> Ativar roteamento adaptativo para perguntas simples</label>
+                  <p className="settings-help">Quando ativado, perguntas curtas podem usar o modelo rápido. Planejamento, código e execução continuam no modelo principal. O modelo rápido precisa estar instalado; se falhar, o Core escala para o principal.</p>
+                  {settings.modelRoutingEnabled && !settings.fastModel.trim() && <div className="ollama-test-result error"><AlertCircle size={15}/><div><strong>Modelo rápido obrigatório</strong><p>Informe um modelo rápido instalado antes de salvar o roteamento adaptativo.</p></div></div>}
                   <p className="settings-help">Perfil econômico ativo: contexto de 4.096 tokens, geração limitada e descarregamento do modelo após dois minutos sem uso. O Core é iniciado automaticamente pelo Studio; para gerar respostas, mantenha o Ollama ativo e instale o modelo selecionado.</p>
                   <div className="settings-actions"><button className="settings-secondary" onClick={() => setSettings(current => ({ ...current, model: "qwen2.5-coder:1.5b" }))}>Selecionar modelo ultra-leve (1.5B)</button></div>
                   <label>Tempo limite de resposta (segundos)<input type="number" min={10} max={900} value={settings.timeout} onChange={event => setSettings(current => ({ ...current, timeout: Math.max(10, Math.min(900, Number(event.target.value) || 180)) }))}/></label>
                   <div className="settings-actions"><button className="settings-secondary" disabled={ollamaTesting} onClick={async () => {
                     setOllamaTesting(true); setOllamaTest(null);
-                    try { const result = await invoke<{ version: string; models: string[]; model: string; response: string }>("test_ollama_connection", { ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model, llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null }); setOllamaTest({ ok: true, version: result.version, models: result.models, message: result.response }); }
+                    try { const result = await invoke<{ version: string; models: string[]; model: string; fast_model: string | null; routing_enabled: boolean; response: string }>("test_ollama_connection", { ollamaBaseUrl: settings.ollamaUrl, llmModel: settings.model, fastModel: settings.fastModel, modelRoutingEnabled: settings.modelRoutingEnabled, llmTimeoutSeconds: settings.timeout, pythonExecutable: settings.pythonPath.trim() || null }); setOllamaTest({ ok: true, version: result.version, models: result.models, fastModel: result.fast_model, routingEnabled: result.routing_enabled, message: result.response }); }
                     catch (error) { setOllamaTest({ ok: false, message: String(error) }); }
                     finally { setOllamaTesting(false); }
                   }}><Wifi size={14}/>{ollamaTesting ? "Testando modelo..." : "Testar conexão e modelo"}</button></div>
-                  {ollamaTest && <div className={ollamaTest.ok ? "ollama-test-result success" : "ollama-test-result error"}>{ollamaTest.ok ? <CheckCircle size={15}/> : <AlertCircle size={15}/>}<div><strong>{ollamaTest.ok ? "Ollama respondeu corretamente" : "Falha na conexão"}</strong><p>{ollamaTest.message}</p>{ollamaTest.version && <small>Ollama {ollamaTest.version} · Modelo {settings.model}</small>}{ollamaTest.models && <small>Modelos instalados: {ollamaTest.models.join(", ") || "nenhum"}</small>}</div></div>}
+                  {ollamaTest && <div className={ollamaTest.ok ? "ollama-test-result success" : "ollama-test-result error"}>{ollamaTest.ok ? <CheckCircle size={15}/> : <AlertCircle size={15}/>}<div><strong>{ollamaTest.ok ? "Ollama respondeu corretamente" : "Falha na conexão"}</strong><p>{ollamaTest.message}</p>{ollamaTest.version && <small>Ollama {ollamaTest.version} · Modelo {settings.model}</small>}{ollamaTest.models && <small>Modelos instalados: {ollamaTest.models.join(", ") || "nenhum"}</small>}{ollamaTest.routingEnabled && <small>Roteamento ativo · modelo rápido: {ollamaTest.fastModel || "não configurado"}</small>}</div></div>}
                 </div>
                 <div className="settings-section">
                   <div className="settings-section-title"><Bot size={16}/><strong>Ambiente do Core</strong></div>
@@ -1502,8 +1509,13 @@ function App() {
             </div>
           </div>
           <footer className="settings-footer"><span>As preferências são salvas localmente neste computador.</span><button className="settings-primary" onClick={() => {
+            if (settings.modelRoutingEnabled && !settings.fastModel.trim()) {
+              setSettingsSection("core");
+              setOllamaTest({ ok: false, message: "Informe um modelo rápido instalado ou desative o roteamento adaptativo." });
+              return;
+            }
             const previous = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("kardecagent.studio.settings") || "{}") };
-            const connectionChanged = previous.ollamaUrl !== settings.ollamaUrl || previous.model !== settings.model || previous.timeout !== settings.timeout || previous.pythonPath !== settings.pythonPath;
+            const connectionChanged = previous.ollamaUrl !== settings.ollamaUrl || previous.model !== settings.model || previous.fastModel !== settings.fastModel || previous.modelRoutingEnabled !== settings.modelRoutingEnabled || previous.timeout !== settings.timeout || previous.pythonPath !== settings.pythonPath;
             const startupChanged = previous.autoStartCore !== settings.autoStartCore;
             localStorage.setItem("kardecagent.studio.settings", JSON.stringify(settings));
             setOllamaTest(null);
