@@ -1009,7 +1009,7 @@ fn send_runtime_command(state: State<'_, RuntimeState>, mut message: Value) -> R
     // The runtime owns one canonical workspace. Do not trust a raw frontend path here:
     // Windows may represent the same directory differently (case, junctions, long paths).
     // Inject the exact workspace associated with this live process for task commands.
-    if matches!(message.get("type").and_then(Value::as_str), Some("task.submit") | Some("task.resume")) {
+    if matches!(message.get("type").and_then(Value::as_str), Some("task.submit") | Some("task.resume") | Some("editor.semantic")) {
         let payload = message.get_mut("payload")
             .and_then(Value::as_object_mut)
             .ok_or("Payload do comando inválido.")?;
