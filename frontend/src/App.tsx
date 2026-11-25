@@ -829,8 +829,13 @@ function App() {
 
   function requestSymbolRename(source: string, cursor: number) {
     if (!projectRoot || !openedPath || runtimeStatus !== "online") return;
-    if (fileDirty) {
-      setSemanticNotice("Salve o arquivo antes de renomear símbolos (Ctrl+S).");
+    const extension = openedPath.split(".").pop()?.toLowerCase() || "";
+    if (extension !== "py" && extension !== "pyi") {
+      setSemanticNotice("Rename Symbol semântico está disponível apenas para Python.");
+      return;
+    }
+    if (openTabs.some(tab => tab.dirty)) {
+      setSemanticNotice("Salve todos os arquivos abertos antes de renomear símbolos (Ctrl+S).");
       return;
     }
     const before = source.slice(0, cursor);
