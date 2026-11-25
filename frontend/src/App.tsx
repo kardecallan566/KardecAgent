@@ -103,9 +103,12 @@ function decodeChatEntities(value: string): string {
       const point = code[0].toLowerCase() === "x" ? Number.parseInt(code.slice(1), 16) : Number.parseInt(code, 10);
       return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : _match;
     })
-    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_match, name: string) => ({
-      amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " "
-    }[name.toLowerCase()] || _match));
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_match, name: string) => {
+      const entities: Record<string, string> = {
+        amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " "
+      };
+      return entities[name.toLowerCase()] || _match;
+    });
 }
 
 function taskStatusLabel(status: string): string {
