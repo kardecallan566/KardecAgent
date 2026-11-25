@@ -82,3 +82,20 @@ def test_python_syntax_diagnostics_are_returned_when_jedi_is_available(tmp_path:
     assert result["action"] == "diagnostics"
     assert result["items"]
     assert result["items"][0]["line"] == 1
+
+
+def test_python_signature_help_returns_function_parameters_when_jedi_is_available(tmp_path: Path) -> None:
+    pytest.importorskip("jedi")
+    root = tmp_path / "project"
+    root.mkdir()
+    source = root / "main.py"
+    code = "def add(first, second):\\n    return first + second\\n\\nadd(1, "
+    source.write_text(code, encoding="utf-8")
+
+    result = python_semantic_request("signature", code, str(source), str(root), 4, 7)
+
+    assert result["available"] is True
+    assert result["action"] == "signature"
+    assert result["items"]
+    assert result["items"][0]["name"] == "add"
+    assert result["items"][0]["parameters"][:2] == ["first", "second"]
