@@ -117,13 +117,3 @@ def test_short_plans_are_not_decomposed_for_single_file_edits(tmp_path):
     assert manager.should_decompose(["A", "B", "C", "D"], 500) is False
     assert manager.should_decompose(["A", "B", "C", "D", "E"], 79) is False
     assert manager.should_decompose(["A", "B", "C", "D", "E"], 80) is True
-
-
-def test_short_plans_do_not_trigger_subtask_decomposition(tmp_path):
-    from kardecagent.tasks.manager import SubtaskManager
-
-    manager = SubtaskManager(tmp_path)
-    assert manager.should_decompose(["Inspect target", "Append line", "Verify"], 500) is False
-    assert manager.should_decompose(["A", "B", "C", "D"], 500) is False
-    assert manager.should_decompose(["A", "B", "C", "D", "E"], 79) is False
-    assert manager.should_decompose(["A", "B", "C", "D", "E"], 80) is True
