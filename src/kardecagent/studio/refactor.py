@@ -78,6 +78,8 @@ class RenamePreviewManager:
         project = jedi.Project(path=str(root), added_sys_path=[str(root)])
         script = jedi.Script(code=source, path=str(target), project=project)
         refactoring = script.rename(line=line, column=column, new_name=new_name)
+        if list(refactoring.get_renames()):
+            raise ValueError("This symbol operation would rename a module or file; use the file rename workflow instead.")
         changed_files = refactoring.get_changed_files()
         if not changed_files:
             raise ValueError("Jedi did not find any files to change at this symbol.")
