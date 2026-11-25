@@ -654,3 +654,5 @@ body { min-width:900px; }
 .agent-chat-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-remove-button { opacity: .85; }
 .task-remove-button:hover { opacity: 1; }
+
+.editor-signature-help{display:flex;flex-direction:column;gap:5px;padding:8px 14px;border-bottom:1px solid #34303f;background:#211e2a;color:#c9c2d8;font-size:11px}.editor-signature-help strong{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e4dcff}.editor-signature-help span{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#a9a2b8}.editor-signature-help em{font-style:normal}.editor-signature-help em.active{color:#fff;background:#57468a;border-radius:3px;padding:1px 2px}.editor-signature-help small{color:#858b98;white-space:pre-wrap;max-height:48px;overflow:hidden}
