@@ -312,7 +312,7 @@ function App() {
         setSemanticNotice(result.message || null);
         if (request.action === "complete") {
           if (editorRef.current?.value !== request.source) return;
-          const prefix = request.source.slice(0, request.cursor).match(/[A-Za-z_$][\\w$]*$/)?.[0] || "";
+          const prefix = request.source.slice(0, request.cursor).match(/[A-Za-z_$][\w$]*$/)?.[0] || "";
           const semanticItems: EditorCompletion[] = result.items
             .filter(item => typeof item.name === "string" && item.name && item.name.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase()) && item.name !== prefix)
             .map(item => ({
@@ -719,7 +719,7 @@ function App() {
     setEditorCompletions(result.items);
     setActiveCompletionIndex(0);
     const extension = openedPath.split(".").pop()?.toLowerCase() || "";
-    const prefix = source.slice(0, cursor).match(/[A-Za-z_$][\\w$]*$/)?.[0] || "";
+    const prefix = source.slice(0, cursor).match(/[A-Za-z_$][\w$]*$/)?.[0] || "";
     if ((extension === "py" || extension === "pyi") && (force || prefix.length >= 2)) {
       requestPythonSemantic("complete", source, cursor);
     }
