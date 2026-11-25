@@ -543,6 +543,47 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     },
                 })
             continue
+        if message.get("schema_version") == 1 and message.get("type") == "task.delete":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            requested_root = payload.get("project_root")
+            requested_task_id = payload.get("task_id")
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            try:
+                workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+            except (OSError, RuntimeError):
+                workspace_matches = False
+            if not workspace_matches:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "project_root does not match the active runtime workspace."})
+                continue
+            if not isinstance(requested_task_id, str) or not requested_task_id.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "task_id is required."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            try:
+                deleted = TaskStore(root).delete_by_id(requested_task_id)
+                if not deleted:
+                    raise PersistenceError("Persisted task was not found in the workspace history.")
+                _write({"type": "command.accepted", "schema_version": 1, "command_id": command_identifier, "accepted": True})
+                _write({
+                    "type": "task.deleted",
+                    "schema_version": 1,
+                    "event_id": f"{requested_task_id}:deleted:{command_identifier}",
+                    "command_id": command_identifier,
+                    "task_id": requested_task_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception as exc:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": str(exc)[:500]})
+            continue
         if message.get("schema_version") == 1 and message.get("type") == "task.resume":
             command_identifier = message.get("command_id")
             payload = message.get("payload")
