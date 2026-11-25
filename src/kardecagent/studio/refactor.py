@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 MAX_SOURCE_BYTES = 1_000_000
-MAX_PREVIEWS = 10
+MAX_PREVIEWS = 5
+MAX_RENAME_FILES = 100
+MAX_TOTAL_RENAME_BYTES = 10_000_000
 MAX_DIFF_CHARS = 40_000
 
 
@@ -81,11 +83,14 @@ class RenamePreviewManager:
         if list(refactoring.get_renames()):
             raise ValueError("This symbol operation would rename a module or file; use the file rename workflow instead.")
         changed_files = refactoring.get_changed_files()
+        if len(changed_files) > MAX_RENAME_FILES:
+            raise ValueError(f"Rename Symbol is limited to {MAX_RENAME_FILES} files per operation.")
         if not changed_files:
             raise ValueError("Jedi did not find any files to change at this symbol.")
 
         pending: dict[Path, tuple[str, bytes, int]] = {}
         display_changes: list[dict[str, Any]] = []
+        total_bytes = 0
         for changed_path, changed_file in changed_files.items():
             path = Path(changed_path).resolve(strict=True)
             if not path.is_relative_to(root) or path.suffix.lower() not in {".py", ".pyi"}:
@@ -105,10 +110,13 @@ class RenamePreviewManager:
             if not isinstance(new_code, str):
                 raise RuntimeError("The installed Jedi version did not expose the refactored source.")
             encoded = new_code.encode("utf-8")
+            total_bytes += len(current) + len(encoded)
+            if total_bytes > MAX_TOTAL_RENAME_BYTES:
+                raise ValueError("Rename Symbol exceeds the 10 MB combined file-size limit.")
             relative = path.relative_to(root).as_posix()
             pending[path] = (_digest(current), encoded, os.stat(path).st_mode)
             display_changes.append({
-                "path": relative,
+                "path": relative[:500],
                 "before_bytes": len(current),
                 "after_bytes": len(encoded),
             })
