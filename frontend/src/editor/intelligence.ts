@@ -14,7 +14,7 @@ export interface EditorDiagnostic {
   severity: "error" | "warning" | "info";
   code?: string;
   message: string;
-  source: "json" | "ruff" | "eslint";
+  source: "json" | "ruff" | "eslint" | "jedi";
 }
 
 const KEYWORDS: Record<string, string[]> = {

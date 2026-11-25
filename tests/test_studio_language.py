@@ -55,3 +55,30 @@ def test_missing_jedi_is_a_supported_fallback(tmp_path: Path, monkeypatch: pytes
     result = python_semantic_request("complete", "value = 1", str(source), str(root), 1, 5)
     assert result["available"] is False
     assert result["items"] == []
+
+
+
+def test_rejects_unsupported_semantic_action(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    source = root / "main.py"
+    source.write_text("value = 1", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unsupported semantic action"):
+        python_semantic_request("rename", "value = 1", str(source), str(root), 1, 0)
+
+
+def test_python_syntax_diagnostics_are_returned_when_jedi_is_available(tmp_path: Path) -> None:
+    pytest.importorskip("jedi")
+    root = tmp_path / "project"
+    root.mkdir()
+    source = root / "main.py"
+    code = "def broken(:\n    pass\n"
+    source.write_text(code, encoding="utf-8")
+
+    result = python_semantic_request("diagnostics", code, str(source), str(root), 1, 0)
+
+    assert result["available"] is True
+    assert result["action"] == "diagnostics"
+    assert result["items"]
+    assert result["items"][0]["line"] == 1

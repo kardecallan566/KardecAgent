@@ -362,3 +362,102 @@ def test_run_stdio_emits_heartbeat_while_agent_execution_is_blocked(monkeypatch,
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
     assert any(item["type"] == "runtime.heartbeat" for item in messages)
     assert all(item.get("schema_version") == 1 for item in messages)
+
+
+
+def test_run_stdio_routes_semantic_editor_request_to_provider(monkeypatch, tmp_path):
+    source = tmp_path / "main.py"
+    source.write_text("value = 1", encoding="utf-8")
+    command = {
+        "type": "editor.semantic",
+        "schema_version": 1,
+        "command_id": "semantic-1",
+        "payload": {
+            "project_root": str(tmp_path),
+            "file_path": str(source),
+            "source": "value = 1",
+            "action": "complete",
+            "line": 1,
+            "column": 5,
+        },
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+    monkeypatch.setattr(
+        studio_protocol,
+        "python_semantic_request",
+        lambda action, source, file_path, project_root, line, column: {
+            "available": True,
+            "action": action,
+            "items": [{"name": "value", "insert_text": "value"}],
+            "message": None,
+        },
+    )
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    response = next(item for item in messages if item["type"] == "editor.semantic.response")
+    assert response["command_id"] == "semantic-1"
+    assert response["payload"]["items"][0]["name"] == "value"
+
+
+def test_run_stdio_rejects_semantic_request_for_another_workspace(monkeypatch, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    source = other / "main.py"
+    source.write_text("value = 1", encoding="utf-8")
+    command = {
+        "type": "editor.semantic",
+        "schema_version": 1,
+        "command_id": "semantic-outside",
+        "payload": {
+            "project_root": str(other),
+            "file_path": str(source),
+            "source": "value = 1",
+            "action": "complete",
+            "line": 1,
+            "column": 5,
+        },
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    response = next(item for item in messages if item["type"] == "editor.semantic.response")
+    assert response["payload"]["available"] is False
+    assert "active runtime workspace" in response["payload"]["message"]
+
+
+
+def test_read_message_allows_bounded_large_semantic_source(monkeypatch):
+    command = {
+        "type": "editor.semantic",
+        "schema_version": 1,
+        "command_id": "large-semantic",
+        "payload": {"source": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    parsed = studio_protocol._read_message()
+    assert parsed["type"] == "editor.semantic"
+    assert len(parsed["payload"]["source"]) > studio_protocol.MAX_MESSAGE_BYTES
+
+
+def test_read_message_keeps_regular_commands_at_64_kib(monkeypatch):
+    command = {
+        "type": "chat.message",
+        "schema_version": 1,
+        "command_id": "oversized-chat",
+        "payload": {"message": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    with pytest.raises(studio_protocol.StudioProtocolError, match="64 KiB"):
+        studio_protocol._read_message()

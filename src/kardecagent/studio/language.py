@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 MAX_SOURCE_BYTES = 1_000_000
-MAX_RESULTS = 100
+MAX_RESULTS = 25
 
 
 def _validated_context(
@@ -31,12 +31,12 @@ def _validated_context(
 def _location(item: Any) -> dict[str, Any]:
     module_path = getattr(item, "module_path", None)
     return {
-        "name": str(getattr(item, "name", "") or ""),
-        "path": str(module_path) if module_path else None,
+        "name": str(getattr(item, "name", "") or "")[:100],
+        "path": str(module_path)[:500] if module_path else None,
         "line": getattr(item, "line", None),
         "column": getattr(item, "column", None),
-        "description": str(getattr(item, "description", "") or "")[:500],
-        "kind": str(getattr(item, "type", "") or ""),
+        "description": str(getattr(item, "description", "") or "")[:150],
+        "kind": str(getattr(item, "type", "") or "")[:40],
     }
 
 
@@ -49,7 +49,7 @@ def python_semantic_request(
     column: int,
 ) -> dict[str, Any]:
     """Run one bounded semantic request; never raises optional-tool errors."""
-    if action not in {"complete", "definition", "references"}:
+    if action not in {"complete", "definition", "references", "diagnostics"}:
         raise ValueError("Unsupported semantic action.")
     root, path = _validated_context(source, file_path, project_root, line, column)
 
@@ -70,20 +70,33 @@ def python_semantic_request(
             values = script.complete(line=line, column=column)
             items = [
                 {
-                    "name": str(item.name),
-                    "insert_text": str(item.name),
-                    "kind": str(getattr(item, "type", "") or ""),
-                    "detail": str(getattr(item, "description", "") or "")[:500],
-                    "doc": str(item.docstring(raw=True) or "")[:1000],
+                    "name": str(item.name)[:100],
+                    "insert_text": str(item.name)[:100],
+                    "kind": str(getattr(item, "type", "") or "")[:40],
+                    "detail": str(getattr(item, "description", "") or "")[:120],
+                    "doc": str(item.docstring(raw=True) or "")[:180],
                 }
                 for item in values[:MAX_RESULTS]
             ]
         elif action == "definition":
             values = script.goto(line=line, column=column, follow_imports=True, follow_builtin_imports=False)
             items = [_location(item) for item in values[:MAX_RESULTS]]
-        else:
+        elif action == "references":
             values = script.get_references(line=line, column=column, include_builtins=False)
             items = [_location(item) for item in values[:MAX_RESULTS]]
+        else:
+            values = script.get_syntax_errors()
+            items = [
+                {
+                    "name": "",
+                    "path": str(path)[:500],
+                    "line": getattr(item, "line", None),
+                    "column": getattr(item, "column", 0),
+                    "description": str(item.get_message() if callable(getattr(item, "get_message", None)) else getattr(item, "message", "Python syntax error"))[:150],
+                    "kind": "error",
+                }
+                for item in values[:MAX_RESULTS]
+            ]
         return {"available": True, "action": action, "items": items, "message": None}
     except Exception as exc:  # Jedi reports parse and project errors with several exception types.
         return {
