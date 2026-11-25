@@ -16,6 +16,7 @@ from .studio.language import python_semantic_request
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
+MAX_SEMANTIC_MESSAGE_BYTES = 6_200_000
 MAX_EVENT_BYTES = 256 * 1024
 MAX_INSTRUCTION_LENGTH = 8000
 MAX_SEEN_COMMAND_IDS = 1000
@@ -146,20 +147,27 @@ def _write(message: dict) -> None:
 
 
 def _read_message() -> dict:
-    line = sys.stdin.readline(MAX_MESSAGE_BYTES + 1)
+    line = sys.stdin.readline(MAX_SEMANTIC_MESSAGE_BYTES + 1)
     if not line:
         raise EOFError("Studio disconnected while waiting for a command or approval.")
-    if len(line.encode("utf-8")) > MAX_MESSAGE_BYTES:
-        while line and not line.endswith("\n"):
-            line = sys.stdin.readline(MAX_MESSAGE_BYTES + 1)
-        raise StudioProtocolError("Command exceeds the 64 KiB protocol limit.")
+    encoded_size = len(line.encode("utf-8"))
+    if encoded_size > MAX_SEMANTIC_MESSAGE_BYTES:
+        while line and not line.endswith("\\n"):
+            line = sys.stdin.readline(MAX_SEMANTIC_MESSAGE_BYTES + 1)
+        raise StudioProtocolError("Command exceeds the bounded 6 MiB protocol limit.")
     try:
         message = json.loads(line)
     except json.JSONDecodeError as exc:
+        if encoded_size > MAX_MESSAGE_BYTES:
+            raise StudioProtocolError("Command exceeds the 64 KiB protocol limit.") from exc
         raise StudioProtocolError("Command must be a valid JSON object.") from exc
     if not isinstance(message, dict):
         raise StudioProtocolError("Command must be a JSON object.")
+    limit = MAX_SEMANTIC_MESSAGE_BYTES if message.get("type") == "editor.semantic" else MAX_MESSAGE_BYTES
+    if encoded_size > limit:
+        raise StudioProtocolError("Command exceeds the 64 KiB protocol limit.")
     return message
+
 
 
 def _approval(
