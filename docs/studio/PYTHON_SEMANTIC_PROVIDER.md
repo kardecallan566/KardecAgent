@@ -41,7 +41,7 @@ informational notice when semantic features are requested.
 
 - Python and stub files only; source is capped at 1 MB.
 - The file must resolve inside the selected workspace.
-- Results are capped at 100 and descriptions/docstrings are bounded.
+- Results are capped at 25 and descriptions/docstrings are bounded to keep JSONL responses below the desktop protocol frame limit.
 - Builtin navigation is disabled; references exclude builtins.
 - The Core validates the workspace root and request identity.
 - Semantic operations are read-only and do not execute project code.
