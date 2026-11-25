@@ -26,7 +26,7 @@ class SubtaskManager:
         self.max_depth = max_depth
 
     def should_decompose(self, plan_steps: list[str], project_file_count: int) -> bool:
-        return len(plan_steps) >= 4 or project_file_count >= 80
+        return len(plan_steps) >= 5 and project_file_count >= 80
 
     def parse_decomposition(self, payload: str | dict[str, Any]) -> TaskBoard:
         try:
