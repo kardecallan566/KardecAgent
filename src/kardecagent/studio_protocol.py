@@ -12,6 +12,7 @@ from .agent.loop import AgentLoop
 from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
+from .studio.language import python_semantic_request
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -475,6 +476,64 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             except Exception as exc:
                 reason = "timeout" if "timeout" in type(exc).__name__.lower() else "model_error"
                 _write({"type": "chat.failed", "schema_version": 1, "command_id": command_identifier, "payload": {"reason": reason, "message": f"Falha na conversa ({reason}): {exc}", "retryable": reason == "timeout"}})
+            continue
+        if message.get("schema_version") == 1 and message.get("type") == "editor.semantic":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "command.rejected", "schema_version": 1, "reason": "command_id is required."})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            try:
+                requested_root = payload.get("project_root")
+                requested_file = payload.get("file_path")
+                source = payload.get("source")
+                action = payload.get("action")
+                line = payload.get("line")
+                column = payload.get("column")
+                try:
+                    workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+                except (OSError, RuntimeError):
+                    workspace_matches = False
+                if not workspace_matches:
+                    raise ValueError("project_root does not match the active runtime workspace.")
+                if not isinstance(requested_file, str) or not requested_file.strip():
+                    raise ValueError("file_path is required.")
+                if not isinstance(source, str):
+                    raise ValueError("source must be text.")
+                if len(source.encode("utf-8")) > 1_000_000:
+                    raise ValueError("Source exceeds the 1 MB semantic-analysis limit.")
+                if isinstance(line, bool) or not isinstance(line, int):
+                    raise ValueError("line must be an integer.")
+                if isinstance(column, bool) or not isinstance(column, int):
+                    raise ValueError("column must be an integer.")
+                result = python_semantic_request(
+                    action, source, requested_file, str(root), line, column
+                )
+                _write({
+                    "type": "editor.semantic.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "payload": result,
+                })
+            except Exception as exc:
+                _write({
+                    "type": "editor.semantic.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "payload": {
+                        "available": False,
+                        "action": action if isinstance(action, str) else "",
+                        "items": [],
+                        "message": str(exc)[:500],
+                    },
+                })
             continue
         if message.get("schema_version") == 1 and message.get("type") == "task.resume":
             command_identifier = message.get("command_id")
