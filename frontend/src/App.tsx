@@ -329,7 +329,6 @@ function App() {
           setEditorCompletions([...merged.values()].slice(0, 20));
           setActiveCompletionIndex(0);
         } else if (request.action === "diagnostics") {
-          if (editorRef.current?.value !== request.source) return;
           const diagnostics: EditorDiagnostic[] = result.items.map(item => ({
             file: item.path || request.path,
             line: Math.max(1, item.line || 1),
@@ -768,6 +767,8 @@ function App() {
   }
 
   useEffect(() => {
+    const previousDiagnosticsRequest = latestSemanticRequest.current.diagnostics;
+    if (previousDiagnosticsRequest) semanticRequests.current.delete(previousDiagnosticsRequest);
     if (!openedPath || runtimeStatus !== "online") return;
     const extension = openedPath.split(".").pop()?.toLowerCase() || "";
     if (extension !== "py" && extension !== "pyi") {
