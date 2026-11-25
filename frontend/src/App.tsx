@@ -32,8 +32,8 @@ const DEFAULT_SETTINGS: StudioSettings = {
 };
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 type RecentProject = { path: string; name: string; lastOpenedAt: string };
-type SemanticAction = "complete" | "definition" | "references" | "diagnostics";
-type SemanticItem = { name?: string; insert_text?: string; kind?: string; detail?: string; doc?: string; path?: string | null; line?: number | null; column?: number | null; description?: string };
+type SemanticAction = "complete" | "definition" | "references" | "diagnostics" | "signature";
+type SemanticItem = { name?: string; insert_text?: string; kind?: string; detail?: string; doc?: string; path?: string | null; line?: number | null; column?: number | null; description?: string; parameters?: string[]; active_parameter?: number | null };
 type SemanticResponse = { available: boolean; action: SemanticAction; items: SemanticItem[]; message?: string | null };
 
 function ExplorerEntry({ entry, projectRoot, onOpenFile, refreshKey }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void; refreshKey: number }) {
@@ -95,6 +95,57 @@ function importedGoogleFontNames(): string[] {
     const fonts = JSON.parse(localStorage.getItem("kardecagent.studio.googleFonts") || "{}");
     return fonts && typeof fonts === "object" ? Object.keys(fonts) : [];
   } catch { return []; }
+}
+
+function decodeChatEntities(value: string): string {
+  return value
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_match, code: string) => {
+      const point = code[0].toLowerCase() === "x" ? Number.parseInt(code.slice(1), 16) : Number.parseInt(code, 10);
+      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : _match;
+    })
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_match, name: string) => {
+      const entities: Record<string, string> = {
+        amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " "
+      };
+      return entities[name.toLowerCase()] || _match;
+    });
+}
+
+function renderInlineMarkdown(value: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  const pattern = /`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > cursor) nodes.push(value.slice(cursor, match.index));
+    const token = match[0];
+    if (token.startsWith("`")) nodes.push(<code className="chat-inline-code" key={match.index}>{token.slice(1, -1)}</code>);
+    else if (token.startsWith("**")) nodes.push(<strong key={match.index}>{token.slice(2, -2)}</strong>);
+    else nodes.push(<em key={match.index}>{token.slice(1, -1)}</em>);
+    cursor = match.index + token.length;
+  }
+  if (cursor < value.length) nodes.push(value.slice(cursor));
+  return <>{nodes}</>;
+}
+
+function renderChatMessage(value: string): ReactNode {
+  const source = decodeChatEntities(value);
+  const nodes: ReactNode[] = [];
+  const pattern = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > cursor) {
+      const prose = source.slice(cursor, match.index);
+      nodes.push(<p key={"text-" + cursor}>{renderInlineMarkdown(prose)}</p>);
+    }
+    nodes.push(<pre className="chat-code-block" key={"code-" + match.index}><code>{match[2].replace(/\n$/, "")}</code></pre>);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < source.length || nodes.length === 0) {
+    nodes.push(<p key={"text-" + cursor}>{renderInlineMarkdown(source.slice(cursor))}</p>);
+  }
+  return <div className="agent-chat-message-body">{nodes}</div>;
 }
 
 function taskStatusLabel(status: string): string {
@@ -181,6 +232,8 @@ function App() {
   const latestSemanticRequest = useRef<Partial<Record<SemanticAction, string>>>({});
   const semanticCompletionTimer = useRef<number | null>(null);
   const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
+  const [signatureHelp, setSignatureHelp] = useState<SemanticItem | null>(null);
+  const signatureTimer = useRef<number | null>(null);
   const [pendingSemanticJump, setPendingSemanticJump] = useState<{ path: string; line: number; column: number } | null>(null);
   const [fileDirty, setFileDirty] = useState(false);
   const [fileSaving, setFileSaving] = useState(false);
@@ -311,7 +364,10 @@ function App() {
           return;
         }
         setSemanticNotice(result.message || null);
-        if (request.action === "complete") {
+        if (request.action === "signature") {
+          if (editorRef.current?.value !== request.source) return;
+          setSignatureHelp(result.items[0] || null);
+        } else if (request.action === "complete") {
           if (editorRef.current?.value !== request.source) return;
           const prefix = request.source.slice(0, request.cursor).match(/[A-Za-z_$][\w$]*$/)?.[0] || "";
           const semanticItems: EditorCompletion[] = result.items
@@ -431,6 +487,9 @@ function App() {
           setActiveRuntimeStep(null);
         }
         setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
+      } else if (message.type === "task.deleted") {
+        setRuntimeTasks(items => items.filter(task => task.id !== message.task_id));
+        setRuntimeEvents(items => [...items, { id: message.event_id || crypto.randomUUID(), type: message.type, message: "Tarefa removida do histórico." }].slice(-100));
       } else if (message.type === "task.created") {
         // Restored records are history only; they are not live executions.
         setRuntimeBusy(!message.payload?.restored);
@@ -443,14 +502,19 @@ function App() {
       } else if (message.type === "task.completed" || message.type === "task.failed") {
         // Startup history replay is informational; it must not look like a new
         // assistant answer or alter the state of a task currently running.
-        if (!message.payload?.restored) {
+        const restoredExecution = Boolean(message.payload?.restored)
+          || String(message.execution_id || "").startsWith("restored:");
+        if (!restoredExecution) {
           setRuntimeBusy(false);
+          // Live task results are useful conversation output. Historical terminal
+          // events (including older runtimes without payload.restored) stay in Tasks.
+          const summary = message.payload?.result_summary || message.payload?.message
+            || (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
           setChatMessages(items => [...items, {
             id: message.event_id || crypto.randomUUID(),
             role: "assistant" as const,
-            text: message.payload?.result_summary || message.payload?.message ||
-              (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou."),
-            createdAt: new Date().toISOString()
+            text: summary,
+            createdAt: message.timestamp || new Date().toISOString()
           }].slice(-100));
           setPendingApproval(null);
           setApprovalSubmitting(false);
@@ -1323,6 +1387,20 @@ function App() {
     }
   }
 
+  async function removeTask(task: { id: string; executionId: string; title: string }) {
+    if (runtimeStatus !== "online" || ["Em execução", "Validando", "Retomando", "Recebida", "Aguardando aprovação", "Decisão enviada"].includes(
+      runtimeTasks.find(item => item.executionId === task.executionId)?.status || ""
+    )) return;
+    try {
+      await invoke("send_runtime_command", { message: {
+        type: "task.delete", schema_version: 1, command_id: crypto.randomUUID(),
+        payload: { task_id: task.id, project_root: projectRoot }
+      }});
+    } catch (error) {
+      setRuntimeError("Não foi possível excluir a tarefa: " + String(error));
+    }
+  }
+
   async function resumeTask(task: { id: string; title: string }) {
     if (!projectRoot || runtimeStatus !== "online" || runtimeBusy) return;
     try {
@@ -1402,7 +1480,7 @@ function App() {
               {recentProjects.length ? recentProjects.map(project => <button key={project.path} className={projectRoot === project.path ? "project-recent-item selected" : "project-recent-item"} onClick={() => void activateProject(project.path)}><Folder size={14}/><span><strong>{project.name}</strong><small>{project.path}</small></span></button>) : <div className="empty-state"><FolderOpen/><strong>Nenhum projeto recente</strong><small>Abra ou crie um projeto para começar.</small></div>}
             </div>
           ) : activeNav === "tasks" ? (
-            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => { const removable = ["Concluída", "Verificada", "Falhou", "Limite de iterações", "completed", "verified", "failed", "max_iterations"].includes(task.status); return <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div>{removable && <button className="task-remove-button" title="Remover do histórico (não apaga arquivos)" aria-label={"Remover tarefa " + task.title + " do histórico"} onClick={() => setRuntimeTasks(items => items.filter(item => item.executionId !== task.executionId))}><X size={13}/></button>}</div>; }) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
+            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => { const removable = !["Em execução", "Validando", "Retomando", "Recebida", "Aguardando aprovação", "Decisão enviada"].includes(task.status); return <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div>{removable && <button className="task-remove-button" title="Remover do histórico (não apaga arquivos)" aria-label={"Remover tarefa " + task.title + " do histórico"} onClick={() => void removeTask(task)}><X size={13}/></button>}</div>; }) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
           ) : activeNav === "approvals" ? (<>{pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>Solicitações do gestor aparecerão aqui.</small></div> : null}</>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>}
@@ -1491,7 +1569,7 @@ function App() {
             <>
               <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · F12 definição · Shift+F12 referências</span><span>{semanticNotice || (editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados")}</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · F12 definição · Shift+F12 referências</span><span>{semanticNotice || (editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados")}</span></div>{signatureHelp && <div className="editor-signature-help"><strong>{signatureHelp.detail || signatureHelp.name}</strong>{signatureHelp.parameters?.length ? <span>{signatureHelp.parameters.map((parameter, index) => <em className={index === signatureHelp.active_parameter ? "active" : ""} key={parameter + index}>{parameter}{index < (signatureHelp.parameters?.length || 0) - 1 ? ", " : ""}</em>)}</span> : null}{signatureHelp.doc && <small>{signatureHelp.doc}</small>}</div>}<div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); const beforeCursor = event.target.value.slice(0, event.target.selectionStart); if (signatureTimer.current !== null) window.clearTimeout(signatureTimer.current); if (/[A-Za-z_]\w*\([^()\n]*$/.test(beforeCursor)) { const value = event.target.value; const cursor = event.target.selectionStart; signatureTimer.current = window.setTimeout(() => requestPythonSemantic("signature", value, cursor), 180); } else setSignatureHelp(null); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
                   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); return; }
                   if ((event.ctrlKey || event.metaKey) && event.code === "Space") { event.preventDefault(); refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart, true); return; }
                   if (event.key === "F12" && !event.shiftKey) { event.preventDefault(); requestPythonSemantic("definition", event.currentTarget.value, event.currentTarget.selectionStart); return; }
@@ -1557,18 +1635,22 @@ function App() {
                 }
                 const today = new Date();
                 const todayKey = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-");
-                const orderedGroups = [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+                // Undated legacy messages are always the oldest group, never the newest.
+                // Otherwise they become expanded by default and look like fresh activity.
+                const orderedGroups = [...groups.entries()].sort(([left], [right]) =>
+                  left === "undated" ? -1 : right === "undated" ? 1 : left.localeCompare(right)
+                );
                 return orderedGroups.map(([key, messages], index) => {
                   const date = key === "undated" ? null : new Date(key + "T12:00:00");
                   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
                   const yesterdayKey = [yesterday.getFullYear(), String(yesterday.getMonth() + 1).padStart(2, "0"), String(yesterday.getDate()).padStart(2, "0")].join("-");
                   const label = key === todayKey ? "Hoje" : key === yesterdayKey ? "Ontem" : date ? date.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : "Histórico sem data";
-                  const collapsed = collapsedChatDates[key] ?? index < orderedGroups.length - 1;
+                  const collapsed = collapsedChatDates[key] ?? (key === "undated" || index < orderedGroups.length - 1);
                   return <section className="chat-date-group" key={key}>
                     <button className="chat-date-heading" onClick={() => setCollapsedChatDates(current => ({ ...current, [key]: !collapsed }))} aria-expanded={!collapsed}><span>{label}</span><small>{messages.length} mensagem(ns)</small><ChevronDown size={13} className={collapsed ? "collapsed" : ""}/></button>
                     {!collapsed && messages.map(message => <article className={`agent-chat-message role-${message.role} ${message.status || ""}`} key={message.id}>
                       <span>{message.role === "user" ? "Você" : "KardecAgent"}{message.status === "sending" ? " · enviando" : message.status === "sent" ? " · recebida" : message.status === "rejected" ? " · não enviada" : ""}<time>{message.createdAt && !Number.isNaN(Date.parse(message.createdAt)) ? new Date(message.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></span>
-                      <p>{message.text}</p>
+                      {renderChatMessage(message.text)}
                     </article>)}
                   </section>;
                 });

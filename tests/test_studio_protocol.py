@@ -461,3 +461,47 @@ def test_read_message_keeps_regular_commands_at_64_kib(monkeypatch):
     monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     with pytest.raises(studio_protocol.StudioProtocolError, match="64 KiB"):
         studio_protocol._read_message()
+
+
+def test_run_stdio_deletes_persisted_task(monkeypatch, tmp_path):
+    deleted = []
+    store = SimpleNamespace(delete_by_id=lambda identifier: deleted.append(identifier) or True)
+    monkeypatch.setattr(studio_protocol, "TaskStore", lambda root: store)
+    command = {
+        "type": "task.delete",
+        "schema_version": 1,
+        "command_id": "delete-task-command",
+        "payload": {"task_id": "persisted-task-id", "project_root": str(tmp_path)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert deleted == ["persisted-task-id"]
+    assert any(item["type"] == "task.deleted" and item["task_id"] == "persisted-task-id" for item in messages)
+
+
+def test_run_stdio_rejects_task_delete_outside_active_workspace(monkeypatch, tmp_path):
+    command = {
+        "type": "task.delete",
+        "schema_version": 1,
+        "command_id": "delete-outside",
+        "payload": {"task_id": "persisted-task-id", "project_root": str(tmp_path / "other")},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(Path(tmp_path), FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    rejected = next(item for item in messages if item.get("command_id") == "delete-outside")
+    assert rejected["type"] == "command.rejected"
+    assert "active runtime workspace" in rejected["reason"]

@@ -227,6 +227,30 @@ class TaskStore:
                 os.unlink(temp_name)
         return target
 
+    def delete_by_id(self, identifier: str) -> bool:
+        """Delete one inactive task snapshot and its journal from this workspace."""
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise PersistenceError("task identifier is required")
+        match = next((item for item in self.list_recent(limit=100) if item[0] == identifier), None)
+        if match is None:
+            return False
+        _, state, _plan, _board = match
+        # The Studio only exposes deletion for non-live tasks. A persisted
+        # RUNNING state can represent an interrupted execution restored at startup.
+        targets = (
+            self.path_for(state.task),
+            self.path_for(state.task).with_suffix(".json.bak"),
+            self.journal_path_for(state.task),
+        )
+        for target in targets:
+            if target.parent.resolve() != self.directory.resolve():
+                raise PersistenceError("task path escapes the workspace task store")
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as exc:
+                raise PersistenceError("failed to delete persisted task") from exc
+        return True
+
     def list_recent(
         self, limit: int = 20
     ) -> list[tuple[str, TaskState, ExecutionPlan, TaskBoard | None]]:
