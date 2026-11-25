@@ -251,3 +251,32 @@ def test_verify_includes_structured_check_summary_without_rerunning_checks(tmp_p
     assert [check["status"] for check in report["checks"]] == [
         "passed", "skipped", "failed", "skipped", "skipped"
     ]
+
+
+def test_agent_file_tools_create_directory_append_and_replace(tmp_path: Path):
+    import json
+    from kardecagent.agent.tools_schema import parse_tool_call
+    loop = AgentLoop(FakeLLM([]), Settings())
+    state = make_state(tmp_path)
+    actions = [
+        parse_tool_call(json.dumps({"tool":"create_directory","arguments":{"path":"src/new"},"plan_step":1})),
+        parse_tool_call(json.dumps({"tool":"append_file","arguments":{"path":"src/new/loucura.py","content":"print(1,2)\\n"},"plan_step":1})),
+        parse_tool_call(json.dumps({"tool":"replace_in_file","arguments":{"path":"src/new/loucura.py","find":"print(1,2)","replace":"print(3,4)"},"plan_step":1})),
+    ]
+    for action in actions:
+        loop.executor._execute_tool(tmp_path, action, None, state)
+    assert (tmp_path / "src/new/loucura.py").read_text(encoding="utf-8") == "print(3,4)\\n"
+
+
+def test_agent_file_tools_respect_subtask_scope(tmp_path: Path):
+    import json
+    from kardecagent.agent.tools_schema import parse_tool_call
+    loop = AgentLoop(FakeLLM([]), Settings())
+    action = parse_tool_call(json.dumps({"tool":"create_directory","arguments":{"path":"outside"},"plan_step":1}))
+    try:
+        loop.executor._execute_tool(tmp_path, action, ("src",))
+    except ValueError as exc:
+        assert "scope violation" in str(exc)
+    else:
+        raise AssertionError("expected scope violation")
+    assert not (tmp_path / "outside").exists()
