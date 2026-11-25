@@ -89,7 +89,7 @@ def test_python_signature_help_returns_function_parameters_when_jedi_is_availabl
     root = tmp_path / "project"
     root.mkdir()
     source = root / "main.py"
-    code = "def add(first, second):\\n    return first + second\\n\\nadd(1, "
+    code = "def add(first, second):\n    return first + second\n\nadd(1, "
     source.write_text(code, encoding="utf-8")
 
     result = python_semantic_request("signature", code, str(source), str(root), 4, 7)
