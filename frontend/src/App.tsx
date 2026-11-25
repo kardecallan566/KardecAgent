@@ -465,10 +465,20 @@ function App() {
       } else if (message.type === "task.completed" || message.type === "task.failed") {
         // Startup history replay is informational; it must not look like a new
         // assistant answer or alter the state of a task currently running.
-        if (!message.payload?.restored) {
+        const restoredExecution = Boolean(message.payload?.restored)
+          || String(message.execution_id || "").startsWith("restored:");
+        if (!restoredExecution) {
           setRuntimeBusy(false);
-          // Task lifecycle events belong to the task board, not the conversation.
-          // Startup restoration can replay the same terminal event on every launch.
+          // Live task results are useful conversation output. Historical terminal
+          // events (including older runtimes without payload.restored) stay in Tasks.
+          const summary = message.payload?.result_summary || message.payload?.message
+            || (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.");
+          setChatMessages(items => [...items, {
+            id: message.event_id || crypto.randomUUID(),
+            role: "assistant" as const,
+            text: summary,
+            createdAt: message.timestamp || new Date().toISOString()
+          }].slice(-100));
           setPendingApproval(null);
           setApprovalSubmitting(false);
         }
