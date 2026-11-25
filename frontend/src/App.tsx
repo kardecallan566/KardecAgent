@@ -179,6 +179,7 @@ function App() {
   const [toolEditorDiagnostics, setToolEditorDiagnostics] = useState<EditorDiagnostic[]>([]);
   const semanticRequests = useRef(new Map<string, { action: SemanticAction; source: string; path: string; cursor: number }>());
   const latestSemanticRequest = useRef<Partial<Record<SemanticAction, string>>>({});
+  const semanticCompletionTimer = useRef<number | null>(null);
   const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
   const [pendingSemanticJump, setPendingSemanticJump] = useState<{ path: string; line: number; column: number } | null>(null);
   const [fileDirty, setFileDirty] = useState(false);
@@ -600,6 +601,8 @@ function App() {
     setSemanticNotice(null);
     semanticRequests.current.clear();
     latestSemanticRequest.current = {};
+    if (semanticCompletionTimer.current !== null) window.clearTimeout(semanticCompletionTimer.current);
+    semanticCompletionTimer.current = null;
   }, [openedPath]);
 
   useEffect(() => {
@@ -688,6 +691,8 @@ function App() {
     const before = source.slice(0, cursor);
     const line = before.split("\n").length;
     const column = before.length - before.lastIndexOf("\n") - 1;
+    const previousRequest = latestSemanticRequest.current[action];
+    if (previousRequest) semanticRequests.current.delete(previousRequest);
     const commandId = "semantic-" + crypto.randomUUID();
     semanticRequests.current.set(commandId, { action, source, path: openedPath, cursor });
     latestSemanticRequest.current[action] = commandId;
@@ -721,7 +726,13 @@ function App() {
     const extension = openedPath.split(".").pop()?.toLowerCase() || "";
     const prefix = source.slice(0, cursor).match(/[A-Za-z_$][\w$]*$/)?.[0] || "";
     if ((extension === "py" || extension === "pyi") && (force || prefix.length >= 2)) {
-      requestPythonSemantic("complete", source, cursor);
+      const previous = latestSemanticRequest.current.complete;
+      if (previous) semanticRequests.current.delete(previous);
+      if (semanticCompletionTimer.current !== null) window.clearTimeout(semanticCompletionTimer.current);
+      semanticCompletionTimer.current = window.setTimeout(() => {
+        semanticCompletionTimer.current = null;
+        requestPythonSemantic("complete", source, cursor);
+      }, force ? 0 : 140);
     }
   }
 
