@@ -152,7 +152,7 @@ def _read_message() -> dict:
         raise EOFError("Studio disconnected while waiting for a command or approval.")
     encoded_size = len(line.encode("utf-8"))
     if encoded_size > MAX_SEMANTIC_MESSAGE_BYTES:
-        while line and not line.endswith("\\n"):
+        while line and not line.endswith("\n"):
             line = sys.stdin.readline(MAX_SEMANTIC_MESSAGE_BYTES + 1)
         raise StudioProtocolError("Command exceeds the bounded 6 MiB protocol limit.")
     try:
