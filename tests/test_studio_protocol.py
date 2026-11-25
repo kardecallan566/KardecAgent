@@ -435,3 +435,29 @@ def test_run_stdio_rejects_semantic_request_for_another_workspace(monkeypatch, t
     response = next(item for item in messages if item["type"] == "editor.semantic.response")
     assert response["payload"]["available"] is False
     assert "active runtime workspace" in response["payload"]["message"]
+
+
+
+def test_read_message_allows_bounded_large_semantic_source(monkeypatch):
+    command = {
+        "type": "editor.semantic",
+        "schema_version": 1,
+        "command_id": "large-semantic",
+        "payload": {"source": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    parsed = studio_protocol._read_message()
+    assert parsed["type"] == "editor.semantic"
+    assert len(parsed["payload"]["source"]) > studio_protocol.MAX_MESSAGE_BYTES
+
+
+def test_read_message_keeps_regular_commands_at_64_kib(monkeypatch):
+    command = {
+        "type": "chat.message",
+        "schema_version": 1,
+        "command_id": "oversized-chat",
+        "payload": {"message": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    with pytest.raises(studio_protocol.StudioProtocolError, match="64 KiB"):
+        studio_protocol._read_message()
