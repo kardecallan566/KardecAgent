@@ -33,10 +33,23 @@ const DEFAULT_SETTINGS: StudioSettings = {
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 type RecentProject = { path: string; name: string; lastOpenedAt: string };
 
-function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void }) {
+function ExplorerEntry({ entry, projectRoot, onOpenFile, refreshKey }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void; refreshKey: number }) {
   const [expanded, setExpanded] = useState(false);
+  const lastRefreshKey = useRef(refreshKey);
   const [children, setChildren] = useState<ProjectEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (lastRefreshKey.current === refreshKey) return;
+    lastRefreshKey.current = refreshKey;
+    if (!expanded || !entry.is_dir) return;
+    let active = true;
+    setLoading(true);
+    void invoke<ProjectEntry[]>("read_project_entries", { projectRoot, projectPath: entry.path })
+      .then(result => { if (active) setChildren(result); })
+      .catch(error => { if (active) console.error("Falha ao atualizar pasta", error); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [refreshKey, expanded, entry.is_dir, entry.path, projectRoot]);
   async function toggleFolder() {
     if (!entry.is_dir) { onOpenFile(entry); return; }
     if (expanded) { setExpanded(false); return; }
@@ -50,7 +63,7 @@ function ExplorerEntry({ entry, projectRoot, onOpenFile }: { entry: ProjectEntry
   return <><button className={entry.is_dir ? "tree-row folder-entry" : "tree-row file"} onClick={toggleFolder} title={entry.path}>
     {entry.is_dir ? (expanded ? <ChevronDown/> : <ChevronRight/>) : <span className="tree-spacer"/>}
     {entry.is_dir ? (expanded ? <FolderOpen/> : <Folder/>) : <FileCode2/>}<span>{entry.name}</span>{loading && <small className="tree-loading">...</small>}
-  </button>{expanded && <div className="tree-children">{children.map(child => <ExplorerEntry key={child.path} entry={child} projectRoot={projectRoot} onOpenFile={onOpenFile}/>)}</div>}</>;
+  </button>{expanded && <div className="tree-children">{children.map(child => <ExplorerEntry key={child.path} entry={child} projectRoot={projectRoot} onOpenFile={onOpenFile} refreshKey={refreshKey}/>)}</div>}</>;
 }
 
 
@@ -146,6 +159,7 @@ function App() {
     } catch { return []; }
   });
   const [projectEntries, setProjectEntries] = useState<ProjectEntry[]>([]);
+  const [projectTreeRevision, setProjectTreeRevision] = useState(0);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [fileSearchOpen, setFileSearchOpen] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
@@ -168,7 +182,9 @@ function App() {
   const [qualityOutput, setQualityOutput] = useState<{ file: string; language: string; tool: string; available: boolean; exit_code: number; output: string; fixed: boolean } | null>(null);
   const [openTabs, setOpenTabs] = useState<Array<{ path: string; name: string; content: string; dirty: boolean }>>([]);
   const [instructionDraft, setInstructionDraft] = useState("");
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; commandId?: string; role: "user" | "assistant"; text: string; status?: "sending" | "sent" | "rejected" }>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; commandId?: string; role: "user" | "assistant"; text: string; createdAt?: string; status?: "sending" | "sent" | "rejected" }>>([]);
+  const chatHistoryRef = useRef<HTMLDivElement | null>(null);
+  const [collapsedChatDates, setCollapsedChatDates] = useState<Record<string, boolean>>({});
   const pendingInstructionCommandId = useRef<string | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
@@ -209,6 +225,10 @@ function App() {
   }, [googleFontRevision]);
 
   useEffect(() => () => { if (startupTimer.current) window.clearTimeout(startupTimer.current); }, []);
+  useEffect(() => {
+    const history = chatHistoryRef.current;
+    if (history) history.scrollTo({ top: history.scrollHeight, behavior: "auto" });
+  }, [chatMessages, activeNav, agentPaneCollapsed]);
   useEffect(() => {
     function handleWorkspaceSearchShortcut(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
@@ -357,7 +377,8 @@ function App() {
             id: message.event_id || crypto.randomUUID(),
             role: "assistant" as const,
             text: message.payload?.result_summary || message.payload?.message ||
-              (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou.")
+              (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou."),
+            createdAt: new Date().toISOString()
           }].slice(-100));
           setPendingApproval(null);
           setApprovalSubmitting(false);
@@ -384,13 +405,13 @@ function App() {
         setRuntimeBusy(false);
         const failure = message.payload?.message || "Falha ao responder. Tente novamente.";
         const failureId = "chat-error-" + (message.command_id || crypto.randomUUID());
-        setChatMessages(items => [...items, { id: failureId, role: "assistant" as const, text: failure }].slice(-100));
+        setChatMessages(items => [...items, { id: failureId, role: "assistant" as const, text: failure, createdAt: new Date().toISOString() }].slice(-100));
         setRuntimeError(null);
         setRuntimeEvents(items => [...items, { id: failureId, type: "chat.failed", message: failure }].slice(-100));
       } else if (message.type === "assistant.response") {
         const responseText = message.payload?.message || "Não consegui formular uma resposta para essa mensagem.";
         const responseId = "chat-" + (message.command_id || crypto.randomUUID());
-        setChatMessages(items => [...items, { id: responseId, role: "assistant" as const, text: responseText }].slice(-100));
+        setChatMessages(items => [...items, { id: responseId, role: "assistant" as const, text: responseText, createdAt: new Date().toISOString() }].slice(-100));
         setRuntimeBusy(false);
         setRuntimeError(null);
         setRuntimeEvents(items => [...items, { id: responseId, type: message.intent === "clarify" ? "intent.clarification" : "chat.response", message: responseText }].slice(-100));
@@ -920,6 +941,7 @@ function App() {
     if (!projectRoot) return;
     const entries = await invoke<ProjectEntry[]>("read_project_entries", { projectRoot, projectPath: projectRoot });
     setProjectEntries(entries);
+    setProjectTreeRevision(revision => revision + 1);
   }
 
   async function searchWorkspaceFiles() {
@@ -1056,7 +1078,7 @@ function App() {
     if (!projectRoot || !instruction || runtimeStatus !== "online" || runtimeBusy) return;
     const commandId = crypto.randomUUID();
     pendingInstructionCommandId.current = commandId;
-    setChatMessages(items => [...items, { id: commandId, commandId, role: "user" as const, text: instruction, status: "sending" as const }].slice(-100));
+    setChatMessages(items => [...items, { id: commandId, commandId, role: "user" as const, text: instruction, createdAt: new Date().toISOString(), status: "sending" as const }].slice(-100));
     setRuntimeBusy(true);
     setRuntimeError(null);
     try {
@@ -1082,7 +1104,7 @@ function App() {
         setFileDirty(Boolean(existingTab?.dirty));
         setActiveNav("explorer");
         pendingInstructionCommandId.current = null;
-        setChatMessages(items => [...items, { id: "opened-" + commandId, role: "assistant" as const, text: "Abri **" + requestedPath + "** no editor." }].slice(-100));
+        setChatMessages(items => [...items, { id: "opened-" + commandId, role: "assistant" as const, text: "Abri **" + requestedPath + "** no editor.", createdAt: new Date().toISOString() }].slice(-100));
         setInstructionDraft("");
         setRuntimeBusy(false);
         setRuntimeError(null);
@@ -1215,7 +1237,7 @@ function App() {
                   <button className={selectedFile === "main.tsx" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("main.tsx")}><FileCode2/><span>main.tsx</span></button>
                   <button className={selectedFile === "styles.css" ? "tree-row file selected-file indent2" : "tree-row file indent2"} onClick={() => setSelectedFile("styles.css")}><FileCode2/><span>styles.css</span></button>
                 </>}
-                {projectEntries.map(entry => <ExplorerEntry key={entry.path} entry={entry} projectRoot={projectRoot!} onOpenFile={openEntry}/>) }
+                {projectEntries.map(entry => <ExplorerEntry key={entry.path} entry={entry} projectRoot={projectRoot!} onOpenFile={openEntry} refreshKey={projectTreeRevision}/>) }
                 {projectError && <div className="tree-row" role="alert">{projectError}</div>}
               </div>
               <button className="sidebar-bottom workspace-search-trigger" onClick={() => { setFileSearchOpen(true); setFileSearchError(null); }} disabled={!projectRoot}><Search size={14}/> Buscar nos arquivos <span className="shortcut">Ctrl+P</span></button>
@@ -1228,7 +1250,7 @@ function App() {
               {recentProjects.length ? recentProjects.map(project => <button key={project.path} className={projectRoot === project.path ? "project-recent-item selected" : "project-recent-item"} onClick={() => void activateProject(project.path)}><Folder size={14}/><span><strong>{project.name}</strong><small>{project.path}</small></span></button>) : <div className="empty-state"><FolderOpen/><strong>Nenhum projeto recente</strong><small>Abra ou crie um projeto para começar.</small></div>}
             </div>
           ) : activeNav === "tasks" ? (
-            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div></div>) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
+            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => { const removable = ["Concluída", "Verificada", "Falhou", "Limite de iterações", "completed", "verified", "failed", "max_iterations"].includes(task.status); return <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div>{removable && <button className="task-remove-button" title="Remover do histórico (não apaga arquivos)" aria-label={"Remover tarefa " + task.title + " do histórico"} onClick={() => setRuntimeTasks(items => items.filter(item => item.executionId !== task.executionId))}><X size={13}/></button>}</div>; }) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
           ) : activeNav === "approvals" ? (<>{pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>Solicitações do gestor aparecerão aqui.</small></div> : null}</>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>}
@@ -1371,11 +1393,32 @@ function App() {
             </div>
           ) : <>
             <div className="agent-header"><div><Bot size={17}/><strong>Agent</strong></div><span className="live-dot">{runtimeStatus === "online" ? "● Online" : runtimeStatus === "connecting" ? "● Conectando" : "● Offline"}</span></div>
-            {chatMessages.length > 0 && <div className="agent-chat-history" aria-live="polite">
-              {chatMessages.map(message => <article className={`agent-chat-message role-${message.role} ${message.status || ""}`} key={message.id}>
-                <span>{message.role === "user" ? "Você" : "KardecAgent"}{message.status === "sending" ? " · enviando" : message.status === "sent" ? " · recebida" : message.status === "rejected" ? " · não enviada" : ""}</span>
-                <p>{message.text}</p>
-              </article>)}
+            {chatMessages.length > 0 && <div className="agent-chat-history" aria-live="polite" ref={chatHistoryRef}>
+              {(() => {
+                const groups = new Map<string, typeof chatMessages>();
+                for (const message of chatMessages) {
+                  const date = message.createdAt && !Number.isNaN(Date.parse(message.createdAt)) ? new Date(message.createdAt) : null;
+                  const key = date ? [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-") : "undated";
+                  groups.set(key, [...(groups.get(key) || []), message]);
+                }
+                const today = new Date();
+                const todayKey = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-");
+                const orderedGroups = [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+                return orderedGroups.map(([key, messages], index) => {
+                  const date = key === "undated" ? null : new Date(key + "T12:00:00");
+                  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+                  const yesterdayKey = [yesterday.getFullYear(), String(yesterday.getMonth() + 1).padStart(2, "0"), String(yesterday.getDate()).padStart(2, "0")].join("-");
+                  const label = key === todayKey ? "Hoje" : key === yesterdayKey ? "Ontem" : date ? date.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : "Histórico sem data";
+                  const collapsed = collapsedChatDates[key] ?? index < orderedGroups.length - 1;
+                  return <section className="chat-date-group" key={key}>
+                    <button className="chat-date-heading" onClick={() => setCollapsedChatDates(current => ({ ...current, [key]: !collapsed }))} aria-expanded={!collapsed}><span>{label}</span><small>{messages.length} mensagem(ns)</small><ChevronDown size={13} className={collapsed ? "collapsed" : ""}/></button>
+                    {!collapsed && messages.map(message => <article className={`agent-chat-message role-${message.role} ${message.status || ""}`} key={message.id}>
+                      <span>{message.role === "user" ? "Você" : "KardecAgent"}{message.status === "sending" ? " · enviando" : message.status === "sent" ? " · recebida" : message.status === "rejected" ? " · não enviada" : ""}<time>{message.createdAt && !Number.isNaN(Date.parse(message.createdAt)) ? new Date(message.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></span>
+                      <p>{message.text}</p>
+                    </article>)}
+                  </section>;
+                });
+              })()}
             </div>}
             {pendingApproval ? <div className="approval-prompt">
               <div className="approval-prompt-head"><ShieldCheck size={18}/><strong>{pendingApproval.kind === "high_risk" ? "Aprovação adicional de alto risco" : "Aprovar plano de execução"}</strong></div>

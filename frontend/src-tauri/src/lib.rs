@@ -2,6 +2,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{
     fs,
+    fs::OpenOptions,
     io::{BufRead, BufReader, ErrorKind, Write},
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
@@ -345,24 +346,77 @@ fn write_project_file(project_root: String, file_path: String, content: String) 
     if !path.is_file() {
         return Err("O caminho selecionado não é um arquivo existente.".into());
     }
-    fs::write(path, content.as_bytes()).map_err(|e| format!("Falha ao gravar arquivo: {e}"))
+    write_workspace_file(&path, content.as_bytes())
 }
 
+fn write_workspace_file(path: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = path.parent().ok_or("Pasta de destino inválida.")?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let temporary = parent.join(format!(".kardecagent-{}-{nonce}.tmp", std::process::id()));
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)
+        .map_err(|e| format!("Não foi possível preparar o salvamento: {e}"))?;
+    if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("Falha ao gravar arquivo temporário: {error}"));
+    }
+    drop(file);
+
+    #[cfg(windows)]
+    {
+        let backup = parent.join(format!(".kardecagent-{}-{nonce}.bak", std::process::id()));
+        if let Err(error) = fs::rename(path, &backup) {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Não foi possível preservar a versão anterior: {error}"));
+        }
+        if let Err(error) = fs::rename(&temporary, path) {
+            let _ = fs::rename(&backup, path);
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Falha ao substituir o arquivo; a versão anterior foi restaurada: {error}"));
+        }
+        let _ = fs::remove_file(backup);
+    }
+    #[cfg(not(windows))]
+    {
+        if let Err(error) = fs::rename(&temporary, path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Falha ao substituir o arquivo: {error}"));
+        }
+    }
+    Ok(())
+}
 
 fn resolve_new_workspace_path(project_root: &str, requested_path: &str) -> Result<std::path::PathBuf, String> {
     let root = Path::new(project_root).canonicalize()
         .map_err(|e| format!("Não foi possível acessar a raiz do projeto: {e}"))?;
     let relative = Path::new(requested_path);
-    if relative.as_os_str().is_empty() || relative.is_absolute() || relative.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+    if relative.as_os_str().is_empty() || relative.is_absolute()
+        || relative.components().any(|component| !matches!(component, std::path::Component::Normal(_))) {
         return Err("Informe um caminho relativo válido dentro do projeto.".into());
     }
-    let candidate = root.join(relative);
-    let parent = candidate.parent().ok_or("Caminho de destino inválido.")?;
-    let canonical_parent = parent.canonicalize()
-        .map_err(|e| format!("A pasta de destino precisa existir: {e}"))?;
-    if !canonical_parent.starts_with(&root) {
-        return Err("A operação está fora da pasta do projeto.".into());
+
+    let components = relative.components().collect::<Vec<_>>();
+    let mut parent = root.clone();
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        let next = parent.join(component.as_os_str());
+        if next.exists() {
+            let metadata = fs::symlink_metadata(&next).map_err(|e| e.to_string())?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err("O caminho pai contém um link simbólico ou não é uma pasta.".into());
+            }
+        } else {
+            fs::create_dir(&next).map_err(|e| format!("Falha ao criar pasta intermediária: {e}"))?;
+        }
+        parent = next.canonicalize().map_err(|e| e.to_string())?;
+        if !parent.starts_with(&root) {
+            return Err("A operação está fora da pasta do projeto.".into());
+        }
     }
+
+    let leaf = components.last().ok_or("Caminho de destino inválido.")?.as_os_str();
+    let candidate = parent.join(leaf);
     if candidate.exists() || candidate.is_symlink() {
         return Err("Já existe um arquivo ou pasta nesse caminho.".into());
     }
@@ -373,7 +427,13 @@ fn resolve_new_workspace_path(project_root: &str, requested_path: &str) -> Resul
 fn create_project_file(project_root: String, relative_path: String, content: String) -> Result<(), String> {
     if content.len() > 1_000_000 { return Err("Arquivo maior que 1 MB.".into()); }
     let path = resolve_new_workspace_path(&project_root, &relative_path)?;
-    fs::write(path, content.as_bytes()).map_err(|e| format!("Falha ao criar arquivo: {e}"))
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&path)
+        .map_err(|e| format!("Falha ao criar arquivo sem sobrescrever um destino existente: {e}"))?;
+    if let Err(error) = file.write_all(content.as_bytes()).and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(&path);
+        return Err(format!("Falha ao gravar novo arquivo: {error}"));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1501,5 +1561,47 @@ mod git_status_tests {
         assert!(status.files[1].unstaged);
         assert_eq!(status.files[2].path, "new file.txt");
         assert!(status.files[2].untracked);
+    }
+}
+
+
+#[cfg(test)]
+mod workspace_file_tests {
+    use super::{resolve_new_workspace_path, write_workspace_file};
+    use std::{fs, path::PathBuf};
+
+    fn temporary_workspace() -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("kardecagent-workspace-test-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn new_file_path_creates_nested_parent_directories_inside_workspace() {
+        let root = temporary_workspace();
+        let path = resolve_new_workspace_path(root.to_str().unwrap(), "src/features/editor/main.py").unwrap();
+        assert!(path.parent().unwrap().is_dir());
+        fs::write(&path, "print('ok')").unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "print('ok')");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_write_replaces_existing_file_with_complete_content() {
+        let root = temporary_workspace();
+        let path = root.join("notes.txt");
+        fs::write(&path, "old content").unwrap();
+        write_workspace_file(&path, b"new content").unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "new content");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn new_file_path_rejects_parent_traversal() {
+        let root = temporary_workspace();
+        assert!(resolve_new_workspace_path(root.to_str().unwrap(), "../escape.txt").is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 }
