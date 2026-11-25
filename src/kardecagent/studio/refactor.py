@@ -91,6 +91,12 @@ class RenamePreviewManager:
             if not path.is_file():
                 raise ValueError("Jedi proposed changing a file that no longer exists.")
             current = path.read_bytes()
+            try:
+                analyzed_source = changed_file._module_node.get_code()
+            except (AttributeError, TypeError) as exc:
+                raise RuntimeError("Jedi did not expose the source snapshot needed for concurrency checks.") from exc
+            if analyzed_source != current.decode("utf-8"):
+                raise RuntimeError(f"{path.relative_to(root).as_posix()} changed during semantic analysis. Generate a new preview.")
             # Jedi's ChangedFile exposes get_new_code() across supported versions.
             getter = getattr(changed_file, "get_new_code", None)
             new_code = getter() if callable(getter) else getattr(changed_file, "new_code", None)
