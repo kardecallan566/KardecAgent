@@ -73,7 +73,7 @@ def test_python_syntax_diagnostics_are_returned_when_jedi_is_available(tmp_path:
     root = tmp_path / "project"
     root.mkdir()
     source = root / "main.py"
-    code = "def broken(:\\n    pass\\n"
+    code = "def broken(:\n    pass\n"
     source.write_text(code, encoding="utf-8")
 
     result = python_semantic_request("diagnostics", code, str(source), str(root), 1, 0)
