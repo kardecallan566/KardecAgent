@@ -423,7 +423,7 @@ def test_run_stdio_rejects_semantic_request_for_another_workspace(monkeypatch, t
             "column": 5,
         },
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
@@ -445,7 +445,7 @@ def test_read_message_allows_bounded_large_semantic_source(monkeypatch):
         "command_id": "large-semantic",
         "payload": {"source": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     parsed = studio_protocol._read_message()
     assert parsed["type"] == "editor.semantic"
     assert len(parsed["payload"]["source"]) > studio_protocol.MAX_MESSAGE_BYTES
@@ -458,6 +458,6 @@ def test_read_message_keeps_regular_commands_at_64_kib(monkeypatch):
         "command_id": "oversized-chat",
         "payload": {"message": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     with pytest.raises(studio_protocol.StudioProtocolError, match="64 KiB"):
         studio_protocol._read_message()
