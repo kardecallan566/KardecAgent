@@ -190,7 +190,7 @@ class AgentExecutor:
     def _execute_tool(self, root: Path, action, scope: tuple[str, ...] | None, state: TaskState | None = None, subtask_id: str | None = None) -> str:
         args = action.arguments
         fs = ProjectFilesystem(root)
-        mutating = action.tool in {"write_file", "apply_patch", "run_command"}
+        mutating = action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command"}
         integrity_before = self._workspace_snapshot(root, True) if mutating else None
         if action.tool == "list_files":
             return json.dumps(fs.list_files(args.get("limit", 500)), ensure_ascii=False)
@@ -212,15 +212,41 @@ class AgentExecutor:
             return json.dumps(fetch_web_page(args["url"], max_chars=args.get("max_chars", 30000),
                 allow_domains=self.settings.web_allow_domains, deny_domains=self.settings.web_deny_domains),
                 ensure_ascii=False)
+        if action.tool == "create_directory":
+            self._check_scope(root, [args["path"]], scope)
+            fs.create_directory(args["path"])
+            return json.dumps({"ok": True, "path": args["path"], "kind": "directory"}, ensure_ascii=False)
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
             fs.write_file(args["path"], args["content"])
+            if fs.read_file(args["path"]) != args["content"]:
+                raise IOError(f"write verification failed for {args['path']}")
             integrity_after = self._workspace_snapshot(root, True)
             if state is not None and integrity_before is not None and integrity_after is not None:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
             return json.dumps({"ok": True, "path": args["path"], "method": "full_file"})
+        if action.tool == "append_file":
+            self._check_scope(root, [args["path"]], scope)
+            fs.append_file(args["path"], args["content"])
+            integrity_after = self._workspace_snapshot(root, True)
+            if state is not None and integrity_before is not None and integrity_after is not None:
+                self._record_integrity(state, integrity_before, integrity_after,
+                                      sorted(integrity_before.changed_paths(integrity_after)),
+                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
+            return json.dumps({"ok": True, "path": args["path"], "method": "append"}, ensure_ascii=False)
+        if action.tool == "replace_in_file":
+            self._check_scope(root, [args["path"]], scope)
+            count = fs.replace_in_file(args["path"], args["find"], args["replace"], args.get("replace_all", False))
+            if count == 0:
+                raise ValueError(f"text to replace was not found in {args['path']}")
+            integrity_after = self._workspace_snapshot(root, True)
+            if state is not None and integrity_before is not None and integrity_after is not None:
+                self._record_integrity(state, integrity_before, integrity_after,
+                                      sorted(integrity_before.changed_paths(integrity_after)),
+                                      tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
+            return json.dumps({"ok": True, "path": args["path"], "replacements": count if args.get("replace_all", False) else 1}, ensure_ascii=False)
         if action.tool == "apply_patch":
             patch_paths = self._patch_paths(args["patch"])
             self._check_scope(root, patch_paths, scope)
@@ -443,7 +469,7 @@ class AgentExecutor:
                     persistence_callback(state, plan)
                 continue
 
-            if action.tool in {"write_file", "apply_patch", "run_command", "run_checks", "complete_step"}:
+            if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"}:
                 if action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
