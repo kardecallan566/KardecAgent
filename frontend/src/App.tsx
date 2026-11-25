@@ -97,6 +97,17 @@ function importedGoogleFontNames(): string[] {
   } catch { return []; }
 }
 
+function decodeChatEntities(value: string): string {
+  return value
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_match, code: string) => {
+      const point = code[0].toLowerCase() === "x" ? Number.parseInt(code.slice(1), 16) : Number.parseInt(code, 10);
+      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : _match;
+    })
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_match, name: string) => ({
+      amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " "
+    }[name.toLowerCase()] || _match));
+}
+
 function taskStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     pending: "Pendente",
@@ -431,6 +442,9 @@ function App() {
           setActiveRuntimeStep(null);
         }
         setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
+      } else if (message.type === "task.deleted") {
+        setRuntimeTasks(items => items.filter(task => task.id !== message.task_id));
+        setRuntimeEvents(items => [...items, { id: message.event_id || crypto.randomUUID(), type: message.type, message: "Tarefa removida do histórico." }].slice(-100));
       } else if (message.type === "task.created") {
         // Restored records are history only; they are not live executions.
         setRuntimeBusy(!message.payload?.restored);
@@ -445,13 +459,8 @@ function App() {
         // assistant answer or alter the state of a task currently running.
         if (!message.payload?.restored) {
           setRuntimeBusy(false);
-          setChatMessages(items => [...items, {
-            id: message.event_id || crypto.randomUUID(),
-            role: "assistant" as const,
-            text: message.payload?.result_summary || message.payload?.message ||
-              (message.type === "task.completed" ? "Tarefa concluída." : "A tarefa falhou."),
-            createdAt: new Date().toISOString()
-          }].slice(-100));
+          // Task lifecycle events belong to the task board, not the conversation.
+          // Startup restoration can replay the same terminal event on every launch.
           setPendingApproval(null);
           setApprovalSubmitting(false);
         }
@@ -1323,6 +1332,20 @@ function App() {
     }
   }
 
+  async function removeTask(task: { id: string; executionId: string; title: string }) {
+    if (runtimeStatus !== "online" || ["Em execução", "Validando", "Retomando", "Recebida", "Aguardando aprovação", "Decisão enviada"].includes(
+      runtimeTasks.find(item => item.executionId === task.executionId)?.status || ""
+    )) return;
+    try {
+      await invoke("send_runtime_command", { message: {
+        type: "task.delete", schema_version: 1, command_id: crypto.randomUUID(),
+        payload: { task_id: task.id, project_root: projectRoot }
+      }});
+    } catch (error) {
+      setRuntimeError("Não foi possível excluir a tarefa: " + String(error));
+    }
+  }
+
   async function resumeTask(task: { id: string; title: string }) {
     if (!projectRoot || runtimeStatus !== "online" || runtimeBusy) return;
     try {
@@ -1402,7 +1425,7 @@ function App() {
               {recentProjects.length ? recentProjects.map(project => <button key={project.path} className={projectRoot === project.path ? "project-recent-item selected" : "project-recent-item"} onClick={() => void activateProject(project.path)}><Folder size={14}/><span><strong>{project.name}</strong><small>{project.path}</small></span></button>) : <div className="empty-state"><FolderOpen/><strong>Nenhum projeto recente</strong><small>Abra ou crie um projeto para começar.</small></div>}
             </div>
           ) : activeNav === "tasks" ? (
-            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => { const removable = ["Concluída", "Verificada", "Falhou", "Limite de iterações", "completed", "verified", "failed", "max_iterations"].includes(task.status); return <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div>{removable && <button className="task-remove-button" title="Remover do histórico (não apaga arquivos)" aria-label={"Remover tarefa " + task.title + " do histórico"} onClick={() => setRuntimeTasks(items => items.filter(item => item.executionId !== task.executionId))}><X size={13}/></button>}</div>; }) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
+            <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => { const removable = !["Em execução", "Validando", "Retomando", "Recebida", "Aguardando aprovação", "Decisão enviada"].includes(task.status); return <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div>{removable && <button className="task-remove-button" title="Remover do histórico (não apaga arquivos)" aria-label={"Remover tarefa " + task.title + " do histórico"} onClick={() => void removeTask(task)}><X size={13}/></button>}</div>; }) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
           ) : activeNav === "approvals" ? (<>{pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>Solicitações do gestor aparecerão aqui.</small></div> : null}</>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>}
@@ -1557,18 +1580,22 @@ function App() {
                 }
                 const today = new Date();
                 const todayKey = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-");
-                const orderedGroups = [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+                // Undated legacy messages are always the oldest group, never the newest.
+                // Otherwise they become expanded by default and look like fresh activity.
+                const orderedGroups = [...groups.entries()].sort(([left], [right]) =>
+                  left === "undated" ? -1 : right === "undated" ? 1 : left.localeCompare(right)
+                );
                 return orderedGroups.map(([key, messages], index) => {
                   const date = key === "undated" ? null : new Date(key + "T12:00:00");
                   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
                   const yesterdayKey = [yesterday.getFullYear(), String(yesterday.getMonth() + 1).padStart(2, "0"), String(yesterday.getDate()).padStart(2, "0")].join("-");
                   const label = key === todayKey ? "Hoje" : key === yesterdayKey ? "Ontem" : date ? date.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }) : "Histórico sem data";
-                  const collapsed = collapsedChatDates[key] ?? index < orderedGroups.length - 1;
+                  const collapsed = collapsedChatDates[key] ?? (key === "undated" || index < orderedGroups.length - 1);
                   return <section className="chat-date-group" key={key}>
                     <button className="chat-date-heading" onClick={() => setCollapsedChatDates(current => ({ ...current, [key]: !collapsed }))} aria-expanded={!collapsed}><span>{label}</span><small>{messages.length} mensagem(ns)</small><ChevronDown size={13} className={collapsed ? "collapsed" : ""}/></button>
                     {!collapsed && messages.map(message => <article className={`agent-chat-message role-${message.role} ${message.status || ""}`} key={message.id}>
                       <span>{message.role === "user" ? "Você" : "KardecAgent"}{message.status === "sending" ? " · enviando" : message.status === "sent" ? " · recebida" : message.status === "rejected" ? " · não enviada" : ""}<time>{message.createdAt && !Number.isNaN(Date.parse(message.createdAt)) ? new Date(message.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></span>
-                      <p>{message.text}</p>
+                      <p>{decodeChatEntities(message.text)}</p>
                     </article>)}
                   </section>;
                 });
