@@ -193,7 +193,7 @@ class AgentExecutor:
         mutating = action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command"}
         integrity_before = self._workspace_snapshot(root, True) if mutating else None
         if action.tool == "list_files":
-            return json.dumps(fs.list_files(args.get("limit", 500)), ensure_ascii=False)
+            return json.dumps(fs.list_files(args.get("limit", 500), args.get("path", ".")), ensure_ascii=False)
         if action.tool == "read_file":
             return fs.read_file(args["path"])
         if action.tool == "open_file":
