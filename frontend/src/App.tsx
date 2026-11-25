@@ -391,7 +391,7 @@ function App() {
             setOpenTabs(tabs => tabs.map(tab => contentByPath.has(tab.path)
               ? { ...tab, content: contentByPath.get(tab.path)!, dirty: false }
               : tab));
-            if (contentByPath.has(openedPath)) {
+            if (openedPath && contentByPath.has(openedPath)) {
               setFileContent(contentByPath.get(openedPath)!);
               setFileDirty(false);
             }
