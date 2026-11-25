@@ -14,7 +14,7 @@ class ToolCall:
     plan_step: int | None = None
 
 TOOL_SCHEMAS = {
-    "list_files": {"required": [], "types": {}, "optional": {"limit": int}},
+    "list_files": {"required": [], "types": {}, "optional": {"path": str, "limit": int}},
     "read_file": {"required": ["path"], "types": {"path": str}, "optional": {}},
     "open_file": {"required": ["path"], "types": {"path": str}, "optional": {}},
     "search_files": {"required": ["query"], "types": {"query": str}, "optional": {"max_results": int}},
@@ -114,7 +114,7 @@ def tool_instructions() -> str:
         "read_file to inspect contents, search_files to find code, write_file to create or replace files, "
         "create_directory to create folders, append_file to add content at the end, replace_in_file for exact text edits, "
         "and apply_patch for structured edits. Use open_file to open a workspace file in the Studio editor when the user needs to inspect it. Paths are relative to the active workspace. "
-        "Before editing, inspect relevant files. After writing, read them back and run suitable checks "
+        "For a simple request targeting one named file, keep the plan to 1-2 steps and edit that file directly; do not invent a workspace-wide inventory step. Use append_file when the user asks to add text without replacing existing content, and replace_in_file or apply_patch for localized changes. Before editing, inspect relevant files. After writing, read them back and run suitable checks "
         "or run_command when the approved plan requires it. "
         "Return ONLY JSON with tool, arguments and optional plan_step. "
         "plan_step is required for write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, open_file and complete_step. "
