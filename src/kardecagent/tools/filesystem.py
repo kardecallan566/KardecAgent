@@ -11,7 +11,29 @@ class ProjectFilesystem:
         if not path.is_file():raise FileNotFoundError(relative_path)
         return path.read_text(encoding="utf-8")
     def write_file(self,relative_path:str,content:str)->None:
-        path=self.safe_path(relative_path);path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content,encoding="utf-8",newline="")
+        path=self.safe_path(relative_path)
+        if path.exists() and not path.is_file():raise IsADirectoryError(relative_path)
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text(content,encoding="utf-8",newline="")
+    def create_directory(self,relative_path:str)->None:
+        path=self.safe_path(relative_path)
+        if path.exists() and not path.is_dir():raise NotADirectoryError(relative_path)
+        path.mkdir(parents=True,exist_ok=True)
+    def append_file(self,relative_path:str,content:str)->None:
+        path=self.safe_path(relative_path)
+        if path.exists() and not path.is_file():raise IsADirectoryError(relative_path)
+        path.parent.mkdir(parents=True,exist_ok=True)
+        with path.open("a",encoding="utf-8",newline="") as stream:stream.write(content)
+    def replace_in_file(self,relative_path:str,find:str,replacement:str,replace_all:bool=False)->int:
+        if not find:raise ValueError("find must not be empty")
+        path=self.safe_path(relative_path)
+        if not path.is_file():raise FileNotFoundError(relative_path)
+        content=path.read_text(encoding="utf-8")
+        count=content.count(find)
+        if count == 0:return 0
+        updated=content.replace(find,replacement) if replace_all else content.replace(find,replacement,1)
+        self.write_file(relative_path,updated)
+        return count if replace_all else 1
     def list_files(self,limit:int=500)->list[str]:
         from ..project.context import project_snapshot
         return project_snapshot(self.root,limit)

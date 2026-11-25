@@ -90,3 +90,28 @@ def test_open_file_requires_approved_plan_step():
     action = parse_tool_call('{"tool":"open_file","arguments":{"path":"src/main.py"},"plan_step":1}')
     assert action.tool == "open_file"
     assert action.arguments["path"] == "src/main.py"
+
+
+def test_arguments_json_string_is_normalized_to_object():
+    import json
+    encoded = json.dumps({"path": "a.txt", "content": "hello"})
+    raw = json.dumps({"tool": "write_file", "arguments": encoded, "plan_step": 1})
+    action = parse_tool_call(raw)
+    assert action.arguments == {"path": "a.txt", "content": "hello"}
+
+
+def test_arguments_nested_object_is_unwrapped():
+    action = parse_tool_call('{"tool":"read_file","arguments":{"arguments":{"path":"a.py"}}}')
+    assert action.arguments == {"path": "a.py"}
+
+
+def test_non_object_arguments_reports_actual_type():
+    with pytest.raises(ToolCallError, match="received list"):
+        parse_tool_call('{"tool":"read_file","arguments":[]}')
+
+
+def test_new_filesystem_tools_require_plan_step_and_validate_types():
+    with pytest.raises(ToolCallError, match="plan_step is required"):
+        parse_tool_call('{"tool":"create_directory","arguments":{"path":"src/new"}}')
+    action = parse_tool_call('{"tool":"replace_in_file","arguments":{"path":"a.py","find":"x","replace":"y","replace_all":true},"plan_step":1}')
+    assert action.arguments["replace_all"] is True
