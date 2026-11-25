@@ -21,6 +21,19 @@ def test_read_message_rejects_oversized_line_and_recovers(monkeypatch):
     assert studio_protocol._read_message() == {}
 
 
+def test_read_message_allows_bounded_large_rename_preview(monkeypatch):
+    command = {
+        "type": "editor.rename.preview",
+        "schema_version": 1,
+        "command_id": "rename-preview",
+        "payload": {"source": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    message = studio_protocol._read_message()
+    assert message["type"] == "editor.rename.preview"
+    assert len(message["payload"]["source"]) == studio_protocol.MAX_MESSAGE_BYTES + 100
+
+
 def test_write_compacts_oversized_event(monkeypatch):
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
