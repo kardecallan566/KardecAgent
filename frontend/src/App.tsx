@@ -757,8 +757,6 @@ function App() {
   function jumpToEditorDiagnostic(diagnostic: EditorDiagnostic) {
     if (diagnostic.file && diagnostic.file !== openedPath) {
       setPendingSemanticJump({ path: diagnostic.file, line: diagnostic.line, column: diagnostic.column });
-      const target = projectEntries.find(entry => !entry.is_dir && entry.path.toLocaleLowerCase() === diagnostic.file.toLocaleLowerCase())
-        || { name: diagnostic.file.split(/[\\/]/).pop() || diagnostic.file, path: diagnostic.file, is_dir: false };
       return;
     }
     if (!editorRef.current) return;
