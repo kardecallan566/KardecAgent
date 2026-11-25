@@ -287,16 +287,16 @@ def test_agent_appends_requested_line_to_existing_file(tmp_path: Path):
     from kardecagent.agent.tools_schema import parse_tool_call
 
     target = tmp_path / "loucura.py"
-    target.write_text("print('inicio')\\n", encoding="utf-8")
+    target.write_text("print('inicio')\n", encoding="utf-8")
     loop = AgentLoop(FakeLLM([]), Settings())
     state = make_state(tmp_path)
     action = parse_tool_call(json.dumps({
         "tool": "append_file",
-        "arguments": {"path": "loucura.py", "content": "print(1,2)\\n"},
+        "arguments": {"path": "loucura.py", "content": "print(1,2)\n"},
         "plan_step": 1,
     }))
 
     result = loop.executor._execute_tool(tmp_path, action, None, state)
 
     assert json.loads(result)["ok"] is True
-    assert target.read_text(encoding="utf-8") == "print('inicio')\\nprint(1,2)\\n"
+    assert target.read_text(encoding="utf-8") == "print('inicio')\nprint(1,2)\n"
