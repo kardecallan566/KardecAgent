@@ -32,6 +32,9 @@ const DEFAULT_SETTINGS: StudioSettings = {
 };
 type ProjectEntry = { name: string; path: string; is_dir: boolean };
 type RecentProject = { path: string; name: string; lastOpenedAt: string };
+type SemanticAction = "complete" | "definition" | "references" | "diagnostics";
+type SemanticItem = { name?: string; insert_text?: string; kind?: string; detail?: string; doc?: string; path?: string | null; line?: number | null; column?: number | null; description?: string };
+type SemanticResponse = { available: boolean; action: SemanticAction; items: SemanticItem[]; message?: string | null };
 
 function ExplorerEntry({ entry, projectRoot, onOpenFile, refreshKey }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void; refreshKey: number }) {
   const [expanded, setExpanded] = useState(false);
@@ -174,6 +177,10 @@ function App() {
   const [editorCompletions, setEditorCompletions] = useState<EditorCompletion[]>([]);
   const [activeCompletionIndex, setActiveCompletionIndex] = useState(0);
   const [toolEditorDiagnostics, setToolEditorDiagnostics] = useState<EditorDiagnostic[]>([]);
+  const semanticRequests = useRef(new Map<string, { action: SemanticAction; source: string; path: string; cursor: number }>());
+  const latestSemanticRequest = useRef<Partial<Record<SemanticAction, string>>>({});
+  const [semanticNotice, setSemanticNotice] = useState<string | null>(null);
+  const [pendingSemanticJump, setPendingSemanticJump] = useState<{ path: string; line: number; column: number } | null>(null);
   const [fileDirty, setFileDirty] = useState(false);
   const [fileSaving, setFileSaving] = useState(false);
   const [runningFile, setRunningFile] = useState(false);
@@ -289,6 +296,71 @@ function App() {
           const oldest = seenEventIds.current.values().next().value;
           if (oldest) seenEventIds.current.delete(oldest);
         }
+      }
+      if (message.type === "editor.semantic.response") {
+        const commandId = typeof message.command_id === "string" ? message.command_id : "";
+        const request = semanticRequests.current.get(commandId);
+        if (!request) return;
+        semanticRequests.current.delete(commandId);
+        if (latestSemanticRequest.current[request.action] !== commandId) return;
+        const result = message.payload as SemanticResponse | undefined;
+        if (!result) return;
+        if (!result.available) {
+          if (result.message) setSemanticNotice(result.message);
+          return;
+        }
+        setSemanticNotice(result.message || null);
+        if (request.action === "complete") {
+          if (editorRef.current?.value !== request.source) return;
+          const prefix = request.source.slice(0, request.cursor).match(/[A-Za-z_$][\\w$]*$/)?.[0] || "";
+          const semanticItems: EditorCompletion[] = result.items
+            .filter(item => typeof item.name === "string" && item.name && item.name.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase()) && item.name !== prefix)
+            .map(item => ({
+              label: item.name || "",
+              insertText: item.insert_text || item.name || "",
+              detail: item.detail || item.doc || item.kind || "Símbolo Python",
+              kind: "symbol" as const,
+            }));
+          const lexical = getEditorCompletions(request.source, "py", request.cursor, [], true);
+          completionRange.current = { start: lexical.start, end: lexical.end };
+          const merged = new Map<string, EditorCompletion>();
+          for (const item of [...semanticItems, ...lexical.items]) if (!merged.has(item.label)) merged.set(item.label, item);
+          setEditorCompletions([...merged.values()].slice(0, 20));
+          setActiveCompletionIndex(0);
+        } else if (request.action === "diagnostics") {
+          if (editorRef.current?.value !== request.source) return;
+          const diagnostics: EditorDiagnostic[] = result.items.map(item => ({
+            file: item.path || request.path,
+            line: Math.max(1, item.line || 1),
+            column: Math.max(1, (item.column ?? 0) + 1),
+            severity: "error",
+            code: "PY",
+            message: item.description || "Erro de sintaxe Python",
+            source: "jedi",
+          }));
+          setToolEditorDiagnostics(items => [...items.filter(item => item.source !== "jedi"), ...diagnostics]);
+        } else if (request.action === "definition") {
+          const target = result.items.find(item => item.path && item.line);
+          if (!target?.path || !target.line) {
+            setSemanticNotice("Nenhuma definição encontrada no workspace.");
+          } else {
+            setPendingSemanticJump({ path: target.path, line: target.line, column: Math.max(1, (target.column ?? 0) + 1) });
+          }
+        } else if (request.action === "references") {
+          const references: EditorDiagnostic[] = result.items.filter(item => item.path && item.line).map(item => ({
+            file: item.path || request.path,
+            line: Math.max(1, item.line || 1),
+            column: Math.max(1, (item.column ?? 0) + 1),
+            severity: "info",
+            code: "REF",
+            message: item.description || ("Referência: " + (item.name || "símbolo")),
+            source: "jedi",
+          }));
+          setToolEditorDiagnostics(items => [...items.filter(item => item.source !== "jedi"), ...references]);
+          setBottomPanel("Problemas");
+          setSemanticNotice(references.length + " referência(s) encontrada(s).");
+        }
+        return;
       }
       if (message.type === "runtime.heartbeat") {
         lastRuntimeHeartbeatAt.current = Date.now();
@@ -525,6 +597,9 @@ function App() {
     setToolEditorDiagnostics([]);
     setEditorCompletions([]);
     setActiveCompletionIndex(0);
+    setSemanticNotice(null);
+    semanticRequests.current.clear();
+    latestSemanticRequest.current = {};
   }, [openedPath]);
 
   useEffect(() => {
@@ -606,6 +681,31 @@ function App() {
     setTerminalReady(false);
   }
 
+  function requestPythonSemantic(action: SemanticAction, source: string, cursor: number) {
+    if (!projectRoot || !openedPath || runtimeStatus !== "online") return;
+    const extension = openedPath.split(".").pop()?.toLowerCase() || "";
+    if (extension !== "py" && extension !== "pyi") return;
+    const before = source.slice(0, cursor);
+    const line = before.split("\n").length;
+    const column = before.length - before.lastIndexOf("\n") - 1;
+    const commandId = "semantic-" + crypto.randomUUID();
+    semanticRequests.current.set(commandId, { action, source, path: openedPath, cursor });
+    latestSemanticRequest.current[action] = commandId;
+    void invoke("send_runtime_command", {
+      message: {
+        type: "editor.semantic",
+        schema_version: 1,
+        command_id: commandId,
+        payload: { file_path: openedPath, source, action, line, column },
+      },
+    }).catch(error => {
+      semanticRequests.current.delete(commandId);
+      if (latestSemanticRequest.current[action] === commandId) {
+        setSemanticNotice("Não foi possível solicitar inteligência Python: " + String(error));
+      }
+    });
+  }
+
   function refreshEditorCompletions(source: string, cursor: number, force = false) {
     if (!openedPath) { setEditorCompletions([]); return; }
     const result = getEditorCompletions(
@@ -618,6 +718,11 @@ function App() {
     completionRange.current = { start: result.start, end: result.end };
     setEditorCompletions(result.items);
     setActiveCompletionIndex(0);
+    const extension = openedPath.split(".").pop()?.toLowerCase() || "";
+    const prefix = source.slice(0, cursor).match(/[A-Za-z_$][\\w$]*$/)?.[0] || "";
+    if ((extension === "py" || extension === "pyi") && (force || prefix.length >= 2)) {
+      requestPythonSemantic("complete", source, cursor);
+    }
   }
 
   function applyEditorCompletion(item: EditorCompletion) {
@@ -639,6 +744,13 @@ function App() {
   }
 
   function jumpToEditorDiagnostic(diagnostic: EditorDiagnostic) {
+    if (diagnostic.file && diagnostic.file !== openedPath) {
+      setPendingSemanticJump({ path: diagnostic.file, line: diagnostic.line, column: diagnostic.column });
+      const target = projectEntries.find(entry => !entry.is_dir && entry.path.toLocaleLowerCase() === diagnostic.file.toLocaleLowerCase())
+        || { name: diagnostic.file.split(/[\\/]/).pop() || diagnostic.file, path: diagnostic.file, is_dir: false };
+      void openEntry(target);
+      return;
+    }
     if (!editorRef.current) return;
     const lines = fileContent.split("\n");
     const lineOffset = lines.slice(0, Math.max(0, diagnostic.line - 1)).reduce((total, line) => total + line.length + 1, 0);
@@ -646,6 +758,37 @@ function App() {
     editorRef.current.focus();
     editorRef.current.setSelectionRange(cursor, cursor);
   }
+
+  useEffect(() => {
+    if (!openedPath || runtimeStatus !== "online") return;
+    const extension = openedPath.split(".").pop()?.toLowerCase() || "";
+    if (extension !== "py" && extension !== "pyi") {
+      setToolEditorDiagnostics(items => items.filter(item => item.source !== "jedi"));
+      setSemanticNotice(null);
+      return;
+    }
+    const timer = window.setTimeout(() => requestPythonSemantic("diagnostics", fileContent, 0), 350);
+    return () => window.clearTimeout(timer);
+  }, [fileContent, openedPath, runtimeStatus, projectRoot]);
+
+  useEffect(() => {
+    if (!pendingSemanticJump) return;
+    if (openedPath !== pendingSemanticJump.path) {
+      const target = projectEntries.find(entry => !entry.is_dir && entry.path.toLocaleLowerCase() === pendingSemanticJump.path.toLocaleLowerCase())
+        || { name: pendingSemanticJump.path.split(/[\\/]/).pop() || pendingSemanticJump.path, path: pendingSemanticJump.path, is_dir: false };
+      void openEntry(target);
+      return;
+    }
+    if (!editorRef.current) return;
+    const lines = fileContent.split("\n");
+    const offset = lines.slice(0, Math.max(0, pendingSemanticJump.line - 1)).reduce((total, line) => total + line.length + 1, 0);
+    const cursor = Math.min(fileContent.length, offset + Math.max(0, pendingSemanticJump.column - 1));
+    requestAnimationFrame(() => {
+      editorRef.current?.focus();
+      editorRef.current?.setSelectionRange(cursor, cursor);
+    });
+    setPendingSemanticJump(null);
+  }, [pendingSemanticJump, openedPath, fileContent, projectEntries]);
 
   async function loadGitDiff(filePath: string) {
     if (!projectRoot) return;
@@ -1339,9 +1482,11 @@ function App() {
             <>
               <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · Tab/Enter aceitar</span><span>{editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados"}</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · F12 definição · Shift+F12 referências</span><span>{editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados"}</span></div><div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
                   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); return; }
                   if ((event.ctrlKey || event.metaKey) && event.code === "Space") { event.preventDefault(); refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart, true); return; }
+                  if (event.key === "F12" && !event.shiftKey) { event.preventDefault(); requestPythonSemantic("definition", event.currentTarget.value, event.currentTarget.selectionStart); return; }
+                  if (event.key === "F12" && event.shiftKey) { event.preventDefault(); requestPythonSemantic("references", event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (editorCompletions.length && event.key === "ArrowDown") { event.preventDefault(); setActiveCompletionIndex(index => (index + 1) % editorCompletions.length); return; }
                   if (editorCompletions.length && event.key === "ArrowUp") { event.preventDefault(); setActiveCompletionIndex(index => (index - 1 + editorCompletions.length) % editorCompletions.length); return; }
                   if (editorCompletions.length && (event.key === "Enter" || event.key === "Tab")) { event.preventDefault(); applyEditorCompletion(editorCompletions[activeCompletionIndex]); return; }
