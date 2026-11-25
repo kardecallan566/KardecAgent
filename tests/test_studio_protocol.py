@@ -396,7 +396,7 @@ def test_run_stdio_routes_semantic_editor_request_to_provider(monkeypatch, tmp_p
     )
 
     class FakeAgent:
-        settings = SimpleNamespace(max_iterations=4)
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
 
     assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -428,7 +428,7 @@ def test_run_stdio_rejects_semantic_request_for_another_workspace(monkeypatch, t
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
     class FakeAgent:
-        settings = SimpleNamespace(max_iterations=4)
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
 
     assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
     messages = [json.loads(line) for line in output.getvalue().splitlines()]
