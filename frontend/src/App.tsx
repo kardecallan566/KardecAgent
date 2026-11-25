@@ -111,6 +111,43 @@ function decodeChatEntities(value: string): string {
     });
 }
 
+function renderInlineMarkdown(value: string): ReactNode {
+  const nodes: ReactNode[] = [];
+  const pattern = /`[^`]+`|\\*\\*[^*]+\\*\\*|\\*[^*]+\\*/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > cursor) nodes.push(value.slice(cursor, match.index));
+    const token = match[0];
+    if (token.startsWith("`")) nodes.push(<code className="chat-inline-code" key={match.index}>{token.slice(1, -1)}</code>);
+    else if (token.startsWith("**")) nodes.push(<strong key={match.index}>{token.slice(2, -2)}</strong>);
+    else nodes.push(<em key={match.index}>{token.slice(1, -1)}</em>);
+    cursor = match.index + token.length;
+  }
+  if (cursor < value.length) nodes.push(value.slice(cursor));
+  return <>{nodes}</>;
+}
+
+function renderChatMessage(value: string): ReactNode {
+  const source = decodeChatEntities(value);
+  const nodes: ReactNode[] = [];
+  const pattern = /```([^\\n`]*)\\n([\\s\\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > cursor) {
+      const prose = source.slice(cursor, match.index);
+      nodes.push(<p key={"text-" + cursor}>{renderInlineMarkdown(prose)}</p>);
+    }
+    nodes.push(<pre className="chat-code-block" key={"code-" + match.index}><code>{match[2].replace(/\\n$/, "")}</code></pre>);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < source.length || nodes.length === 0) {
+    nodes.push(<p key={"text-" + cursor}>{renderInlineMarkdown(source.slice(cursor))}</p>);
+  }
+  return <div className="agent-chat-message-body">{nodes}</div>;
+}
+
 function taskStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     pending: "Pendente",
@@ -1613,7 +1650,7 @@ function App() {
                     <button className="chat-date-heading" onClick={() => setCollapsedChatDates(current => ({ ...current, [key]: !collapsed }))} aria-expanded={!collapsed}><span>{label}</span><small>{messages.length} mensagem(ns)</small><ChevronDown size={13} className={collapsed ? "collapsed" : ""}/></button>
                     {!collapsed && messages.map(message => <article className={`agent-chat-message role-${message.role} ${message.status || ""}`} key={message.id}>
                       <span>{message.role === "user" ? "Você" : "KardecAgent"}{message.status === "sending" ? " · enviando" : message.status === "sent" ? " · recebida" : message.status === "rejected" ? " · não enviada" : ""}<time>{message.createdAt && !Number.isNaN(Date.parse(message.createdAt)) ? new Date(message.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></span>
-                      <p>{decodeChatEntities(message.text)}</p>
+                      {renderChatMessage(message.text)}
                     </article>)}
                   </section>;
                 });
