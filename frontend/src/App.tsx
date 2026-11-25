@@ -1391,12 +1391,16 @@ function App() {
     if (runtimeStatus !== "online" || ["Em execução", "Validando", "Retomando", "Recebida", "Aguardando aprovação", "Decisão enviada"].includes(
       runtimeTasks.find(item => item.executionId === task.executionId)?.status || ""
     )) return;
+    const removed = runtimeTasks.find(item => item.id === task.id);
+    // Remove immediately from the visible panel; Core deletion remains authoritative.
+    setRuntimeTasks(items => items.filter(item => item.id !== task.id));
     try {
       await invoke("send_runtime_command", { message: {
         type: "task.delete", schema_version: 1, command_id: crypto.randomUUID(),
         payload: { task_id: task.id, project_root: projectRoot }
       }});
     } catch (error) {
+      if (removed) setRuntimeTasks(items => items.some(item => item.id === removed.id) ? items : [...items, removed].slice(-50));
       setRuntimeError("Não foi possível excluir a tarefa: " + String(error));
     }
   }
