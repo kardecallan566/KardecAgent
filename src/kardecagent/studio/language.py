@@ -49,7 +49,7 @@ def python_semantic_request(
     column: int,
 ) -> dict[str, Any]:
     """Run one bounded semantic request; never raises optional-tool errors."""
-    if action not in {"complete", "definition", "references"}:
+    if action not in {"complete", "definition", "references", "diagnostics"}:
         raise ValueError("Unsupported semantic action.")
     root, path = _validated_context(source, file_path, project_root, line, column)
 
@@ -81,9 +81,22 @@ def python_semantic_request(
         elif action == "definition":
             values = script.goto(line=line, column=column, follow_imports=True, follow_builtin_imports=False)
             items = [_location(item) for item in values[:MAX_RESULTS]]
-        else:
+        elif action == "references":
             values = script.get_references(line=line, column=column, include_builtins=False)
             items = [_location(item) for item in values[:MAX_RESULTS]]
+        else:
+            values = script.get_syntax_errors()
+            items = [
+                {
+                    "name": "",
+                    "path": str(path),
+                    "line": getattr(item, "line", None),
+                    "column": getattr(item, "column", 0),
+                    "description": str(item.get_message() if callable(getattr(item, "get_message", None)) else getattr(item, "message", "Python syntax error"))[:500],
+                    "kind": "error",
+                }
+                for item in values[:MAX_RESULTS]
+            ]
         return {"available": True, "action": action, "items": items, "message": None}
     except Exception as exc:  # Jedi reports parse and project errors with several exception types.
         return {
