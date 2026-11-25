@@ -235,8 +235,8 @@ class TaskStore:
         if match is None:
             return False
         _, state, _plan, _board = match
-        if state.status.value in {"running", "verifying", "recovering", "resuming"}:
-            raise PersistenceError("active tasks cannot be deleted")
+        # The Studio only exposes deletion for non-live tasks. A persisted
+        # RUNNING state can represent an interrupted execution restored at startup.
         targets = (
             self.path_for(state.task),
             self.path_for(state.task).with_suffix(".json.bak"),
