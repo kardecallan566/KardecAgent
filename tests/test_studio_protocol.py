@@ -473,7 +473,7 @@ def test_run_stdio_deletes_persisted_task(monkeypatch, tmp_path):
         "command_id": "delete-task-command",
         "payload": {"task_id": "persisted-task-id", "project_root": str(tmp_path)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
@@ -493,7 +493,7 @@ def test_run_stdio_rejects_task_delete_outside_active_workspace(monkeypatch, tmp
         "command_id": "delete-outside",
         "payload": {"task_id": "persisted-task-id", "project_root": str(tmp_path / "other")},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
