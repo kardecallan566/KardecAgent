@@ -54,7 +54,7 @@ class AgentLoop:
                 "commands": profile.commands,
             },
             "project_files": project_snapshot(root, limit=500),
-            "workspace_access": {"root": str(root), "tools": ["list_files", "read_file", "search_files", "write_file", "apply_patch", "run_command"], "path_rule": "All tool paths are relative to this workspace root."},
+            "workspace_access": {"root": str(root), "tools": ["list_files", "read_file", "search_files", "write_file", "append_file", "replace_in_file", "create_directory", "apply_patch", "run_command"], "path_rule": "All tool paths are relative to this workspace root; list_files accepts an optional relative directory path."},
             "conversation_history": conversation_history or [],
             "active_editor": active_editor_context or None,
         }
