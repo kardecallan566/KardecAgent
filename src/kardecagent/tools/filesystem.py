@@ -34,6 +34,16 @@ class ProjectFilesystem:
         updated=content.replace(find,replacement) if replace_all else content.replace(find,replacement,1)
         self.write_file(relative_path,updated)
         return count if replace_all else 1
-    def list_files(self,limit:int=500)->list[str]:
-        from ..project.context import project_snapshot
-        return project_snapshot(self.root,limit)
+    def list_files(self,limit:int=500,relative_path:str=".")->list[str]:
+        from ..project.context import iter_project_files
+        base=self.safe_path(relative_path)
+        if not base.is_dir():
+            raise NotADirectoryError(relative_path)
+        files=[]
+        for path in iter_project_files(self.root):
+            try:
+                path.relative_to(base)
+            except ValueError:
+                continue
+            files.append(path.relative_to(self.root).as_posix())
+        return sorted(files)[:limit]
