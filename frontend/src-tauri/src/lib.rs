@@ -1017,8 +1017,17 @@ fn send_runtime_command(state: State<'_, RuntimeState>, mut message: Value) -> R
     }
     let encoded = serde_json::to_string(&message)
         .map_err(|e| format!("Comando inválido: {e}"))?;
-    if encoded.len() > 64 * 1024 {
-        return Err("Comando excede o limite de 64 KiB.".into());
+    let limit = if message.get("type").and_then(Value::as_str) == Some("editor.semantic") {
+        6_200_000
+    } else {
+        64 * 1024
+    };
+    if encoded.len() > limit {
+        return Err(if limit > 64 * 1024 {
+            "Solicitação semântica excede o limite de 6 MiB.".into()
+        } else {
+            "Comando excede o limite de 64 KiB.".into()
+        });
     }
     let stdin = process.stdin.as_mut().ok_or("Entrada do Core indisponível.")?;
     stdin.write_all(encoded.as_bytes()).map_err(|e| format!("Falha ao enviar comando ao runtime: {e}"))?;
