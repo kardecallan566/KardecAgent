@@ -649,3 +649,8 @@ body { min-width:900px; }
 }
 .task-remove-button:hover { border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.09); color: #f28b8b; }
 .task-remove-button:focus-visible, .chat-date-heading:focus-visible { outline: 2px solid #9b85f5; outline-offset: 2px; }
+
+/* Chat text may contain literal HTML entities from older model responses. */
+.agent-chat-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-remove-button { opacity: .85; }
+.task-remove-button:hover { opacity: 1; }
