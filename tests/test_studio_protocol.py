@@ -463,7 +463,7 @@ def test_read_message_keeps_regular_commands_at_64_kib(monkeypatch):
         studio_protocol._read_message()
 
 
-def test_run_stdio_deletes_only_inactive_persisted_task(monkeypatch, tmp_path):
+def test_run_stdio_deletes_persisted_task(monkeypatch, tmp_path):
     deleted = []
     store = SimpleNamespace(delete_by_id=lambda identifier: deleted.append(identifier) or True)
     monkeypatch.setattr(studio_protocol, "TaskStore", lambda root: store)
