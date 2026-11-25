@@ -49,7 +49,7 @@ def python_semantic_request(
     column: int,
 ) -> dict[str, Any]:
     """Run one bounded semantic request; never raises optional-tool errors."""
-    if action not in {"complete", "definition", "references", "diagnostics"}:
+    if action not in {"complete", "definition", "references", "diagnostics", "signature"}:
         raise ValueError("Unsupported semantic action.")
     root, path = _validated_context(source, file_path, project_root, line, column)
 
@@ -84,6 +84,21 @@ def python_semantic_request(
         elif action == "references":
             values = script.get_references(line=line, column=column, include_builtins=False)
             items = [_location(item) for item in values[:MAX_RESULTS]]
+        elif action == "signature":
+            values = script.get_signatures(line=line, column=column)
+            items = [
+                {
+                    "name": str(getattr(item, "name", "") or "")[:100],
+                    "detail": str(item.to_string() if callable(getattr(item, "to_string", None)) else getattr(item, "name", ""))[:240],
+                    "doc": str(item.docstring(raw=True) or "")[:500],
+                    "parameters": [
+                        str(getattr(parameter, "name", parameter))[:100]
+                        for parameter in getattr(item, "params", [])[:20]
+                    ],
+                    "active_parameter": getattr(item, "index", None),
+                }
+                for item in values[:5]
+            ]
         else:
             values = script.get_syntax_errors()
             items = [
