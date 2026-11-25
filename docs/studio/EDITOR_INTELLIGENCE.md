@@ -32,7 +32,7 @@ O editor Python oferece Rename Symbol com Jedi por meio de `F2`:
 - O arquivo ativo precisa estar salvo antes da análise, evitando misturar buffer não persistido com o conteúdo real do workspace.
 - Jedi calcula as referências e produz uma prévia multi-arquivo; o editor mostra os caminhos afetados e o diff antes de solicitar confirmação.
 - A aplicação exige uma confirmação explícita. Cancelar descarta a prévia sem gravar arquivos.
-- O Core limita a prévia a dez operações pendentes, valida identificadores Python e restringe todos os caminhos ao workspace.
+- O Core limita a prévia a cinco operações pendentes, até 100 arquivos e 10 MB combinados por operação, valida identificadores Python e restringe todos os caminhos ao workspace.
 - Cada arquivo recebe um SHA-256 durante a prévia. Se qualquer arquivo mudar antes da confirmação, a aplicação é recusada e uma nova prévia deve ser gerada.
 - Os arquivos são preparados em temporários no mesmo diretório e substituídos somente depois das validações. Em caso de falha durante a substituição, o Core tenta restaurar os arquivos já substituídos.
 - O recurso é exclusivo para arquivos Python e depende do extra opcional `studio` (Jedi).
