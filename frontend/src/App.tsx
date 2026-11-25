@@ -113,7 +113,7 @@ function decodeChatEntities(value: string): string {
 
 function renderInlineMarkdown(value: string): ReactNode {
   const nodes: ReactNode[] = [];
-  const pattern = /`[^`]+`|\\*\\*[^*]+\\*\\*|\\*[^*]+\\*/g;
+  const pattern = /\*\*[^*]+\*\*|\*[^*]+\*/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(value)) !== null) {
@@ -131,7 +131,7 @@ function renderInlineMarkdown(value: string): ReactNode {
 function renderChatMessage(value: string): ReactNode {
   const source = decodeChatEntities(value);
   const nodes: ReactNode[] = [];
-  const pattern = /```([^\\n`]*)\\n([\\s\\S]*?)```/g;
+  const pattern = /```([^\n`]*)\n([\s\S]*?)```/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(source)) !== null) {
@@ -139,7 +139,7 @@ function renderChatMessage(value: string): ReactNode {
       const prose = source.slice(cursor, match.index);
       nodes.push(<p key={"text-" + cursor}>{renderInlineMarkdown(prose)}</p>);
     }
-    nodes.push(<pre className="chat-code-block" key={"code-" + match.index}><code>{match[2].replace(/\\n$/, "")}</code></pre>);
+    nodes.push(<pre className="chat-code-block" key={"code-" + match.index}><code>{match[2].replace(/\n$/, "")}</code></pre>);
     cursor = match.index + match[0].length;
   }
   if (cursor < source.length || nodes.length === 0) {
