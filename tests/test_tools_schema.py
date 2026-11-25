@@ -115,3 +115,8 @@ def test_new_filesystem_tools_require_plan_step_and_validate_types():
         parse_tool_call('{"tool":"create_directory","arguments":{"path":"src/new"}}')
     action = parse_tool_call('{"tool":"replace_in_file","arguments":{"path":"a.py","find":"x","replace":"y","replace_all":true},"plan_step":1}')
     assert action.arguments["replace_all"] is True
+
+
+def test_list_files_accepts_optional_path_argument():
+    action = parse_tool_call('{"tool":"list_files","arguments":{"path":"src","limit":20}}')
+    assert action.arguments == {"path": "src", "limit": 20}
