@@ -140,7 +140,7 @@ class RenamePreviewManager:
                     raise RuntimeError(f"{path.relative_to(root).as_posix()} changed after preview. Generate a new preview.")
 
             staged: dict[Path, Path] = {}
-            originals: dict[Path, bytes] = {}
+            originals: dict[Path, tuple[bytes, int]] = {}
             replaced: list[Path] = []
             try:
                 for path, (_expected_hash, new_content, mode) in preview.changes.items():
