@@ -120,6 +120,12 @@ class RenamePreviewManager:
             "diff": diff,
         }
 
+    def cancel(self, preview_id: str) -> dict[str, Any]:
+        with self._lock:
+            if self._pending.pop(preview_id, None) is None:
+                raise ValueError("Rename preview was not found, expired, or already consumed.")
+        return {"cancelled": True}
+
     def apply(self, project_root: str, preview_id: str) -> dict[str, Any]:
         root = Path(project_root).expanduser().resolve(strict=True)
         with self._lock:
