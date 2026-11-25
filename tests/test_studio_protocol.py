@@ -381,7 +381,7 @@ def test_run_stdio_routes_semantic_editor_request_to_provider(monkeypatch, tmp_p
             "column": 5,
         },
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
     monkeypatch.setattr(
