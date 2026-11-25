@@ -359,12 +359,12 @@ function App() {
         }
         const files = (result.changes || []).map(change => change.path);
         const diff = result.diff || "(Jedi não retornou um diff textual.)";
-        const excerpt = diff.length > 12000 ? diff.slice(0, 12000) + "\\n\\n[Diff truncado na prévia]" : diff;
+        const excerpt = diff.length > 12000 ? diff.slice(0, 12000) + "\n\n[Diff truncado na prévia]" : diff;
         const approved = window.confirm(
           "Renomear símbolo " + (result.old_name || "selecionado") + " para " + (result.new_name || "") +
-          "?\\n\\nArquivos afetados (" + files.length + "):\\n" + files.join("\\n") +
-          "\\n\\nPRÉVIA DAS ALTERAÇÕES\\n" + excerpt +
-          "\\n\\nSomente confirme se deseja aplicar estas alterações."
+          "?\n\nArquivos afetados (" + files.length + "):\n" + files.join("\n") +
+          "\n\nPRÉVIA DAS ALTERAÇÕES\n" + excerpt +
+          "\n\nSomente confirme se deseja aplicar estas alterações."
         );
         const commandId = "rename-" + crypto.randomUUID();
         void invoke("send_runtime_command", {
@@ -834,8 +834,8 @@ function App() {
       return;
     }
     const before = source.slice(0, cursor);
-    const match = before.match(/[A-Za-z_]\\w*$/);
-    const symbol = match?.[0] || source.slice(cursor).match(/^[A-Za-z_]\\w*/)?.[0] || "";
+    const match = before.match(/[A-Za-z_]\w*$/);
+    const symbol = match?.[0] || source.slice(cursor).match(/^[A-Za-z_]\w*/)?.[0] || "";
     if (!symbol) {
       setSemanticNotice("Posicione o cursor sobre um símbolo Python para renomeá-lo.");
       return;
@@ -844,8 +844,8 @@ function App() {
     if (!newName || newName === symbol) return;
     const symbolStart = match ? cursor - symbol.length : cursor;
     const position = source.slice(0, symbolStart);
-    const line = position.split("\\n").length;
-    const column = position.length - position.lastIndexOf("\\n") - 1;
+    const line = position.split("\n").length;
+    const column = position.length - position.lastIndexOf("\n") - 1;
     const commandId = "rename-preview-" + crypto.randomUUID();
     void invoke("send_runtime_command", {
       message: {
