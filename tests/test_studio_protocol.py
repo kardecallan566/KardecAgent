@@ -28,7 +28,7 @@ def test_read_message_allows_bounded_large_rename_preview(monkeypatch):
         "command_id": "rename-preview",
         "payload": {"source": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + chr(10)))
     message = studio_protocol._read_message()
     assert message["type"] == "editor.rename.preview"
     assert len(message["payload"]["source"]) == studio_protocol.MAX_MESSAGE_BYTES + 100
