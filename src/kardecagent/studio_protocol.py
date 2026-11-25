@@ -13,6 +13,7 @@ from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
 from .studio.language import python_semantic_request
+from .studio.refactor import RenamePreviewManager
 
 
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -163,7 +164,7 @@ def _read_message() -> dict:
         raise StudioProtocolError("Command must be a valid JSON object.") from exc
     if not isinstance(message, dict):
         raise StudioProtocolError("Command must be a JSON object.")
-    limit = MAX_SEMANTIC_MESSAGE_BYTES if message.get("type") == "editor.semantic" else MAX_MESSAGE_BYTES
+    limit = MAX_SEMANTIC_MESSAGE_BYTES if message.get("type") in {"editor.semantic", "editor.rename.preview"} else MAX_MESSAGE_BYTES
     if encoded_size > limit:
         raise StudioProtocolError("Command exceeds the 64 KiB protocol limit.")
     return message
@@ -484,6 +485,56 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             except Exception as exc:
                 reason = "timeout" if "timeout" in type(exc).__name__.lower() else "model_error"
                 _write({"type": "chat.failed", "schema_version": 1, "command_id": command_identifier, "payload": {"reason": reason, "message": f"Falha na conversa ({reason}): {exc}", "retryable": reason == "timeout"}})
+            continue
+        if message.get("schema_version") == 1 and message.get("type") in {"editor.rename.preview", "editor.rename.apply", "editor.rename.cancel"}:
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            command_type = message.get("type")
+            response_type = {
+                "editor.rename.preview": "editor.rename.preview.response",
+                "editor.rename.apply": "editor.rename.apply.response",
+                "editor.rename.cancel": "editor.rename.cancel.response",
+            }[command_type]
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": response_type, "schema_version": 1, "payload": {"available": False, "message": "command_id is required."}})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            try:
+                if command_type == "editor.rename.preview":
+                    requested_root = payload.get("project_root")
+                    try:
+                        workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+                    except (OSError, RuntimeError):
+                        workspace_matches = False
+                    if not workspace_matches:
+                        raise ValueError("project_root does not match the active runtime workspace.")
+                    result = rename_previews.preview(
+                        str(root), payload.get("file_path"), payload.get("source"),
+                        payload.get("line"), payload.get("column"), payload.get("new_name"),
+                    )
+                elif command_type == "editor.rename.apply":
+                    result = rename_previews.apply(str(root), payload.get("preview_id", ""))
+                else:
+                    result = rename_previews.cancel(payload.get("preview_id", ""))
+                _write({
+                    "type": response_type,
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "payload": {"available": True, **result},
+                })
+            except Exception as exc:
+                _write({
+                    "type": response_type,
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "payload": {"available": False, "message": str(exc)[:1000]},
+                })
             continue
         if message.get("schema_version") == 1 and message.get("type") == "editor.semantic":
             command_identifier = message.get("command_id")
