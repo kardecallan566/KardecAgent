@@ -113,7 +113,7 @@ function decodeChatEntities(value: string): string {
 
 function renderInlineMarkdown(value: string): ReactNode {
   const nodes: ReactNode[] = [];
-  const pattern = /\*\*[^*]+\*\*|\*[^*]+\*/g;
+  const pattern = /`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(value)) !== null) {
