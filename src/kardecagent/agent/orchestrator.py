@@ -132,11 +132,15 @@ class Orchestrator:
 
         for left_scope in left.scope:
             left_parts = normalized(left_scope)
-            if not left_parts:
+            if not left_parts or any(
+                part == ".." or "*" in part or "?" in part for part in left_parts
+            ):
                 return True
             for right_scope in right.scope:
                 right_parts = normalized(right_scope)
-                if not right_parts:
+                if not right_parts or any(
+                    part == ".." or "*" in part or "?" in part for part in right_parts
+                ):
                     return True
                 common = min(len(left_parts), len(right_parts))
                 if left_parts[:common] == right_parts[:common]:
