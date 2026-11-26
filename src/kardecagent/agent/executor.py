@@ -131,7 +131,6 @@ class AgentExecutor:
             }, ensure_ascii=False)},
         ]
         for _ in range(3):
-            messages = self._bound_messages(messages, state, tracker)
             response = self.llm.chat(messages)
             try:
                 return parse_security_review(response.content).as_dict()
@@ -440,6 +439,7 @@ class AgentExecutor:
             state.record("iteration_started", f"Starting iteration {iteration}.")
             if persistence_callback is not None:
                 persistence_callback(state, plan)
+            messages = self._bound_messages(messages, state, tracker)
             response = self.llm.chat(messages)
             state.record("model_response", response.content)
             try:
