@@ -267,13 +267,10 @@ def _doctor(settings: Settings, root) -> int:
             client = _build_llm(settings)
             print("[OK] Ollama installed models: " + (", ".join(names) if names else "(none)"))
             print(f"[OK] Active primary model: {client.model}")
-            response = client.chat(
-                [
-                    {"role": "system", "content": "Reply with exactly: KARDECAGENT_OK"},
-                    {"role": "user", "content": "Health check."},
-                ],
-                temperature=0.0,
-            )
+            inventory_client.model = client.model
+            response = inventory_client.health_check()
+        else:
+            client = _build_llm(settings)
             response = client.chat(
                 [
                     {"role": "system", "content": "Reply with exactly: KARDECAGENT_OK"},
@@ -290,7 +287,6 @@ def _doctor(settings: Settings, root) -> int:
     except Exception as exc:
         print(f"[FAIL] Local LLM: {exc}")
         return 1
-
 
 
 def _ollama_health(settings: Settings) -> int:
@@ -311,13 +307,8 @@ def _ollama_health(settings: Settings) -> int:
             if isinstance(item, dict) and item.get("name")
         })
         client = _build_llm(settings)
-        response = client.chat(
-            [
-                {"role": "system", "content": "Reply with exactly: KARDECAGENT_OK"},
-                {"role": "user", "content": "Health check."},
-            ],
-            temperature=0.0,
-        )
+        inventory_client.model = client.model
+        response = inventory_client.health_check()
         if response.content.strip() != "KARDECAGENT_OK":
             raise RuntimeError("Ollama responded, but the health-check content was unexpected.")
         print(json.dumps({
