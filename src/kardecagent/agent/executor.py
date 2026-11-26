@@ -504,10 +504,15 @@ class AgentExecutor:
             "security_requirements": plan.security_requirements,
             "scope": list(allowed_scope or ()),
             "plan_progress": tracker.as_dict(),
+            "active_step": {
+                "number": tracker.current_step,
+                "description": plan.steps[tracker.current_step - 1] if tracker.current_step else None,
+            },
             "resume_step": resume_step,
             "instruction": "Resume from the specified active plan step. Do not redo completed steps unless verification requires it. " +
-                           "Execute only the approved plan. Mutating actions must use the active plan_step. " +
-                           "Complete each step with evidence. Never expand scope.",
+                           "The active_step is the ONLY step you may execute now. Every mutating action's plan_step MUST exactly equal active_step.number. " +
+                           "Never jump to a future step. After gathering concrete evidence for the active step, call complete_step for that exact step number; wait for the executor to advance before acting on the next step. " +
+                           "Do not use meaningless actions such as creating the project root directory. Complete each step with evidence. Never expand scope.",
         }
         messages = [
             {"role": "system", "content": compose_system_prompt(
@@ -906,6 +911,11 @@ class AgentExecutor:
                              {"role": "user", "content": json.dumps({
                                  "tool": action.tool, "result": result,
                                  "plan_progress": tracker.as_dict(),
+                                 "active_step": {
+                                     "number": tracker.current_step,
+                                     "description": plan.steps[tracker.current_step - 1] if tracker.current_step else None,
+                                 },
+                                 "instruction": "Continue ONLY with the active_step shown here. For every mutating action, plan_step must exactly equal active_step.number. Complete the active step with evidence before starting the next one.",
                              }, ensure_ascii=False)}]
             except Exception as exc:
                 state.record("tool_error", f"{action.tool} failed: {exc}",
