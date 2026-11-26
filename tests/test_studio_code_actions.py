@@ -93,3 +93,19 @@ def test_code_actions_reject_overlapping_ruff_edits(tmp_path: Path, monkeypatch:
 
     assert result["available"] is True
     assert result["actions"] == []
+
+
+def test_real_ruff_exposes_safe_unused_import_fix(tmp_path: Path) -> None:
+    import importlib.util
+
+    if importlib.util.find_spec("ruff") is None:
+        pytest.skip("Ruff is not installed in this test environment.")
+    root = tmp_path / "project"
+    root.mkdir()
+    source = "import os\\nprint('ok')\\n"
+    (root / "main.py").write_text(source, encoding="utf-8")
+
+    result = code_actions.python_code_actions(source, "main.py", str(root), 1, 0)
+
+    assert result["available"] is True
+    assert any(action["code"] == "F401" for action in result["actions"])
