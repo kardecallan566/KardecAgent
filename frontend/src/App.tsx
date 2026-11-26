@@ -286,6 +286,9 @@ function App() {
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEventItem[]>([]);
   const [eventSearch, setEventSearch] = useState("");
   const filteredEvents = runtimeEvents.filter(event => (event.type + " " + event.message + " " + runtimeEventDetails(event.data).join(" ")).toLowerCase().includes(eventSearch.trim().toLowerCase()));
+  const runtimeCompletedSteps = runtimePlanSteps.filter(step => step.status === "completed").length;
+  const runtimeProgressPercent = runtimePlanSteps.length ? Math.round(runtimeCompletedSteps / runtimePlanSteps.length * 100) : 0;
+  const runtimeNextSteps = runtimePlanSteps.filter(step => step.status === "pending").slice(0, 3);
   const liveEditorDiagnostics = openedPath ? getLiveEditorDiagnostics(fileContent, openedPath.split(".").pop() || "", openedPath) : [];
   const editorDiagnostics = [...liveEditorDiagnostics, ...toolEditorDiagnostics];
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string; recoverable?: boolean }>>([]);
@@ -567,10 +570,10 @@ function App() {
         }
         if (coreType === "plan_step_started" && Number.isInteger(eventData.step)) {
           setActiveRuntimeStep(eventData.step);
-          setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "running" } : item));
+          setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "running", updated_at: message.timestamp } : item));
         }
         if (coreType === "plan_step_completed" && Number.isInteger(eventData.step)) {
-          setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "completed" } : item));
+          setRuntimePlanSteps(items => items.map(item => item.step === eventData.step ? { ...item, status: "completed", evidence: typeof eventData.evidence === "string" ? eventData.evidence : undefined, updated_at: message.timestamp } : item));
           setActiveRuntimeStep(null);
         }
         if (board && Array.isArray(board.subtasks)) {
@@ -1750,6 +1753,15 @@ function App() {
             <div className="process-dashboard">
               <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Mapa de dependências e estados recebido por eventos do core Python</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
               <div className="process-summary"><div><span>ESTADO DO CORE</span><strong>{runtimeStatus === "online" ? "Online" : runtimeStatus === "connecting" ? "Conectando" : "Offline"}</strong><small>{runtimeBusy ? "Uma tarefa está em execução" : "Aguardando instrução"}</small></div><div><span>TAREFAS RECEBIDAS</span><strong>{String(runtimeTasks.length).padStart(2, "0")}</strong><small>Histórico recente nesta sessão</small></div><div><span>EVENTOS</span><strong>{String(runtimeEvents.length).padStart(2, "0")}</strong><small>Buffer limitado a 100 eventos</small></div></div>
+              {runtimePlanSteps.length > 0 && <section className="runtime-progress-overview">
+                <div className="runtime-progress-heading"><strong>Progresso do plano aprovado</strong><span>{runtimeCompletedSteps}/{runtimePlanSteps.length} etapas · {runtimeProgressPercent}%</span></div>
+                <div className="runtime-progress-track"><i style={{ width: runtimeProgressPercent + "%" }}/></div>
+                <div className="runtime-next-steps">
+                  <strong>Próximas etapas</strong>
+                  {runtimeNextSteps.length ? runtimeNextSteps.map(step => <span key={step.step}>#{step.step} · {step.title}</span>) : <span>{runtimeProgressPercent === 100 ? "Todas as etapas foram concluídas; aguardando verificação final." : "O agente está executando ou verificando a etapa atual."}</span>}
+                </div>
+                {runtimePlanSteps.filter(step => step.status === "completed" && step.evidence).slice(-3).map(step => <div className="runtime-step-evidence" key={step.step}><b>Etapa {step.step} · evidência</b><span>{step.evidence}</span></div>)}
+              </section>}
               <section className="runtime-task-graph">
                 <div className="process-section-title"><strong>Mapa de execução do runtime</strong><span>{runtimeSubtasks.length ? `${runtimeSubtasks.length} subtarefas · dependências do core` : runtimePlanSteps.length ? `${runtimePlanSteps.length} etapas aprovadas · progresso do executor` : "Aguardando o plano do core"}</span></div>
                 {runtimeSubtasks.length ? <div className="runtime-board-grid">
