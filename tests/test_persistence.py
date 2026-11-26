@@ -289,3 +289,27 @@ def test_task_store_lists_recent_tasks_with_a_hard_limit(tmp_path: Path):
     assert [item[0] for item in recent] == saved_ids[-2:][::-1]
     assert [item[1].task for item in recent] == ["newest", "middle"]
     assert store.list_recent(limit=0) == []
+
+
+
+def test_journal_replay_keeps_parallel_subtask_cursors_separate(tmp_path: Path):
+    store = TaskStore(tmp_path)
+    state = TaskState("parallel-cursors", str(tmp_path))
+    state.transition(TaskStatus.RUNNING)
+    state.record("subtask_started", "first started", subtask_id="first", plan_steps=[1, 2])
+    state.record("subtask_started", "second started", subtask_id="second", plan_steps=[3, 4])
+    state.record(
+        "subtask_progress", "first progressed",
+        subtask_id="first", plan_step=2, parent_plan_step=2,
+    )
+    state.record(
+        "subtask_progress", "second progressed",
+        subtask_id="second", plan_step=2, parent_plan_step=4,
+    )
+    store.save(state, plan=make_plan(), approved=True)
+
+    loaded, _, _ = store.load("parallel-cursors")
+
+    assert loaded.active_subtask_id == "second"
+    assert loaded.active_subtask_step == 2
+    assert loaded.active_plan_step == 4
