@@ -29,7 +29,7 @@ Rules:
 - Every subtask must map to one or more approved plan steps.
 - Every implementation subtask must declare a non-empty project-relative scope.
 - Dependencies must be explicit.
-- Execution is sequential.
+- Independent subtasks may run in parallel only when dependencies and file scopes do not overlap.
 - Return ONLY JSON:
 {"subtasks":[{"id":"1","title":"...","objective":"...","scope":["src/..."],"dependencies":[],"completion_criteria":["..."],"plan_steps":[1]}]}
 """
@@ -307,20 +307,21 @@ class Orchestrator:
             state.transition(TaskStatus.RUNNING, reason="Subtask execution initialized.")
             def persist_subtask_progress(current_state, current_plan):
                 if parent_state is not None:
-                    parent_state.record(
-                        "subtask_progress",
-                        "Logical subtask execution cursor persisted.",
-                        subtask_id=subtask.id,
-                        plan_step=current_state.active_plan_step,
-                        parent_plan_step=(
-                            subtask.plan_steps[current_state.active_plan_step - 1]
-                            if 1 <= current_state.active_plan_step <= len(subtask.plan_steps)
-                            else subtask.plan_steps[-1]
-                        ),
-                        status=current_state.status.value,
-                    )
-                    if progress_callback is not None:
-                        progress_callback(board)
+                    with self._progress_lock:
+                        parent_state.record(
+                            "subtask_progress",
+                            "Logical subtask execution cursor persisted.",
+                            subtask_id=subtask.id,
+                            plan_step=current_state.active_plan_step,
+                            parent_plan_step=(
+                                subtask.plan_steps[current_state.active_plan_step - 1]
+                                if 1 <= current_state.active_plan_step <= len(subtask.plan_steps)
+                                else subtask.plan_steps[-1]
+                            ),
+                            status=current_state.status.value,
+                        )
+                        if progress_callback is not None:
+                            progress_callback(board)
 
             result_state = self.agent_loop.execute_approved_plan(
                 project_root,
