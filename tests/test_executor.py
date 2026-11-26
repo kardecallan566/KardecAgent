@@ -459,6 +459,15 @@ def test_create_directory_reports_existing_directory_as_noop(tmp_path: Path):
 
 
 def test_executor_advances_only_after_explicit_step_completion(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='counter-fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_example.py").write_text(
+        "def test_example():\n    assert True\n",
+        encoding="utf-8",
+    )
     llm = FakeLLM([
         '{"tool":"list_files","arguments":{"path":"."}}',
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"Directory listing inspected; teste.py is absent."},"plan_step":1}',
