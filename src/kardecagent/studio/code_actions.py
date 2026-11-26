@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -54,11 +55,24 @@ def python_code_actions(
     """Return safe Ruff fixes as source-range edits; never modifies workspace files."""
     root, path = _context(source, file_path, project_root, line, column)
     relative = path.relative_to(root).as_posix()
+    executable = shutil.which("ruff")
+    if executable:
+        command = [executable]
+    elif not getattr(sys, "frozen", False):
+        # Isolated mode prevents a workspace-local ruff.py/package from shadowing
+        # the installed linter when the Core is running from a project directory.
+        command = [sys.executable, "-I", "-m", "ruff"]
+    else:
+        return {
+            "available": False,
+            "actions": [],
+            "message": "O executável Ruff não foi encontrado. Instale Ruff no ambiente do Studio ou disponibilize 'ruff' no PATH.",
+        }
+
     try:
         completed = subprocess.run(
-            [
-                sys.executable, "-m", "ruff", "check",
-                "--output-format", "json",
+            command + [
+                "check", "--output-format", "json",
                 "--stdin-filename", relative,
                 "-",
             ],
