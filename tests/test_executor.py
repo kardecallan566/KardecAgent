@@ -489,5 +489,5 @@ def test_executor_advances_only_after_explicit_step_completion(tmp_path: Path):
     result = loop.execute_approved_plan(tmp_path, "create counter", plan, make_state(tmp_path))
 
     assert result.status is TaskStatus.COMPLETED
-    assert (tmp_path / "teste.py").read_text(encoding="utf-8") == "for i in range(11):\\n    print(i)\\n"
+    assert (tmp_path / "teste.py").read_text(encoding="utf-8") == "for i in range(11):\n    print(i)\n"
     assert [event.data["step"] for event in result.events if event.event_type == "plan_step_completed"] == [1, 2, 3]
