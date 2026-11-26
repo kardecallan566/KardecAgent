@@ -30,6 +30,18 @@ TOOL_SCHEMAS = {
     "git_status": {"required": [], "types": {}, "optional": {}},
     "git_diff": {"required": [], "types": {}, "optional": {}},
     "git_log": {"required": [], "types": {}, "optional": {"limit": int}},
+    "git_branches": {"required": [], "types": {}, "optional": {}},
+    "git_remotes": {"required": [], "types": {}, "optional": {}},
+    "git_fetch": {"required": [], "types": {}, "optional": {"remote": str, "prune": bool}},
+    "git_pull": {"required": [], "types": {}, "optional": {"remote": str, "branch": str}},
+    "git_push": {"required": [], "types": {}, "optional": {"remote": str, "branch": str, "set_upstream": bool}},
+    "git_create_branch": {"required": ["branch"], "types": {"branch": str}, "optional": {"base": str}},
+    "git_checkout": {"required": ["branch"], "types": {"branch": str}, "optional": {}},
+    "git_commit": {"required": ["message", "paths"], "types": {"message": str, "paths": list}, "optional": {}},
+    "git_merge": {"required": ["branch"], "types": {"branch": str}, "optional": {}},
+    "git_create_pr": {"required": ["title"], "types": {"title": str}, "optional": {"body": str, "base": str, "draft": bool}},
+    "git_pr_status": {"required": [], "types": {}, "optional": {}},
+    "git_merge_pr": {"required": ["number"], "types": {"number": int}, "optional": {"method": str}},
     "request_plan_change": {
         "required": ["plan"],
         "types": {"plan": dict},
@@ -41,7 +53,8 @@ TOOL_SCHEMAS = {
 
 from ..llm.cleaner import extract_json_payload
 
-STEP_REQUIRED_TOOLS = {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"}
+GIT_MUTATING_TOOLS = {"git_pull", "git_push", "git_create_branch", "git_checkout", "git_commit", "git_merge", "git_create_pr", "git_merge_pr"}
+STEP_REQUIRED_TOOLS = {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS
 
 def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     schema = TOOL_SCHEMAS[tool]
@@ -86,6 +99,12 @@ def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
                 "criteria_evidence must be a non-empty list of evidence strings "
                 "or objects with textual criterion and evidence fields"
             )
+    if tool == "git_commit":
+        paths = arguments.get("paths")
+        if not paths or not all(isinstance(path, str) and path.strip() for path in paths):
+            raise ToolCallError("git_commit paths must be a non-empty list of relative path strings")
+    if tool == "git_merge_pr" and arguments.get("method", "squash") not in {"merge", "squash", "rebase"}:
+        raise ToolCallError("git_merge_pr method must be merge, squash, or rebase")
     if tool == "run_checks" and arguments.get("kind") not in {"test", "lint", "typecheck", "build", "validate", "security", "dependency_audit"}:
         raise ToolCallError("argument 'kind' must be one of: test, lint, typecheck, build, validate, security, dependency_audit")
     for key in ("limit", "max_results", "max_chars"):
@@ -118,6 +137,10 @@ def tool_instructions() -> str:
         "or run_command when the approved plan requires it. "
         "Return ONLY JSON with tool, arguments and optional plan_step. "
         "plan_step is required for write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, open_file and complete_step. "
+        "Use read-only tools without plan_step. Git tools: git_status, git_diff, git_log, git_branches, git_remotes, git_pr_status. " 
+        "Git mutations: git_fetch, git_pull, git_push, git_create_branch, git_checkout, git_commit, git_merge, git_create_pr, git_merge_pr. " 
+        "Before every Git mutation, request and receive the explicit user high-risk approval; never treat plan approval as Git approval. " 
+        "Use git_commit only with explicit selected paths; never stage all files implicitly. Pulls must be fast-forward-only; never force-push or hard-reset. " 
         "Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, "
         "fetch_web_page, write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, open_file, git_status, git_diff, git_log, "
         "complete_step, request_plan_change, finish. finish requires exactly one criteria_evidence item for every approved completion criterion; use objects with criterion and evidence fields so each item is explicitly linked. "
