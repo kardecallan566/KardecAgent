@@ -101,3 +101,78 @@ def test_ollama_client_server_version(monkeypatch):
 
     monkeypatch.setattr("kardecagent.llm.ollama.httpx.get", lambda *args, **kwargs: FakeResponse())
     assert OllamaClient().server_version() == "0.12.0"
+
+
+
+def test_build_llm_discovers_installed_models_and_creates_escalation_pool(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "qwen-coder:3b", "size": 3_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+            {"name": "llama:8b", "size": 5_000_000_000},
+        ],
+    )
+    settings = Settings(llm_model="qwen-coder:3b")
+
+    client = _build_llm(settings)
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen-coder:3b"
+    assert [item.model for item in client.clients[1:]] == ["llama:8b", "qwen-coder:14b"]
+
+
+def test_build_llm_automatically_selects_installed_model_when_configured_model_is_missing(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "general:2b", "size": 2_000_000_000},
+            {"name": "qwen-coder:4b", "size": 3_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+        ],
+    )
+
+    client = _build_llm(Settings(llm_model="not-installed:latest"))
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen-coder:4b"
+    assert [item.model for item in client.clients[1:]] == ["qwen-coder:14b"]
+
+
+def test_build_llm_uses_smallest_installed_model_as_fast_route_when_enabled(monkeypatch):
+    from kardecagent.llm.router import AdaptiveLLMClient, EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "qwen-coder:3b", "size": 2_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+        ],
+    )
+
+    client = _build_llm(Settings(
+        llm_model="qwen-coder:14b",
+        llm_routing_enabled=True,
+        llm_fast_model="",
+    ))
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert isinstance(client.clients[0], AdaptiveLLMClient)
+    assert client.clients[0].primary.model == "qwen-coder:14b"
+    assert client.clients[0].fast.model == "qwen-coder:3b"
+
+
+def test_build_llm_fails_clearly_when_ollama_has_no_installed_models(monkeypatch):
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [],
+    )
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="No Ollama models are installed"):
+        _build_llm(Settings())
