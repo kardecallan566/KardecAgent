@@ -1808,7 +1808,7 @@ function App() {
                   {runtimeSubtasks.map(subtask => <article className={`runtime-subtask-card status-${subtask.status}`} key={subtask.id}>
                     <div className="runtime-subtask-head"><span className="runtime-subtask-id">{subtask.id}</span><span className={`runtime-subtask-status status-${subtask.status}`}>{subtask.status === "running" ? "EM EXECUÇÃO" : subtask.status === "completed" ? "CONCLUÍDA" : subtask.status === "failed" ? "FALHOU" : subtask.status === "blocked" ? "BLOQUEADA" : "PENDENTE"}</span></div>
                     <strong>{subtask.title}</strong><p>{subtask.objective}</p>
-                    <div className="runtime-subtask-meta"><span>Dependências: {subtask.dependencies.length ? subtask.dependencies.join(", ") : "Nenhuma"}</span><span>Etapas aprovadas: {subtask.plan_steps.join(", ") || "—"} · tentativas: {subtask.iterations}</span></div>
+                    <div className="runtime-subtask-meta"><span>Dependências: {subtask.dependencies.length ? subtask.dependencies.join(", ") : "Nenhuma"}</span><span>Etapas aprovadas: {subtask.plan_steps.join(", ") || "—"} · cursor: {subtask.current_step ?? 1}/{subtask.plan_steps.length} · tentativas: {subtask.iterations}</span></div>
                     {subtask.scope.length > 0 && <div className="runtime-subtask-scope">{subtask.scope.slice(0, 3).join(" · ")}{subtask.scope.length > 3 ? ` · +${subtask.scope.length - 3}` : ""}</div>}
                     {subtask.result && <small className="runtime-subtask-result">{subtask.result}</small>}
                   </article>)}
