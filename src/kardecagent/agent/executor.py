@@ -50,7 +50,10 @@ class AgentExecutor:
     @classmethod
     def _is_repeated_side_effect(cls, state: TaskState, action) -> bool:
         """Block an identical append/command when no successful workspace mutation intervened."""
-        if action.tool not in {"append_file", "run_command"} | GIT_MUTATING_TOOLS:
+        if action.tool not in {
+            "write_file", "create_directory", "append_file",
+            "replace_in_file", "apply_patch", "run_command",
+        } | GIT_MUTATING_TOOLS:
             return False
         signature = cls._action_signature(action)
         workspace_mutations = {
@@ -782,9 +785,23 @@ class AgentExecutor:
             if action.tool == "finish":
                 if not tracker.completed:
                     state.record("plan_scope_violation", "Finish rejected: plan has incomplete steps.",
-                                 progress=tracker.as_dict())
+                                 progress=tracker.as_dict(), active_step=active_step_number(),
+                                 active_step_description=active_step_description())
+                    if register_no_progress("model attempted to finish before completing the active plan",
+                                            tool="finish", requested_step=active_step_number()):
+                        return stop_stalled_execution(
+                            "The model repeatedly attempted to finish while approved steps remained incomplete.",
+                            tool="finish", requested_step=active_step_number())
                     messages += [{"role": "assistant", "content": response.content},
-                                 {"role": "user", "content": "Complete every approved plan step before finishing."}]
+                                 {"role": "user", "content": json.dumps({
+                                     "error": "plan_incomplete",
+                                     "plan_progress": tracker.as_dict(),
+                                     "active_step": {
+                                         "number": active_step_number(),
+                                         "description": active_step_description(),
+                                     },
+                                     "instruction": "Do not finish yet. Execute and explicitly complete the active approved step, then continue in order.",
+                                 }, ensure_ascii=False)}]
                     continue
                 evidence_result = evaluate_completion_evidence(
                     plan.completion_criteria,
