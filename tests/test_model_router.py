@@ -205,3 +205,19 @@ def test_escalating_client_does_not_switch_without_an_approval_callback():
     assert not approved
     assert request is not None
     assert client.model == "qwen-coder:3b"
+
+
+
+def test_escalation_approval_is_scoped_to_one_task():
+    primary = FakeClient("qwen-coder:3b")
+    stronger = FakeClient("qwen-coder:14b")
+    client = EscalatingLLMClient(primary, [stronger])
+    client.set_approval_callback(lambda request: True)
+
+    approved, _request = client.request_escalation("repeated verification failures")
+    assert approved
+    assert client.model == "qwen-coder:14b"
+
+    client.set_approval_callback(lambda request: True)
+
+    assert client.model == "qwen-coder:3b"
