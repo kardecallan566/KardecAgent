@@ -134,3 +134,22 @@ def test_create_pr_refuses_implicit_push_without_upstream(tmp_path: Path):
     assert result.returncode != 0
     assert "Push it first" in result.stderr
     assert "implicit push" in result.stderr
+
+
+def test_create_pr_refuses_unpushed_commits(tmp_path: Path):
+    import subprocess
+    from kardecagent.tools.git import gh_create_pr
+
+    _init_repo(tmp_path)
+    remote = tmp_path.parent / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=tmp_path, check=True)
+    branch = git_current_branch(tmp_path).stdout.strip()
+    subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("unpushed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "unpushed"], cwd=tmp_path, check=True, capture_output=True)
+
+    result = gh_create_pr(tmp_path, "Feature", "Description", "main")
+    assert result.returncode != 0
+    assert "unpushed commits" in result.stderr
