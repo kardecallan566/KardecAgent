@@ -105,6 +105,8 @@ class EscalatingLLMClient:
                     response.raw = raw
                     return response
             except Exception as exc:
+                if isinstance(exc, RuntimeError) and "not approved" in str(exc).lower():
+                    raise
                 with self._lock:
                     if self.active_index != selected_index:
                         continue
