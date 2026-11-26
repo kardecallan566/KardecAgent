@@ -870,6 +870,38 @@ class AgentExecutor:
                     ]
                     continue
                 evidence = evidence_result["items"]
+                if isinstance(context, dict) and isinstance(context.get("subtask"), dict):
+                    state.transition(
+                        TaskStatus.VERIFYING,
+                        reason="Subtask completion accepted; project-wide checks are deferred until integration.",
+                    )
+                    deferred = {
+                        "verified": True,
+                        "deferred_to_parent": True,
+                        "reason": "Independent subtasks share a workspace; global checks run after all required subtasks finish.",
+                    }
+                    state.record(
+                        "verification_deferred",
+                        "Project-wide verification deferred until the parent plan integrates all subtasks.",
+                        verification=deferred,
+                    )
+                    state.transition(
+                        TaskStatus.VERIFIED,
+                        reason="Subtask evidence accepted; parent verification remains required.",
+                    )
+                    state.record(
+                        "completed",
+                        "Subtask completed with evidence; parent verification is still required.",
+                        reason=action.arguments["reason"],
+                        criteria_evidence=evidence,
+                        verification=deferred,
+                    )
+                    state.transition(
+                        TaskStatus.COMPLETED,
+                        reason="Subtask completed; parent plan owns final project verification.",
+                    )
+                    return state
+
                 security_required = plan.security_level in {"sensitive", "high_risk"}
                 state.transition(TaskStatus.VERIFYING, reason="Completion verification started.")
                 verification = self.verify(root, security_required=security_required)
