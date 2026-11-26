@@ -117,3 +117,25 @@ def test_short_plans_are_not_decomposed_for_single_file_edits(tmp_path):
     assert manager.should_decompose(["A", "B", "C", "D"], 500) is False
     assert manager.should_decompose(["A", "B", "C", "D", "E"], 79) is False
     assert manager.should_decompose(["A", "B", "C", "D", "E"], 80) is True
+
+
+
+def test_recover_interrupted_subtasks_preserves_individual_cursors(tmp_path: Path):
+    manager = SubtaskManager(tmp_path)
+    board = manager.parse_decomposition({
+        "subtasks": [
+            {"id": "1", "title": "Core", "objective": "Implement core", "scope": ["src/core"], "plan_steps": [1]},
+            {"id": "2", "title": "UI", "objective": "Implement UI", "scope": ["src/ui"], "plan_steps": [2]},
+        ]
+    })
+    board.mark_running("1")
+    board.mark_running("2")
+    board.get("1").current_step = 2
+    board.get("2").current_step = 3
+
+    recovered = board.recover_interrupted()
+
+    assert recovered == ["1", "2"]
+    assert [task.id for task in board.ready()] == ["1", "2"]
+    assert board.get("1").current_step == 2
+    assert board.get("2").current_step == 3
