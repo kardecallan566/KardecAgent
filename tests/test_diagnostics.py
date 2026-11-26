@@ -122,3 +122,20 @@ def test_diagnose_model_provider_timeout_as_transient_provider_failure():
     assert result.category is FailureCategory.MODEL_PROVIDER
     assert result.retryable is True
     assert result.source_event == "model_request_failed"
+
+
+
+def test_diagnose_repeated_plan_step_stall_as_non_retryable_plan_failure():
+    result = diagnose_failure(
+        [event(
+            "plan_execution_stalled",
+            "Execution stalled on the active approved plan step.",
+            reason="model repeatedly skipped active step",
+            active_step=1,
+        )],
+        "failed",
+    )
+
+    assert result.category is FailureCategory.PLAN
+    assert result.retryable is False
+    assert result.source_event == "plan_execution_stalled"
