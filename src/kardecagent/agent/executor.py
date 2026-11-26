@@ -543,6 +543,7 @@ class AgentExecutor:
         repeated_invalid_count = 0
         no_progress_count = 0
         no_progress_limit = 3
+        verification_failure_count = 0
 
         def stop_stalled_execution(reason: str, *, tool: str | None = None,
                                    requested_step: int | None = None) -> TaskState:
@@ -881,6 +882,12 @@ class AgentExecutor:
                                      "verification": verification,
                                      "instruction": "Diagnose the failed checks, fix the implementation, and retest before finishing.",
                                  }, ensure_ascii=False)}]
+                    verification_failure_count += 1
+                    if verification_failure_count >= 2 and request_model_escalation(
+                        "The same task has failed independent verification more than once.",
+                        "verification_failure",
+                    ):
+                        verification_failure_count = 0
                     continue
                 if security_required:
                     review = self._security_review(root, task, plan)
@@ -893,6 +900,12 @@ class AgentExecutor:
                                          "security_review": review,
                                          "instruction": "Address security findings before finishing.",
                                      }, ensure_ascii=False)}]
+                        verification_failure_count += 1
+                        if verification_failure_count >= 2 and request_model_escalation(
+                            "The implementation repeatedly failed the independent security review.",
+                            "verification_failure",
+                        ):
+                            verification_failure_count = 0
                         continue
                 state.transition(TaskStatus.VERIFIED, reason="Completion verification passed.")
                 state.record("completed", "Task completed and verified.",
