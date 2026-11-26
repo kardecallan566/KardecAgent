@@ -10,7 +10,11 @@ def test_settings_default_to_ollama():
     assert settings.llm_model == "qwen2.5-coder:3b"
 
 
-def test_build_llm_uses_ollama():
+def test_build_llm_uses_ollama(monkeypatch):
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [{"name": "qwen2.5-coder:3b", "size": 2_000_000_000}],
+    )
     client = _build_llm(Settings())
     assert isinstance(client, OllamaClient)
     assert client.base_url == "http://127.0.0.1:11434"
