@@ -309,6 +309,7 @@ function App() {
   const pendingInstructionCommandId = useRef<string | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeActivity, setRuntimeActivity] = useState("");
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEventItem[]>([]);
   const [eventSearch, setEventSearch] = useState("");
@@ -321,6 +322,7 @@ function App() {
   const runtimeCompletedSteps = runtimePlanSteps.filter(step => step.status === "completed").length;
   const runtimeProgressPercent = runtimePlanSteps.length ? Math.round(runtimeCompletedSteps / runtimePlanSteps.length * 100) : 0;
   const runtimeNextSteps = runtimePlanSteps.filter(step => step.status === "pending").slice(0, 3);
+  const recoverableTaskCount = runtimeTasks.filter(task => task.recoverable).length;
   const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
   const [activeRuntimeStep, setActiveRuntimeStep] = useState<number | null>(null);
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
@@ -589,11 +591,20 @@ function App() {
             || { name: requestedPath.split("/").pop() || requestedPath, path: requestedPath, is_dir: false };
           void openEntry(entry);
         }
+        if (coreType === "model_request_started") setRuntimeActivity("Aguardando resposta do modelo");
+        if (coreType === "model_response_received") setRuntimeActivity("Interpretando resposta do modelo");
+        if (coreType === "tool_started") setRuntimeActivity("Executando ferramenta: " + String(eventData.tool || "ação"));
+        if (["tool_result", "tool_error", "model_request_failed"].includes(coreType)) setRuntimeActivity("Atualizando estado da execução");
         if (coreType === "plan_created" && Array.isArray(eventData.plan?.steps)) {
           setRuntimePlanSteps(eventData.plan.steps.map((title: string, index: number) => ({ step: index + 1, title, status: "pending" })));
         }
         if ((coreType === "plan_step_started" || coreType === "subtask_started") && message.execution_id) {
-          setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: "Em execução" } : task));
+          if (message.type === "task.failed") {
+          setRuntimePlanSteps(items => items.map(step => step.status === "running"
+            ? { ...step, status: message.payload?.recoverable ? "interrupted" : "failed" }
+            : step));
+        }
+        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: "Em execução" } : task));
         }
         if (coreType === "plan_step_started" && Number.isInteger(eventData.step)) {
           setActiveRuntimeStep(eventData.step);
@@ -634,6 +645,7 @@ function App() {
       } else if (message.type === "task.created") {
         // Restored records are history only; they are not live executions.
         setRuntimeBusy(!message.payload?.restored);
+        setRuntimeActivity(message.payload?.restored ? "Histórico restaurado; aguardando retomada explícita" : "Iniciando execução");
         setRuntimeSubtasks([]);
         setRuntimePlanSteps([]);
         setActiveRuntimeSubtask(null);
@@ -647,6 +659,7 @@ function App() {
           || String(message.execution_id || "").startsWith("restored:");
         if (!restoredExecution) {
           setRuntimeBusy(false);
+          setRuntimeActivity("");
           // Live task results are useful conversation output. Historical terminal
           // events (including older runtimes without payload.restored) stay in Tasks.
           const summary = message.payload?.result_summary || message.payload?.message
