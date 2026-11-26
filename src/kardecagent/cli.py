@@ -127,6 +127,8 @@ def _build_llm(settings: Settings):
         for model in settings.llm_escalation_models
         if model and model not in {settings.llm_model, settings.llm_fast_model}
     ]
+    if not alternatives:
+        return base
     return EscalatingLLMClient(base, alternatives)
 
 
