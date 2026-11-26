@@ -820,6 +820,8 @@ class AgentExecutor:
                 no_progress_count = 0
                 state.record("plan_step_completed", f"Completed plan step {step}.",
                              step=step, evidence=action.arguments["evidence"], progress=tracker.as_dict())
+                if persistence_callback is not None:
+                    persistence_callback(state, plan)
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
                                  "plan_progress": tracker.as_dict(),
