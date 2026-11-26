@@ -120,3 +120,46 @@ def test_new_filesystem_tools_require_plan_step_and_validate_types():
 def test_list_files_accepts_optional_path_argument():
     action = parse_tool_call('{"tool":"list_files","arguments":{"path":"src","limit":20}}')
     assert action.arguments == {"path": "src", "limit": 20}
+
+
+def test_git_mutations_require_plan_step_and_explicit_arguments():
+    for tool, arguments in [
+        ("git_push", {"remote": "origin"}),
+        ("git_pull", {"remote": "origin"}),
+        ("git_create_branch", {"branch": "feature/new"}),
+        ("git_checkout", {"branch": "main"}),
+        ("git_commit", {"message": "feat: change", "paths": ["src/app.py"]}),
+        ("git_merge", {"branch": "feature/new"}),
+        ("git_create_pr", {"title": "Feature"}),
+        ("git_merge_pr", {"number": 12}),
+        ("git_fetch", {"remote": "origin"}),
+    ]:
+        import json
+        with pytest.raises(ToolCallError, match="plan_step is required"):
+            parse_tool_call(json.dumps({"tool": tool, "arguments": arguments}))
+
+
+def test_git_commit_requires_non_empty_relative_paths():
+    import json
+    with pytest.raises(ToolCallError, match="non-empty list"):
+        parse_tool_call(json.dumps({
+            "tool": "git_commit",
+            "arguments": {"message": "feat: change", "paths": []},
+            "plan_step": 1,
+        }))
+    with pytest.raises(ToolCallError, match="non-empty list"):
+        parse_tool_call(json.dumps({
+            "tool": "git_commit",
+            "arguments": {"message": "feat: change", "paths": ["", 3]},
+            "plan_step": 1,
+        }))
+
+
+def test_git_read_only_tools_do_not_require_plan_step():
+    for tool in ("git_branches", "git_remotes", "git_pr_status", "git_status"):
+        assert parse_tool_call('{"tool":"' + tool + '","arguments":{}}').tool == tool
+
+
+def test_git_merge_pr_validates_merge_method():
+    with pytest.raises(ToolCallError, match="method must be"):
+        parse_tool_call('{"tool":"git_merge_pr","arguments":{"number":3,"method":"force"},"plan_step":1}')
