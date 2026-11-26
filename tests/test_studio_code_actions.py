@@ -10,7 +10,7 @@ from kardecagent.studio import code_actions
 def test_returns_only_safe_ruff_fixes_as_source_edits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "project"
     root.mkdir()
-    (root / "main.py").write_text("import os\\nprint('ok')\\n", encoding="utf-8")
+    (root / "main.py").write_text("import os\nprint('ok')\n", encoding="utf-8")
     payload = [{
         "code": "F401",
         "message": "`os` imported but unused",
@@ -31,23 +31,23 @@ def test_returns_only_safe_ruff_fixes_as_source_edits(tmp_path: Path, monkeypatc
         returncode=1, stdout=json.dumps(payload), stderr=""
     ))
 
-    result = code_actions.python_code_actions("import os\\nprint('ok')\\n", "main.py", str(root), 1, 0)
+    result = code_actions.python_code_actions("import os\nprint('ok')\n", "main.py", str(root), 1, 0)
 
     assert result["available"] is True
     assert len(result["actions"]) == 1
     assert result["actions"][0]["code"] == "F401"
     assert result["actions"][0]["edits"] == [{"start": 0, "end": 10, "content": ""}]
-    assert (root / "main.py").read_text(encoding="utf-8") == "import os\\nprint('ok')\\n"
+    assert (root / "main.py").read_text(encoding="utf-8") == "import os\nprint('ok')\n"
 
 
 def test_code_actions_reject_paths_outside_workspace(tmp_path: Path) -> None:
     root = tmp_path / "project"
     root.mkdir()
     outside = tmp_path / "outside.py"
-    outside.write_text("value = 1\\n", encoding="utf-8")
+    outside.write_text("value = 1\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="inside the active workspace"):
-        code_actions.python_code_actions("value = 1\\n", str(outside), str(root), 1, 0)
+        code_actions.python_code_actions("value = 1\n", str(outside), str(root), 1, 0)
 
 
 def test_code_actions_reject_non_python_files(tmp_path: Path) -> None:
