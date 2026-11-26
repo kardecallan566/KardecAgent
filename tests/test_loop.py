@@ -64,8 +64,9 @@ def test_failed_verification_returns_to_model(tmp_path: Path):
     state = AgentLoop(llm, Settings(max_iterations=4)).run(
         tmp_path, "fix task", approval_callback=lambda plan: True
     )
-    assert state.status.value == "max_iterations"
-    assert any(event.event_type == "verification_failed" for event in state.events)
+    assert state.status.value == "failed"
+    assert sum(event.event_type == "verification_failed" for event in state.events) == 2
+    assert any(event.event_type == "model_request_failed" for event in state.events)
 
 
 def test_static_html_finish_is_verified(tmp_path: Path):
