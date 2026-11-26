@@ -18,6 +18,8 @@ from ..tools import (
     git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
     fetch_web_page,
     WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change,
+    git_branch_list, git_remote_list, git_fetch, git_pull, git_push, git_create_branch,
+    git_checkout, git_commit, git_merge, gh_create_pr, gh_pr_status, gh_merge_pr,
 )
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
 from .security import assess_security, security_requirements_for
@@ -25,7 +27,7 @@ from .security_review import (
     SecurityReviewError, parse_security_review, security_review_instructions,
 )
 from .state import TaskState, TaskStatus
-from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
+from .tools_schema import GIT_MUTATING_TOOLS, ToolCallError, parse_tool_call, tool_instructions
 from .verification import evaluate_completion_evidence, summarize_check_results
 
 CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate")
@@ -47,13 +49,13 @@ class AgentExecutor:
     @classmethod
     def _is_repeated_side_effect(cls, state: TaskState, action) -> bool:
         """Block an identical append/command when no successful workspace mutation intervened."""
-        if action.tool not in {"append_file", "run_command"}:
+        if action.tool not in {"append_file", "run_command"} | GIT_MUTATING_TOOLS:
             return False
         signature = cls._action_signature(action)
         workspace_mutations = {
             "write_file", "create_directory", "append_file",
             "replace_in_file", "apply_patch", "run_command",
-        }
+        } | GIT_MUTATING_TOOLS
         for event in reversed(state.events):
             if event.event_type != "tool_result":
                 continue
@@ -205,6 +207,32 @@ class AgentExecutor:
                          changes=records, subtask_id=subtask_id)
 
     @staticmethod
+    def _contains_git_mutation_command(command: str) -> bool:
+        pattern = (
+            r"\bgit(?:['\",\s]+)(?:-C\s+[^\s]+\s+)?"
+            r"(?:add|commit|push|pull|fetch|checkout|switch|branch|merge|reset|rebase|cherry-pick|revert|tag|remote|worktree|update-ref|stash|clean|config|submodule|clone|restore|apply)\b"
+            r"|\bgh(?:['\",\s]+)pr(?:['\",\s]+)(?:create|merge|close|edit|ready|review)\b"
+        )
+        return re.search(pattern, command) is not None
+
+    @staticmethod
+    def _is_forbidden_git_command(command: str) -> bool:
+        patterns = (
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?push\b[^\n]*(?:--force(?:-with-lease)?|\s-f(?:\s|$))",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?reset\s+--hard\b",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?clean\b[^\n]*(?:-[^\s]*[fd]|--force)",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?branch\s+-D\b",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?checkout\s+--(?:\s|$)",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?restore\b",
+        )
+        return any(re.search(pattern, command, re.IGNORECASE) for pattern in patterns)
+
+    @staticmethod
+    def _redact_git_command(command: str) -> str:
+        command = re.sub(r"(?i)(token|password|secret|authorization)(\s*[=:]\s*)[^\s]+", r"\1\2[REDACTED]", command)
+        return re.sub(r"(https?://)[^/@\s]+@", r"\1[REDACTED]@", command)
+
+    @staticmethod
     def _is_dependency_install_command(command: str) -> bool:
         """Conservative detection for package-manager mutations; test/build commands remain allowed."""
         patterns = (
@@ -348,6 +376,30 @@ class AgentExecutor:
             return json.dumps(git_diff(root).__dict__, ensure_ascii=False)
         if action.tool == "git_log":
             return json.dumps(git_log(root, args.get("limit", 10)).__dict__, ensure_ascii=False)
+        if action.tool == "git_branches":
+            return json.dumps(git_branch_list(root).__dict__, ensure_ascii=False)
+        if action.tool == "git_remotes":
+            return json.dumps(git_remote_list(root).__dict__, ensure_ascii=False)
+        if action.tool == "git_pr_status":
+            return json.dumps(gh_pr_status(root).__dict__, ensure_ascii=False)
+        git_operations = {
+            "git_fetch": lambda: git_fetch(root, args.get("remote", "origin"), prune=args.get("prune", False)),
+            "git_pull": lambda: git_pull(root, args.get("remote", "origin"), args.get("branch")),
+            "git_push": lambda: git_push(root, args.get("remote", "origin"), args.get("branch"),
+                                         set_upstream=args.get("set_upstream", False)),
+            "git_create_branch": lambda: git_create_branch(root, args["branch"], args.get("base", "HEAD")),
+            "git_checkout": lambda: git_checkout(root, args["branch"]),
+            "git_commit": lambda: git_commit(root, args["message"], args["paths"]),
+            "git_merge": lambda: git_merge(root, args["branch"]),
+            "git_create_pr": lambda: gh_create_pr(root, args["title"], args.get("body", ""),
+                                                  args.get("base", "main"), draft=args.get("draft", False)),
+            "git_merge_pr": lambda: gh_merge_pr(root, args["number"], args.get("method", "squash")),
+        }
+        if action.tool in git_operations:
+            if scope:
+                raise PermissionError("Git repository mutations are disabled inside scoped subtasks.")
+            result = git_operations[action.tool]()
+            return json.dumps(result.__dict__, ensure_ascii=False)
         raise ToolCallError("unsupported tool: " + action.tool)
 
     def rollback_operation(self, root: Path, state: TaskState, event_index: int) -> TaskState:
@@ -546,7 +598,7 @@ class AgentExecutor:
                     persistence_callback(state, plan)
                 continue
 
-            if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"}:
+            if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS:
                 if action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
@@ -562,6 +614,54 @@ class AgentExecutor:
                     state.record("plan_step_started", f"Started plan step {action.plan_step}.",
                                  step=action.plan_step,
                                  description=plan.steps[action.plan_step - 1])
+
+            if action.tool == "run_command" and self._is_forbidden_git_command(action.arguments.get("command", "")):
+                state.record("git_command_blocked",
+                             "A destructive Git command is permanently blocked by the safety policy.",
+                             tool=action.tool, reason="force push, hard reset, destructive clean, or forced branch deletion")
+                messages += [{"role": "assistant", "content": response.content},
+                             {"role": "user", "content":
+                              "This destructive Git command is blocked and cannot be authorized through run_command. Use the dedicated safe Git tools or explain why the requested operation cannot be performed safely."}]
+                continue
+
+            git_command_requires_approval = (
+                action.tool == "run_command"
+                and self._contains_git_mutation_command(action.arguments.get("command", ""))
+            )
+            if action.tool in GIT_MUTATING_TOOLS or git_command_requires_approval:
+                approval_details = {
+                    key: action.arguments[key]
+                    for key in ("remote", "branch", "base", "number", "method", "title", "paths", "message", "draft", "set_upstream", "prune")
+                    if key in action.arguments
+                }
+                if git_command_requires_approval:
+                    approval_details["command"] = self._redact_git_command(action.arguments["command"])
+                approval_summary = " · ".join(f"{key}={value}" for key, value in approval_details.items())
+                approval_plan = ExecutionPlan(
+                    summary=f"Autorização Git: {action.tool}" + (f" · {approval_summary}" if approval_summary else ""),
+                    steps=[f"Executar {action.tool} após autorização explícita do usuário."],
+                    validation=["Verificar o código de saída e o resultado retornado pelo Git."],
+                    risks=["Esta operação altera referências, histórico local ou remoto do repositório."],
+                    completion_criteria=["A operação Git autorizada foi executada e seu resultado foi verificado."],
+                    security_level="high_risk",
+                    security_requirements=[
+                        "Aprovação explícita do usuário para esta operação Git específica.",
+                        "Não executar push forçado nem sobrescrever alterações locais.",
+                        "Registrar o resultado da operação no journal.",
+                    ],
+                )
+                state.record("git_approval_requested",
+                             "Git mutation is paused until explicit user approval.",
+                             tool=action.tool, details=approval_details)
+                if high_risk_approval_callback is None or not high_risk_approval_callback(approval_plan):
+                    state.record("git_approval_denied", "Git operation was not authorized.",
+                                 tool=action.tool)
+                    messages += [{"role": "assistant", "content": response.content},
+                                 {"role": "user", "content":
+                                  "A operação Git foi recusada ou não recebeu autorização explícita. Não tente contornar a aprovação. Continue apenas com consultas ou explique o bloqueio."}]
+                    continue
+                state.record("git_approval_granted", "User explicitly authorized this Git operation.",
+                             tool=action.tool, details=approval_details)
 
             if action.tool == "complete_step":
                 step = action.arguments["step"]
@@ -679,6 +779,13 @@ class AgentExecutor:
                 ]
                 continue
 
+            safe_action_details = {
+                key: action.arguments[key]
+                for key in ("path", "branch", "base", "remote", "number", "title", "kind", "message", "paths", "prune", "set_upstream", "draft", "method")
+                if key in action.arguments
+            }
+            state.record("tool_started", f"Starting {action.tool}.", tool=action.tool,
+                         plan_step=action.plan_step, details=safe_action_details)
             try:
                 result = self._execute_tool(root, action, allowed_scope, state, (context or {}).get("subtask", {}).get("id"))
                 if action.tool in investigation_tools:

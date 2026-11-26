@@ -111,4 +111,6 @@ export interface RuntimePlanStep {
   step: number;
   title: string;
   status: "pending" | "running" | "completed";
+  evidence?: string;
+  updated_at?: string;
 }

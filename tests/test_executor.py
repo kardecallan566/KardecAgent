@@ -300,3 +300,79 @@ def test_agent_appends_requested_line_to_existing_file(tmp_path: Path):
 
     assert json.loads(result)["ok"] is True
     assert target.read_text(encoding="utf-8") == "print('inicio')\nprint(1,2)\n"
+
+
+def test_git_shell_mutations_are_detected_and_redacted(tmp_path: Path):
+    executor = AgentLoop(FakeLLM([]), Settings()).executor
+    assert executor._contains_git_mutation_command("git push origin main")
+    assert executor._contains_git_mutation_command("git -C repo pull --ff-only origin main")
+    assert executor._contains_git_mutation_command("npm test && gh pr merge 12 --squash")
+    assert not executor._contains_git_mutation_command("git status && git log -5")
+    redacted = executor._redact_git_command("git push https://token123@github.com/org/repo")
+    assert "token123" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_git_mutation_requires_separate_explicit_approval(tmp_path: Path):
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True)
+
+    class StaticLLM:
+        def chat(self, messages):
+            return LLMResponse('{"tool":"git_create_branch","arguments":{"branch":"feature/approval"},"plan_step":1}', {})
+
+    loop = AgentLoop(StaticLLM(), Settings(max_iterations=2))
+    plan = ExecutionPlan("Git change", ["Create a branch"], ["verify branch"], [], ["branch created"])
+    result = loop.execute_approved_plan(tmp_path, "create branch", plan, make_state(tmp_path))
+
+    assert result.status.value == "max_iterations"
+    assert any(event.event_type == "git_approval_denied" for event in result.events)
+    assert not subprocess.run(["git", "branch", "--list", "feature/approval"], cwd=tmp_path,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+
+def test_git_mutation_executes_only_after_high_risk_approval(tmp_path: Path):
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True)
+
+    class StaticLLM:
+        def chat(self, messages):
+            return LLMResponse('{"tool":"git_create_branch","arguments":{"branch":"feature/approved"},"plan_step":1}', {})
+
+    loop = AgentLoop(StaticLLM(), Settings(max_iterations=2))
+    plan = ExecutionPlan("Git change", ["Create a branch"], ["verify branch"], [], ["branch created"])
+    approvals = []
+    result = loop.execute_approved_plan(
+        tmp_path, "create branch", plan, make_state(tmp_path),
+        high_risk_approval_callback=lambda proposed: approvals.append(proposed) or True,
+    )
+
+    assert result.status.value == "max_iterations"
+    assert approvals and approvals[0].security_level == "high_risk"
+    assert any(event.event_type == "git_approval_granted" for event in result.events)
+    assert "feature/approved" in subprocess.run(
+        ["git", "branch", "--list"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def test_shell_git_mutations_cannot_bypass_approval_or_destructive_guards():
+    executor = AgentLoop(FakeLLM([]), Settings()).executor
+    assert executor._contains_git_mutation_command("python -c \"import subprocess; subprocess.run(['git','push'])\"")
+    assert executor._contains_git_mutation_command("git add src/app.py")
+    assert executor._contains_git_mutation_command("gh pr create --title feature")
+    assert executor._is_forbidden_git_command("git push --force-with-lease origin main")
+    assert executor._is_forbidden_git_command("git reset --hard HEAD~1")
+    assert executor._is_forbidden_git_command("git checkout -- .")
+    assert not executor._is_forbidden_git_command("git pull --ff-only origin main")

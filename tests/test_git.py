@@ -74,3 +74,82 @@ def subprocess_run(command: list[str], cwd: Path) -> str:
         capture_output=True,
         text=True,
     ).stdout
+
+
+def test_branch_commit_and_merge_workflow(tmp_path: Path):
+    from kardecagent.tools.git import git_checkout, git_create_branch, git_commit, git_merge
+
+    _init_repo(tmp_path)
+    base = git_current_branch(tmp_path).stdout.strip()
+    created = git_create_branch(tmp_path, "feature/workflow", base)
+    assert created.returncode == 0
+    assert git_current_branch(tmp_path).stdout.strip() == "feature/workflow"
+
+    (tmp_path / "README.md").write_text("feature\n", encoding="utf-8")
+    committed = git_commit(tmp_path, "feat: update readme", ["README.md"])
+    assert committed.returncode == 0
+    assert "feat: update readme" in git_log(tmp_path).stdout
+
+    assert git_checkout(tmp_path, base).returncode == 0
+    (tmp_path / "base.txt").write_text("base update\n", encoding="utf-8")
+    assert git_commit(tmp_path, "docs: base update", ["base.txt"]).returncode == 0
+    assert git_checkout(tmp_path, "feature/workflow").returncode == 0
+    merged = git_merge(tmp_path, base)
+    assert merged.returncode == 0
+    assert (tmp_path / "base.txt").read_text(encoding="utf-8") == "base update\n"
+
+
+def test_git_commit_rejects_unrelated_staged_changes(tmp_path: Path):
+    from kardecagent.tools.git import git_commit
+
+    _init_repo(tmp_path)
+    (tmp_path / "README.md").write_text("selected\n", encoding="utf-8")
+    (tmp_path / "other.txt").write_text("unrelated\n", encoding="utf-8")
+    import subprocess
+    subprocess.run(["git", "add", "other.txt"], cwd=tmp_path, check=True, capture_output=True)
+
+    result = git_commit(tmp_path, "feat: selected only", ["README.md"])
+    assert result.returncode != 0
+    assert "Unrelated staged changes" in result.stderr
+    assert "other.txt" in subprocess.run(
+        ["git", "diff", "--cached", "--name-only"], cwd=tmp_path,
+        check=True, capture_output=True, text=True
+    ).stdout
+
+
+def test_git_branch_name_is_validated(tmp_path: Path):
+    from kardecagent.tools.git import git_create_branch
+
+    _init_repo(tmp_path)
+    import pytest
+    with pytest.raises(ValueError, match="invalid"):
+        git_create_branch(tmp_path, "--delete-all")
+
+
+def test_create_pr_refuses_implicit_push_without_upstream(tmp_path: Path):
+    from kardecagent.tools.git import gh_create_pr
+
+    _init_repo(tmp_path)
+    result = gh_create_pr(tmp_path, "Feature", "Description", "main")
+    assert result.returncode != 0
+    assert "Push it first" in result.stderr
+    assert "implicit push" in result.stderr
+
+
+def test_create_pr_refuses_unpushed_commits(tmp_path: Path):
+    import subprocess
+    from kardecagent.tools.git import gh_create_pr
+
+    _init_repo(tmp_path)
+    remote = tmp_path.parent / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=tmp_path, check=True)
+    branch = git_current_branch(tmp_path).stdout.strip()
+    subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("unpushed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "unpushed"], cwd=tmp_path, check=True, capture_output=True)
+
+    result = gh_create_pr(tmp_path, "Feature", "Description", "main")
+    assert result.returncode != 0
+    assert "unpushed commits" in result.stderr
