@@ -228,6 +228,10 @@ def gh_create_pr(root: Path, title: str, body: str, base: str = "main",
     if not title:
         raise ValueError("Pull request title cannot be empty.")
     base = _safe_ref(base, "Base branch")
+    upstream = _git(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+    if upstream.returncode != 0:
+        return GitResult("gh pr create", 1, "",
+                         "Current branch has no upstream. Push it first using git_push and its separate approval; PR creation will not trigger an implicit push.")
     args = ["pr", "create", "--title", title, "--body", body, "--base", base]
     if draft:
         args.append("--draft")
