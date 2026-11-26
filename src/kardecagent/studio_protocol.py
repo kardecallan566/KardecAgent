@@ -255,7 +255,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         "limits": {
             "max_concurrent_tasks": 1,
             "max_subtasks": 6,
-            "max_concurrent_subtasks": 1,
+            "max_concurrent_subtasks": agent.settings.max_parallel_subtasks,
             "max_llm_iterations": agent.settings.max_iterations,
             "max_command_output_chars": agent.settings.max_command_output_chars,
             "max_project_snapshot_files": 500,
@@ -263,7 +263,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             "max_command_timeout_seconds": agent.settings.command_timeout_seconds,
             "max_instruction_chars": MAX_INSTRUCTION_LENGTH,
             "max_event_bytes": MAX_EVENT_BYTES,
-            "execution_mode": "sequential",
+            "execution_mode": "bounded_parallel" if agent.settings.max_parallel_subtasks > 1 else "sequential",
         },
     })
 
