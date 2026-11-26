@@ -259,6 +259,15 @@ class AgentLoop:
 
         state.record("resume_started", "Resuming previously approved persisted task.")
         if board is not None:
+            recovered_subtasks = board.recover_interrupted()
+            if recovered_subtasks:
+                state.record(
+                    "subtasks_recovered",
+                    "Interrupted parallel subtasks were returned to the scheduler with their individual cursors preserved.",
+                    subtask_ids=recovered_subtasks,
+                    board=board.as_dict(),
+                )
+                store.save(state, plan=plan, board=board, approved=True)
             from .orchestrator import Orchestrator
             orchestrator = Orchestrator(self.llm, self.settings)
             board = orchestrator.execute_approved_plan(
