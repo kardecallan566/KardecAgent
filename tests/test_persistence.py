@@ -23,7 +23,7 @@ def test_task_store_round_trip(tmp_path: Path):
     board.add(Subtask(
         "1", "Implementation", "Implement feature",
         scope=("src",), plan_steps=(1,), status=SubtaskStatus.COMPLETED,
-        result="done", evidence=["test passed"], iterations=1,
+        result="done", evidence=["test passed"], iterations=1, current_step=2,
     ))
     path = store.save(state, plan=make_plan(), board=board, approved=True)
 
@@ -36,6 +36,7 @@ def test_task_store_round_trip(tmp_path: Path):
     assert loaded_board is not None
     assert loaded_board.get("1").status is SubtaskStatus.COMPLETED
     assert loaded_board.get("1").evidence == ["test passed"]
+    assert loaded_board.get("1").current_step == 2
 
 
 def test_running_subtask_is_reset_to_pending_on_resume(tmp_path: Path):
@@ -44,7 +45,11 @@ def test_running_subtask_is_reset_to_pending_on_resume(tmp_path: Path):
     board = TaskBoard()
     board.add(Subtask(
         "1", "Running", "Work", scope=("src",), plan_steps=(1,),
-        status=SubtaskStatus.RUNNING,
+        status=SubtaskStatus.RUNNING, current_step=2,
+    ))
+    board.add(Subtask(
+        "2", "Also running", "Parallel work", scope=("tests",), plan_steps=(2,),
+        status=SubtaskStatus.RUNNING, current_step=3,
     ))
     store.save(state, plan=make_plan(), board=board, approved=True)
 
@@ -52,6 +57,9 @@ def test_running_subtask_is_reset_to_pending_on_resume(tmp_path: Path):
 
     assert loaded_board is not None
     assert loaded_board.get("1").status is SubtaskStatus.PENDING
+    assert loaded_board.get("1").current_step == 2
+    assert loaded_board.get("2").status is SubtaskStatus.PENDING
+    assert loaded_board.get("2").current_step == 3
 
 
 def test_unapproved_task_cannot_resume(tmp_path: Path):
