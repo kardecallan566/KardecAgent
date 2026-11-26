@@ -97,14 +97,15 @@ def python_code_actions(
 
     if len(completed.stdout.encode("utf-8")) > MAX_RUFF_OUTPUT_BYTES:
         return {"available": False, "actions": [], "message": "A resposta do Ruff excedeu o limite de tamanho."}
+    detail = completed.stderr.strip() or completed.stdout.strip()
+    if "No module named ruff" in detail:
+        return {
+            "available": False,
+            "actions": [],
+            "message": "Ruff não está instalado. Instale o extra 'studio' do KardecAgent para habilitar Code Actions.",
+        }
     if completed.returncode not in {0, 1}:
-        detail = completed.stderr.strip() or completed.stdout.strip() or f"exit code {completed.returncode}"
-        if "No module named ruff" in detail:
-            return {
-                "available": False,
-                "actions": [],
-                "message": "Ruff não está instalado. Instale o extra 'studio' do KardecAgent para habilitar Code Actions.",
-            }
+        detail = detail or f"exit code {completed.returncode}"
         return {"available": False, "actions": [], "message": f"Ruff não conseguiu analisar o arquivo: {detail[:400]}"}
 
     try:
