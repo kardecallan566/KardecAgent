@@ -49,13 +49,13 @@ class AgentExecutor:
     @classmethod
     def _is_repeated_side_effect(cls, state: TaskState, action) -> bool:
         """Block an identical append/command when no successful workspace mutation intervened."""
-        if action.tool not in {"append_file", "run_command"}:
+        if action.tool not in {"append_file", "run_command"} | GIT_MUTATING_TOOLS:
             return False
         signature = cls._action_signature(action)
         workspace_mutations = {
             "write_file", "create_directory", "append_file",
             "replace_in_file", "apply_patch", "run_command",
-        }
+        } | GIT_MUTATING_TOOLS
         for event in reversed(state.events):
             if event.event_type != "tool_result":
                 continue
@@ -205,6 +205,21 @@ class AgentExecutor:
         if records:
             state.record("integrity_change", "Workspace changes recorded with before/after SHA-256 fingerprints.",
                          changes=records, subtask_id=subtask_id)
+
+    @staticmethod
+    def _contains_git_mutation_command(command: str) -> bool:
+        pattern = (
+            r"(?im)(?:^|[;&|\\n]\\s*)"
+            r"(?:git\\s+(?:-C\\s+[^\\s]+\\s+)?"
+            r"(?:push|pull|fetch|checkout|switch|branch|commit|merge|reset|rebase|cherry-pick|tag|remote|worktree)\\b"
+            r"|gh\\s+pr\\s+(?:create|merge|close|edit)\\b)"
+        )
+        return re.search(pattern, command) is not None
+
+    @staticmethod
+    def _redact_git_command(command: str) -> str:
+        command = re.sub(r"(?i)(token|password|secret|authorization)(\\s*[=:]\\s*)[^\\s]+", r"\\1\\2[REDACTED]", command)
+        return re.sub(r"(https?://)[^/@\\s]+@", r"\\1[REDACTED]@", command)
 
     @staticmethod
     def _is_dependency_install_command(command: str) -> bool:
@@ -589,12 +604,18 @@ class AgentExecutor:
                                  step=action.plan_step,
                                  description=plan.steps[action.plan_step - 1])
 
-            if action.tool in GIT_MUTATING_TOOLS:
+            git_command_requires_approval = (
+                action.tool == "run_command"
+                and self._contains_git_mutation_command(action.arguments.get("command", ""))
+            )
+            if action.tool in GIT_MUTATING_TOOLS or git_command_requires_approval:
                 approval_details = {
                     key: action.arguments[key]
                     for key in ("remote", "branch", "base", "number", "method", "title", "paths", "message", "draft", "set_upstream", "prune")
                     if key in action.arguments
                 }
+                if git_command_requires_approval:
+                    approval_details["command"] = self._redact_git_command(action.arguments["command"])
                 approval_summary = " · ".join(f"{key}={value}" for key, value in approval_details.items())
                 approval_plan = ExecutionPlan(
                     summary=f"Autorização Git: {action.tool}" + (f" · {approval_summary}" if approval_summary else ""),
