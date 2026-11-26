@@ -28,11 +28,25 @@ type RuntimeEventItem = { id: string; type: string; message: string; timestamp?:
 
 function runtimeEventDetails(data?: Record<string, unknown>): string[] {
   if (!data) return [];
-  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "details", "changes", "result"];
+  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "details", "changes", "verification", "result"];
   const details: string[] = [];
   for (const key of visibleKeys) {
     const value = data[key];
     if (value === undefined || value === null || value === "") continue;
+    if (key === "verification" && value && typeof value === "object") {
+      const verification = value as Record<string, unknown>;
+      if (verification.verified !== undefined) details.push("verificação aprovada: " + String(verification.verified));
+      const checks = verification.checks;
+      if (Array.isArray(checks)) {
+        for (const check of checks.slice(0, 8)) {
+          if (!check || typeof check !== "object") continue;
+          const item = check as Record<string, unknown>;
+          details.push("check " + String(item.kind || "validação") + ": " + String(item.passed ?? item.status ?? item.available ?? "executado"));
+        }
+      }
+      if (verification.summary && typeof verification.summary === "object") details.push("resumo: " + JSON.stringify(verification.summary).slice(0, 360));
+      continue;
+    }
     if (key === "changes" && Array.isArray(value)) {
       const paths = value.map(item => item && typeof item === "object" ? (item as Record<string, unknown>).path : null).filter(Boolean);
       if (paths.length) details.push("arquivos afetados: " + paths.join(", ").slice(0, 360));
@@ -51,7 +65,7 @@ function runtimeEventDetails(data?: Record<string, unknown>): string[] {
         const parsed = typeof value === "string" ? JSON.parse(value) : value;
         if (parsed && typeof parsed === "object") {
           const result = parsed as Record<string, unknown>;
-          const safe = ["command", "returncode", "path", "changed_files", "changed_paths", "scope_verified", "method", "replacements"];
+          const safe = ["command", "returncode", "path", "changed_files", "changed_paths", "scope_verified", "method", "replacements", "kind", "available", "passed", "summary", "failures", "tests", "errors", "warnings"];
           for (const field of safe) if (result[field] !== undefined) details.push(field + ": " + JSON.stringify(result[field]));
         } else details.push("resultado: " + String(value).slice(0, 240));
       } catch { details.push("resultado: " + String(value).slice(0, 240)); }
