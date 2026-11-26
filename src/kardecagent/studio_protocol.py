@@ -164,7 +164,7 @@ def _read_message() -> dict:
         raise StudioProtocolError("Command must be a valid JSON object.") from exc
     if not isinstance(message, dict):
         raise StudioProtocolError("Command must be a JSON object.")
-    limit = MAX_SEMANTIC_MESSAGE_BYTES if message.get("type") in {"editor.semantic", "editor.rename.preview"} else MAX_MESSAGE_BYTES
+    limit = MAX_SEMANTIC_MESSAGE_BYTES if message.get("type") in {"editor.semantic", "editor.rename.preview", "editor.code_actions"} else MAX_MESSAGE_BYTES
     if encoded_size > limit:
         raise StudioProtocolError("Command exceeds the 64 KiB protocol limit.")
     return message
@@ -534,6 +534,45 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                     "schema_version": 1,
                     "command_id": command_identifier,
                     "payload": {"available": False, "message": str(exc)[:1000]},
+                })
+            continue
+        if message.get("schema_version") == 1 and message.get("type") == "editor.code_actions":
+            command_identifier = message.get("command_id")
+            payload = message.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            if not isinstance(command_identifier, str) or not command_identifier.strip():
+                _write({"type": "editor.code_actions.response", "schema_version": 1, "payload": {"available": False, "actions": [], "message": "command_id is required."}})
+                continue
+            if command_identifier in seen_command_ids:
+                _write({"type": "command.rejected", "schema_version": 1, "command_id": command_identifier, "reason": "command_id has already been processed."})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            try:
+                requested_root = payload.get("project_root")
+                try:
+                    workspace_matches = isinstance(requested_root, str) and Path(requested_root).resolve() == root
+                except (OSError, RuntimeError):
+                    workspace_matches = False
+                if not workspace_matches:
+                    raise ValueError("project_root does not match the active runtime workspace.")
+                result = python_code_actions(
+                    payload.get("source"), payload.get("file_path"), str(root),
+                    payload.get("line"), payload.get("column"),
+                )
+                _write({
+                    "type": "editor.code_actions.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "payload": result,
+                })
+            except Exception as exc:
+                _write({
+                    "type": "editor.code_actions.response",
+                    "schema_version": 1,
+                    "command_id": command_identifier,
+                    "payload": {"available": False, "actions": [], "message": str(exc)[:500]},
                 })
             continue
         if message.get("schema_version") == 1 and message.get("type") == "editor.semantic":
