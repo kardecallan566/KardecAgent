@@ -365,3 +365,14 @@ def test_git_mutation_executes_only_after_high_risk_approval(tmp_path: Path):
     assert "feature/approved" in subprocess.run(
         ["git", "branch", "--list"], cwd=tmp_path, check=True, capture_output=True, text=True
     ).stdout
+
+
+def test_shell_git_mutations_cannot_bypass_approval_or_destructive_guards():
+    executor = AgentLoop(FakeLLM([]), Settings()).executor
+    assert executor._contains_git_mutation_command("python -c \"import subprocess; subprocess.run(['git','push'])\"")
+    assert executor._contains_git_mutation_command("git add src/app.py")
+    assert executor._contains_git_mutation_command("gh pr create --title feature")
+    assert executor._is_forbidden_git_command("git push --force-with-lease origin main")
+    assert executor._is_forbidden_git_command("git reset --hard HEAD~1")
+    assert executor._is_forbidden_git_command("git checkout -- .")
+    assert not executor._is_forbidden_git_command("git pull --ff-only origin main")
