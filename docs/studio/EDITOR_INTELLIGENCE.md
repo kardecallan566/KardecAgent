@@ -38,3 +38,19 @@ O editor Python oferece Rename Symbol com Jedi por meio de `F2`:
 - O recurso é exclusivo para arquivos Python e depende do extra opcional `studio` (Jedi).
 
 Atalho: posicione o cursor sobre o nome do símbolo e pressione `F2`. Use `Esc`/Cancelar na confirmação do sistema para não aplicar a alteração.
+
+## Code Actions (Python)
+
+O editor disponibiliza correções rápidas por meio de Ruff:
+
+- Pressione `Ctrl+.` ou use o botão de ações rápidas na barra do arquivo.
+- O Core executa Ruff sobre o conteúdo atual do editor via stdin; o arquivo no disco não é alterado durante a análise.
+- Somente correções marcadas pelo Ruff como seguras são exibidas nesta primeira versão.
+- Cada ação contém edições por intervalo de origem. O editor valida os intervalos, apresenta uma prévia Antes/Depois e pede confirmação.
+- Ao confirmar, a alteração é aplicada somente ao buffer aberto e marcada como não salva. O usuário decide quando gravar com `Ctrl+S`.
+- A resposta é descartada se o arquivo ou o buffer mudar enquanto a análise estiver em andamento.
+- O Core limita o tamanho da fonte, o tempo de execução, o tamanho da saída e a quantidade de ações/edições.
+- O caminho informado precisa permanecer dentro do workspace. Ruff é executado sem shell, com o diretório do projeto como contexto e sem permitir que um módulo `ruff.py` local substitua a ferramenta instalada.
+- O extra `studio` instala Jedi e Ruff. O instalador Windows distribui o executável Ruff ao lado do Core independente.
+
+A primeira versão cobre correções seguras disponibilizadas pelo Ruff. Ações de refatoração mais amplas e sugestões semânticas serão adicionadas em etapas posteriores.
