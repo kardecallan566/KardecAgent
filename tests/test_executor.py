@@ -495,6 +495,14 @@ def test_executor_advances_only_after_explicit_step_completion(tmp_path: Path):
 
 
 def test_executor_escalates_after_repeated_invalid_tool_protocol_with_approval(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='escalation-fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test_example.py").write_text(
+        "def test_example():\n    assert True\n",
+        encoding="utf-8",
+    )
     from kardecagent.llm.client import LLMResponse
     from kardecagent.llm.router import EscalatingLLMClient
 
