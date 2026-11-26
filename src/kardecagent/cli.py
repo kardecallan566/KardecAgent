@@ -188,7 +188,40 @@ def _build_llm(settings: Settings):
                 continue
             alternatives.append(build_client(name))
 
-        return EscalatingLLMClient(base, alternatives) if alternatives else base
+        def refresh_alternatives():
+            latest = primary.list_models()
+            discovered = [
+                item for item in latest
+                if isinstance(item, dict)
+                and isinstance(item.get("name"), str)
+                and item["name"].strip()
+            ]
+            refreshed = []
+            for item in sorted(
+                discovered,
+                key=lambda candidate: (
+                    candidate.get("size") if isinstance(candidate.get("size"), (int, float)) else float("inf"),
+                    candidate["name"],
+                ),
+            ):
+                name = item["name"]
+                if name in {primary_name, fast_name}:
+                    continue
+                size = item.get("size")
+                if (
+                    isinstance(primary_size, (int, float))
+                    and isinstance(size, (int, float))
+                    and size <= primary_size
+                ):
+                    continue
+                refreshed.append(build_client(name))
+            return refreshed
+
+        return (
+            EscalatingLLMClient(base, alternatives, alternatives_provider=refresh_alternatives)
+            if alternatives or settings.llm_provider == "ollama"
+            else base
+        )
 
     primary = build_client(settings.llm_model)
     base = primary
