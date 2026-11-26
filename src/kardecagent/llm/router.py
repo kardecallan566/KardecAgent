@@ -39,6 +39,7 @@ class ModelSwitchRequest:
             f"Modelo atual: {self.current_model}\n"
             f"Modelo sugerido: {self.target_model}\n"
             f"Motivo: {self.reason}\n"
+            f"Gatilho: {self.trigger}\n"
             "A conversa e as evidências da tarefa serão preservadas. "
             "Nenhuma troca ocorrerá sem aprovação."
         )
