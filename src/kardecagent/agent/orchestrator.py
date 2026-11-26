@@ -483,7 +483,7 @@ class Orchestrator:
                         f"retry not performed: {decision.reason}."
                     )
             else:
-                summary = "Subtask completed and verified."
+                summary = "Subtask completed with evidence; final project verification is deferred to the parent plan."
             evidence = [
                 event.data.get("result") or event.message
                 for event in result_state.events
