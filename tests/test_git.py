@@ -77,10 +77,11 @@ def subprocess_run(command: list[str], cwd: Path) -> str:
 
 
 def test_branch_commit_and_merge_workflow(tmp_path: Path):
-    from kardecagent.tools.git import git_create_branch, git_commit, git_merge
+    from kardecagent.tools.git import git_checkout, git_create_branch, git_commit, git_merge
 
     _init_repo(tmp_path)
-    created = git_create_branch(tmp_path, "feature/workflow")
+    base = git_current_branch(tmp_path).stdout.strip()
+    created = git_create_branch(tmp_path, "feature/workflow", base)
     assert created.returncode == 0
     assert git_current_branch(tmp_path).stdout.strip() == "feature/workflow"
 
@@ -89,10 +90,13 @@ def test_branch_commit_and_merge_workflow(tmp_path: Path):
     assert committed.returncode == 0
     assert "feat: update readme" in git_log(tmp_path).stdout
 
-    merged = git_merge(tmp_path, "master" if git_current_branch(tmp_path).returncode == 0 else "main")
-    # The initial branch name differs between Git installations; merge the
-    # original commit through the symbolic ref recorded before branching.
-    assert merged.returncode in {0, 1, 128}
+    assert git_checkout(tmp_path, base).returncode == 0
+    (tmp_path / "base.txt").write_text("base update\n", encoding="utf-8")
+    assert git_commit(tmp_path, "docs: base update", ["base.txt"]).returncode == 0
+    assert git_checkout(tmp_path, "feature/workflow").returncode == 0
+    merged = git_merge(tmp_path, base)
+    assert merged.returncode == 0
+    assert (tmp_path / "base.txt").read_text(encoding="utf-8") == "base update\n"
 
 
 def test_git_commit_rejects_unrelated_staged_changes(tmp_path: Path):
