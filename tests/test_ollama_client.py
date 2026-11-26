@@ -182,3 +182,25 @@ def test_build_llm_fails_clearly_when_ollama_has_no_installed_models(monkeypatch
 
     with pytest.raises(RuntimeError, match="No Ollama models are installed"):
         _build_llm(Settings())
+
+
+
+def test_unenabled_fast_model_remains_available_for_escalation(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "qwen-coder:3b", "size": 2_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+        ],
+    )
+
+    client = _build_llm(Settings(
+        llm_model="qwen-coder:3b",
+        llm_fast_model="qwen-coder:14b",
+        llm_routing_enabled=False,
+    ))
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert [item.model for item in client.clients[1:]] == ["qwen-coder:14b"]
