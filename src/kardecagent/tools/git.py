@@ -200,7 +200,13 @@ def git_commit(root: Path, message: str, paths: list[str]) -> GitResult:
         raise ValueError("Select at least one path to stage; implicit git add -A is not allowed.")
     if any(Path(path).is_absolute() or ".." in Path(path).parts for path in normalized):
         raise ValueError("Commit paths must stay inside the workspace.")
-    staged = _git(root, ["add", "--", *normalized])
+    staged_before = _git(root, ["diff", "--cached", "--name-only"])
+    if staged_before.returncode != 0:
+        return staged_before
+    unrelated_staged = sorted(set(staged_before.stdout.splitlines()) - set(normalized))
+    if unrelated_staged:
+        return GitResult("git commit", 1, "", "Unrelated staged changes detected; refusing to include them: " + ", ".join(unrelated_staged))
+    staged = _git(root, ["add", "--", *[":(literal)" + path for path in normalized]])
     if staged.returncode != 0:
         return staged
     staged_diff = _git(root, ["diff", "--cached", "--quiet"])
