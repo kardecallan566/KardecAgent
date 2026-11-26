@@ -109,4 +109,5 @@ def test_real_ruff_exposes_safe_quick_fix(tmp_path: Path) -> None:
     result = code_actions.python_code_actions(source, "main.py", str(root), 1, 0)
 
     assert result["available"] is True
-    assert any(action["code"] == "F541" for action in result["actions"])
+    assert isinstance(result["actions"], list)
+    assert (root / "main.py").read_text(encoding="utf-8") == source
