@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from kardecagent.llm.client import LLMResponse
-from kardecagent.llm.router import AdaptiveLLMClient, ModelRouter
+from kardecagent.llm.router import AdaptiveLLMClient, EscalatingLLMClient, ModelRouter
 
 
 class FakeClient:
@@ -103,6 +103,7 @@ def test_fast_model_failure_falls_back_to_primary_without_losing_request():
     primary = FakeClient("qwen-coder:9b", content="primary response")
     fast = FakeClient("qwen-fast:1b", error=RuntimeError("model not loaded"))
     client = AdaptiveLLMClient(primary, fast)
+    client.set_approval_callback(lambda request: True)
     messages = [{"role": "user", "content": "quanto é 5+3?"}]
 
     response = client.chat(messages)
@@ -147,3 +148,59 @@ def test_fast_model_is_not_retried_for_every_request_after_failure():
     assert first.raw["_kardecagent_routing"]["fallback"] is True
     assert second.raw["_kardecagent_routing"]["fallback"] is True
     assert "disabled after an earlier failure" in second.raw["_kardecagent_routing"]["reason"]
+
+
+
+def test_fast_model_failure_does_not_switch_without_user_approval():
+    primary = FakeClient("qwen-coder:9b", content="primary response")
+    fast = FakeClient("qwen-fast:1b", error=RuntimeError("model not loaded"))
+    client = AdaptiveLLMClient(primary, fast)
+
+    with pytest.raises(RuntimeError, match="not approved"):
+        client.chat([{"role": "user", "content": "quanto é 5+3?"}])
+
+    assert len(primary.calls) == 0
+    assert len(fast.calls) == 1
+
+
+def test_escalating_client_asks_approval_and_retries_on_stronger_model():
+    primary = FakeClient("qwen-coder:3b", error=RuntimeError("provider unavailable"))
+    stronger = FakeClient("qwen-coder:14b", content="completed")
+    requests = []
+    client = EscalatingLLMClient(primary, [stronger])
+    client.set_approval_callback(lambda request: requests.append(request) or True)
+
+    response = client.chat([{"role": "user", "content": "implement feature"}])
+
+    assert response.content == "completed"
+    assert len(requests) == 1
+    assert requests[0].current_model == "qwen-coder:3b"
+    assert requests[0].target_model == "qwen-coder:14b"
+    assert response.raw["_kardecagent_escalation"]["from_model"] == "qwen-coder:3b"
+    assert response.raw["_kardecagent_escalation"]["to_model"] == "qwen-coder:14b"
+
+
+def test_escalating_client_keeps_current_model_when_user_rejects():
+    primary = FakeClient("qwen-coder:3b")
+    stronger = FakeClient("qwen-coder:14b")
+    client = EscalatingLLMClient(primary, [stronger])
+    client.set_approval_callback(lambda request: False)
+
+    approved, request = client.request_escalation("repeated invalid tool calls")
+
+    assert not approved
+    assert request is not None
+    assert client.model == "qwen-coder:3b"
+    assert not stronger.calls
+
+
+def test_escalating_client_does_not_switch_without_an_approval_callback():
+    primary = FakeClient("qwen-coder:3b")
+    stronger = FakeClient("qwen-coder:14b")
+    client = EscalatingLLMClient(primary, [stronger])
+
+    approved, request = client.request_escalation("stalled")
+
+    assert not approved
+    assert request is not None
+    assert client.model == "qwen-coder:3b"
