@@ -522,6 +522,36 @@ class AgentExecutor:
         limit = max_iterations or self.settings.max_iterations
         last_invalid_signature = None
         repeated_invalid_count = 0
+        no_progress_count = 0
+        no_progress_limit = 3
+
+        def stop_stalled_execution(reason: str, *, tool: str | None = None,
+                                   requested_step: int | None = None) -> TaskState:
+            state.record("plan_execution_stalled",
+                "Execution stopped because the model repeatedly failed to make progress on the active approved plan step.",
+                reason=reason, tool=tool, active_step=tracker.current_step,
+                active_step_description=(plan.steps[tracker.current_step - 1]
+                    if tracker.current_step and tracker.current_step <= len(plan.steps) else None),
+                requested_step=requested_step,
+                consecutive_no_progress=no_progress_count, limit=no_progress_limit)
+            state.transition(TaskStatus.FAILED,
+                reason="Execution stalled on the active approved plan step; no further actions were run.",
+                failure_source="plan_execution_stalled")
+            if persistence_callback is not None:
+                persistence_callback(state, plan)
+            return state
+
+        def register_no_progress(reason: str, *, tool: str | None = None,
+                                 requested_step: int | None = None) -> bool:
+            nonlocal no_progress_count
+            no_progress_count += 1
+            state.record("execution_no_progress",
+                "The proposed action did not advance the approved plan.",
+                reason=reason, tool=tool, active_step=tracker.current_step,
+                requested_step=requested_step,
+                consecutive_no_progress=no_progress_count, limit=no_progress_limit)
+            return no_progress_count >= no_progress_limit
+
         for iteration in range(1, limit + 1):
             state.iteration = iteration
             state.record("iteration_started", f"Starting iteration {iteration}.")
@@ -648,12 +678,20 @@ class AgentExecutor:
                 if action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
-                                 active_step=tracker.current_step)
+                                 active_step=tracker.current_step,
+                                 active_step_description=plan.steps[tracker.current_step - 1])
+                    if register_no_progress("model attempted an action for a different plan step",
+                                            tool=action.tool, requested_step=action.plan_step):
+                        return stop_stalled_execution("The model repeatedly skipped the active plan step.",
+                            tool=action.tool, requested_step=action.plan_step)
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": json.dumps({
                                      "error": "plan_scope_violation",
                                      "active_plan_step": tracker.current_step,
-                                 })}]
+                                     "active_plan_step_description": plan.steps[tracker.current_step - 1],
+                                     "requested_plan_step": action.plan_step,
+                                     "instruction": "STOP: the requested future step is not active. Do not execute it. Finish the active step first using evidence gathered for that step. If inspection is complete, call complete_step for the active step with concrete evidence; only then work on the next step.",
+                                 }, ensure_ascii=False)}]
                     continue
                 if action.plan_step not in tracker.started_steps:
                     tracker.start(action.plan_step)
@@ -716,6 +754,7 @@ class AgentExecutor:
                                  requested_step=step, active_step=tracker.current_step)
                     continue
                 tracker.complete(step)
+                no_progress_count = 0
                 state.record("plan_step_completed", f"Completed plan step {step}.",
                              step=step, evidence=action.arguments["evidence"], progress=tracker.as_dict())
                 messages += [{"role": "assistant", "content": response.content},
@@ -815,6 +854,9 @@ class AgentExecutor:
                     tool=action.tool,
                     action_signature=self._action_signature(action),
                 )
+                if register_no_progress("identical side effect was blocked", tool=action.tool):
+                    return stop_stalled_execution("The model repeated an ineffective side effect without advancing the plan.",
+                        tool=action.tool, requested_step=action.plan_step)
                 messages += [
                     {"role": "assistant", "content": response.content},
                     {"role": "user", "content": json.dumps({
@@ -837,8 +879,23 @@ class AgentExecutor:
                 if action.tool in investigation_tools:
                     state.record("investigation_action", "Read-only investigation action recorded.",
                                  tool=action.tool, key=investigation_key)
+                parsed_result = None
+                try:
+                    parsed_result = json.loads(result)
+                except (TypeError, json.JSONDecodeError):
+                    pass
+                no_op = isinstance(parsed_result, dict) and (
+                    parsed_result.get("changed") is False or parsed_result.get("created") is False
+                )
                 state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result,
-                             action_signature=self._action_signature(action))
+                             action_signature=self._action_signature(action), no_op=no_op)
+                if no_op:
+                    if register_no_progress("tool completed without changing or advancing the workspace",
+                                            tool=action.tool):
+                        return stop_stalled_execution("The model repeatedly selected actions that made no progress.",
+                            tool=action.tool, requested_step=action.plan_step)
+                else:
+                    no_progress_count = 0
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
                                  "tool": action.tool, "result": result,
