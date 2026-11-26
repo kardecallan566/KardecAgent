@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import re
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -527,7 +528,52 @@ class AgentExecutor:
             if persistence_callback is not None:
                 persistence_callback(state, plan)
             messages = self._bound_messages(messages, state, tracker)
-            response = self.llm.chat(messages)
+            model_started = time.monotonic()
+            model_name = getattr(self.llm, "model", None)
+            request_timeout = getattr(self.settings, "llm_timeout_seconds", None)
+            state.record(
+                "model_request_started",
+                "Waiting for the model provider to return the next execution action.",
+                iteration=iteration,
+                plan_step=state.active_plan_step,
+                model=model_name,
+                timeout_seconds=request_timeout,
+            )
+            if persistence_callback is not None:
+                persistence_callback(state, plan)
+            try:
+                response = self.llm.chat(messages)
+            except Exception as exc:
+                duration = round(time.monotonic() - model_started, 3)
+                error = f"{type(exc).__name__}: {exc}"
+                state.record(
+                    "model_request_failed",
+                    "The model request failed before an execution action was returned.",
+                    iteration=iteration,
+                    plan_step=state.active_plan_step,
+                    model=model_name,
+                    duration_seconds=duration,
+                    timeout_seconds=request_timeout,
+                    error=error,
+                )
+                state.transition(
+                    TaskStatus.FAILED,
+                    reason="The model provider request failed; the task can be diagnosed and safely resumed.",
+                    failure_source="model_provider",
+                )
+                if persistence_callback is not None:
+                    persistence_callback(state, plan)
+                return state
+            duration = round(time.monotonic() - model_started, 3)
+            state.record(
+                "model_response_received",
+                "The model provider returned a response.",
+                iteration=iteration,
+                plan_step=state.active_plan_step,
+                model=model_name,
+                duration_seconds=duration,
+                response_chars=len(response.content),
+            )
             state.record("model_response", response.content)
             try:
                 action = parse_tool_call(response.content)
