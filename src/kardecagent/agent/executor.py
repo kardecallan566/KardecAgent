@@ -276,8 +276,11 @@ class AgentExecutor:
                 ensure_ascii=False)
         if action.tool == "create_directory":
             self._check_scope(root, [args["path"]], scope)
-            fs.create_directory(args["path"])
-            return json.dumps({"ok": True, "path": args["path"], "kind": "directory"}, ensure_ascii=False)
+            created = fs.create_directory(args["path"])
+            return json.dumps({
+                "ok": True, "path": args["path"], "kind": "directory",
+                "created": created, "changed": created,
+            }, ensure_ascii=False)
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
             fs.write_file(args["path"], args["content"])
@@ -838,6 +841,9 @@ class AgentExecutor:
                 if any(event.data.get("key") == investigation_key for event in prior):
                     state.record("investigation_blocked", "Repeated investigation action was blocked.",
                                  tool=action.tool, key=investigation_key)
+                    if register_no_progress("identical read-only investigation was repeated", tool=action.tool):
+                        return stop_stalled_execution("The model repeatedly requested the same investigation without advancing the plan.",
+                            tool=action.tool, requested_step=action.plan_step)
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "This exact investigation was already performed. Use its recorded result or choose a materially different, justified action."}]
                     continue
