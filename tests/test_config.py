@@ -58,16 +58,16 @@ def test_routing_supports_legacy_environment_prefix(monkeypatch):
 
 
 
-def test_escalation_models_and_parallelism_are_configurable(monkeypatch):
+def test_parallelism_is_configurable_without_a_manual_model_list(monkeypatch):
     from kardecagent.config import Settings
 
-    monkeypatch.setenv("KARDECAGENT_ESCALATION_MODELS", "qwen-coder:14b,deepseek-coder:16b")
+    monkeypatch.setenv("KARDECAGENT_ESCALATION_MODELS", "ignored:1b,ignored:2b")
     monkeypatch.setenv("KARDECAGENT_MAX_PARALLEL_SUBTASKS", "3")
 
     settings = Settings.from_env()
 
-    assert settings.llm_escalation_models == ("qwen-coder:14b", "deepseek-coder:16b")
     assert settings.max_parallel_subtasks == 3
+    assert not hasattr(settings, "llm_escalation_models")
 
 
 def test_parallelism_is_bounded(monkeypatch):
