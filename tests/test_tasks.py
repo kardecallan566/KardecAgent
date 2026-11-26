@@ -124,8 +124,8 @@ def test_recover_interrupted_subtasks_preserves_individual_cursors(tmp_path: Pat
     manager = SubtaskManager(tmp_path)
     board = manager.parse_decomposition({
         "subtasks": [
-            {"id": "1", "title": "Core", "objective": "Implement core", "scope": ["src/core"], "plan_steps": [1]},
-            {"id": "2", "title": "UI", "objective": "Implement UI", "scope": ["src/ui"], "plan_steps": [2]},
+            {"id": "1", "title": "Core", "objective": "Implement core", "scope": ["src/core"], "plan_steps": [1, 2, 3]},
+            {"id": "2", "title": "UI", "objective": "Implement UI", "scope": ["src/ui"], "plan_steps": [4, 5, 6]},
         ]
     })
     board.mark_running("1")
