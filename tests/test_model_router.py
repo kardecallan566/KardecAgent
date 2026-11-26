@@ -243,3 +243,25 @@ def test_escalation_refreshes_ollama_inventory_before_requesting_approval():
     assert request.target_model == "qwen-coder:14b"
     assert requests == [request]
     assert client.model == "qwen-coder:14b"
+
+
+
+def test_escalation_refresh_drops_models_removed_from_ollama():
+    primary = FakeClient("qwen-coder:3b")
+    stale = FakeClient("qwen-coder:14b")
+    current = FakeClient("qwen-coder:32b")
+    requests = []
+    client = EscalatingLLMClient(
+        primary,
+        [stale],
+        alternatives_provider=lambda: [current],
+    )
+    client.set_approval_callback(lambda request: requests.append(request) or True)
+
+    approved, request = client.request_escalation("primary model failed")
+
+    assert approved
+    assert request is not None
+    assert request.target_model == "qwen-coder:32b"
+    assert client.model == "qwen-coder:32b"
+    assert [item.model for item in client.clients] == ["qwen-coder:3b", "qwen-coder:32b"]
