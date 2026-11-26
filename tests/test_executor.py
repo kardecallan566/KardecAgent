@@ -409,5 +409,6 @@ def test_model_request_failure_is_journaled_and_task_is_terminal(tmp_path: Path)
     assert started.data["timeout_seconds"] == 17
     assert failed.data["error"] == "TimeoutError: model request timed out"
     assert failed.data["duration_seconds"] >= 0
+    assert ("running", "model_request_started") in persisted
     assert any(status == "failed" for status, _event in persisted)
     assert not any(event.event_type == "model_response" for event in result.events)
