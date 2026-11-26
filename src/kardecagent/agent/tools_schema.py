@@ -140,7 +140,7 @@ def tool_instructions() -> str:
         "Use read-only tools without plan_step. Git tools: git_status, git_diff, git_log, git_branches, git_remotes, git_pr_status. " 
         "Git mutations: git_fetch, git_pull, git_push, git_create_branch, git_checkout, git_commit, git_merge, git_create_pr, git_merge_pr. " 
         "Before every Git mutation, request and receive the explicit user high-risk approval; never treat plan approval as Git approval. " 
-        "Use git_commit only with explicit selected paths; never stage all files implicitly. Pulls must be fast-forward-only; never force-push or hard-reset. " 
+        "Use git_commit only with explicit selected paths; never stage all files implicitly. For a new branch, git_push must use set_upstream=true. Push before git_create_pr; PR creation refuses unpushed commits and never pushes implicitly. Pulls must be fast-forward-only; never force-push or hard-reset. " 
         "Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, "
         "fetch_web_page, write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, open_file, git_status, git_diff, git_log, git_branches, git_remotes, git_fetch, git_pull, git_push, git_create_branch, git_checkout, git_commit, git_merge, git_create_pr, git_pr_status, git_merge_pr, "
         "complete_step, request_plan_change, finish. finish requires exactly one criteria_evidence item for every approved completion criterion; use objects with criterion and evidence fields so each item is explicitly linked. "
