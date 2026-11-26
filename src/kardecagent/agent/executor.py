@@ -559,6 +559,32 @@ class AgentExecutor:
                 persistence_callback(state, plan)
             return state
 
+        def request_model_escalation(reason: str, trigger: str) -> bool:
+            method = getattr(self.llm, "request_escalation", None)
+            if not callable(method):
+                return False
+            approved, request = method(reason, trigger=trigger)
+            if request is None:
+                state.record("model_escalation_unavailable",
+                             "No additional configured model is available for escalation.",
+                             current_model=getattr(self.llm, "model", None), reason=reason)
+                return False
+            state.record(
+                "model_switch_approved" if approved else "model_switch_rejected",
+                "A stronger model was selected after user approval." if approved
+                else "The requested model switch was rejected; the current model remains active.",
+                from_model=request.current_model, to_model=request.target_model,
+                reason=request.reason, trigger=request.trigger,
+            )
+            if approved:
+                messages.append({"role": "user", "content": json.dumps({
+                    "instruction": "The user approved switching to a stronger model. Continue the same approved task; preserve all prior evidence, respect the active plan step, and change strategy instead of repeating the failed action.",
+                    "active_plan_step": active_step_number(),
+                    "previous_blocker": reason,
+                    "new_model": request.target_model,
+                }, ensure_ascii=False)})
+            return approved
+
         def register_no_progress(reason: str, *, tool: str | None = None,
                                  requested_step: int | None = None) -> bool:
             nonlocal no_progress_count
@@ -568,6 +594,11 @@ class AgentExecutor:
                 reason=reason, tool=tool, active_step=active_step_number(),
                 requested_step=requested_step,
                 consecutive_no_progress=no_progress_count, limit=no_progress_limit)
+            if no_progress_count >= no_progress_limit and request_model_escalation(
+                reason, "repeated_no_progress"
+            ):
+                no_progress_count = 0
+                return False
             return no_progress_count >= no_progress_limit
 
         for iteration in range(1, limit + 1):
@@ -622,6 +653,10 @@ class AgentExecutor:
                 duration_seconds=duration,
                 response_chars=len(response.content),
             )
+            escalation = (getattr(response, "raw", {}) or {}).get("_kardecagent_escalation")
+            if isinstance(escalation, dict):
+                state.record("model_escalated", "The model changed after explicit user approval.",
+                             **escalation)
             state.record("model_response", response.content)
             try:
                 action = parse_tool_call(response.content)
@@ -630,6 +665,15 @@ class AgentExecutor:
                 repeated_invalid_count = repeated_invalid_count + 1 if signature == last_invalid_signature else 1
                 last_invalid_signature = signature
                 state.record("model_error", str(exc), repeated_count=repeated_invalid_count)
+                if repeated_invalid_count >= 2 and request_model_escalation(
+                    "The model repeated an invalid tool-call format.", "invalid_tool_protocol"
+                ):
+                    repeated_invalid_count = 0
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": "A stronger model was approved. Continue with a valid supported tool call; do not repeat the invalid format."},
+                    ]
+                    continue
                 if repeated_invalid_count >= 2:
                     state.record("model_protocol_stalled",
                                  "Execution stopped because the model repeated an invalid tool call.",
