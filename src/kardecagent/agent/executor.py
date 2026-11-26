@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -36,6 +37,38 @@ class AgentExecutor:
     def __init__(self, llm, settings: Settings) -> None:
         self.llm = llm
         self.settings = settings
+
+    @staticmethod
+    def _action_signature(action) -> str:
+        payload = {"tool": action.tool, "arguments": action.arguments}
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _is_repeated_side_effect(cls, state: TaskState, action) -> bool:
+        """Block an identical append/command when no successful workspace mutation intervened."""
+        if action.tool not in {"append_file", "run_command"}:
+            return False
+        signature = cls._action_signature(action)
+        workspace_mutations = {
+            "write_file", "create_directory", "append_file",
+            "replace_in_file", "apply_patch", "run_command",
+        }
+        for event in reversed(state.events):
+            if event.event_type != "tool_result":
+                continue
+            previous_tool = event.data.get("tool")
+            if previous_tool not in workspace_mutations:
+                continue
+            if (
+                previous_tool == action.tool
+                and event.data.get("action_signature") == signature
+            ):
+                return True
+            # A successful intervening mutation gives the agent new workspace
+            # state and a legitimate reason to rerun the same command/action.
+            return False
+        return False
 
     def _scope_allows(self, root: Path, raw_path: str, scope: tuple[str, ...] | None) -> bool:
         if not scope:
@@ -629,12 +662,30 @@ class AgentExecutor:
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "Investigation budget exhausted. Implement using available evidence or report the specific missing information to the user."}]
                     continue
+            if self._is_repeated_side_effect(state, action):
+                state.record(
+                    "repeated_side_effect_blocked",
+                    "An identical side-effecting action was blocked because no successful workspace mutation occurred since its previous execution.",
+                    tool=action.tool,
+                    action_signature=self._action_signature(action),
+                )
+                messages += [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": json.dumps({
+                        "error": "repeated_side_effect_blocked",
+                        "tool": action.tool,
+                        "instruction": "Do not repeat this identical side effect. Use the recorded result, inspect the outcome, or make a justified change before trying again.",
+                    }, ensure_ascii=False)},
+                ]
+                continue
+
             try:
                 result = self._execute_tool(root, action, allowed_scope, state, (context or {}).get("subtask", {}).get("id"))
                 if action.tool in investigation_tools:
                     state.record("investigation_action", "Read-only investigation action recorded.",
                                  tool=action.tool, key=investigation_key)
-                state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result)
+                state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result,
+                             action_signature=self._action_signature(action))
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
                                  "tool": action.tool, "result": result,
