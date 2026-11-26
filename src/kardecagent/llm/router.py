@@ -86,29 +86,34 @@ class EscalatingLLMClient:
             return True, request
 
     def chat(self, messages: list[dict[str, Any]], *, temperature: float = 0.2):
-        # Serialize model calls so an approved switch cannot change the active
-        # model underneath another parallel subtask's in-flight request.
-        with self._lock:
-            while True:
-                client = self.clients[self.active_index]
-                try:
-                    response = client.chat(messages, temperature=temperature)
-                    raw = dict(getattr(response, "raw", {}) or {})
+        while True:
+            with self._lock:
+                selected_index = self.active_index
+                client = self.clients[selected_index]
+            try:
+                # Inference calls remain concurrent. A model switch affects only
+                # requests started after the approval, never an in-flight call.
+                response = client.chat(messages, temperature=temperature)
+                raw = dict(getattr(response, "raw", {}) or {})
+                with self._lock:
                     if self.last_switch:
                         raw["_kardecagent_escalation"] = dict(self.last_switch)
                         self.last_switch = None
-                    try:
-                        return replace(response, raw=raw)
-                    except TypeError:
-                        response.raw = raw
-                        return response
-                except Exception as exc:
+                try:
+                    return replace(response, raw=raw)
+                except TypeError:
+                    response.raw = raw
+                    return response
+            except Exception as exc:
+                with self._lock:
+                    if self.active_index != selected_index:
+                        continue
                     approved, _request = self.request_escalation(
                         f"Falha do modelo {self.model}: {type(exc).__name__}: {exc}",
                         trigger="provider_error",
                     )
-                    if not approved:
-                        raise
+                if not approved:
+                    raise
 
 
 _COMPLEX_SIGNALS = (
