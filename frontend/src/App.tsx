@@ -28,11 +28,24 @@ type RuntimeEventItem = { id: string; type: string; message: string; timestamp?:
 
 function runtimeEventDetails(data?: Record<string, unknown>): string[] {
   if (!data) return [];
-  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "result"];
+  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "details", "changes", "result"];
   const details: string[] = [];
   for (const key of visibleKeys) {
     const value = data[key];
     if (value === undefined || value === null || value === "") continue;
+    if (key === "changes" && Array.isArray(value)) {
+      const paths = value.map(item => item && typeof item === "object" ? (item as Record<string, unknown>).path : null).filter(Boolean);
+      if (paths.length) details.push("arquivos afetados: " + paths.join(", ").slice(0, 360));
+      continue;
+    }
+    if (key === "details" && value && typeof value === "object") {
+      const detail = value as Record<string, unknown>;
+      for (const [name, item] of Object.entries(detail)) {
+        if (item === undefined || item === null) continue;
+        details.push(name + ": " + (Array.isArray(item) ? item.join(", ") : String(item)).slice(0, 240));
+      }
+      continue;
+    }
     if (key === "result") {
       try {
         const parsed = typeof value === "string" ? JSON.parse(value) : value;
