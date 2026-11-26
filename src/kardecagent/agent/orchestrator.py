@@ -128,7 +128,7 @@ class Orchestrator:
             value = str(scope).replace("\\", "/").strip("/")
             if not value or value == ".":
                 return ()
-            return tuple(part for part in PurePosixPath(value).parts if part not in {"", "."})
+            return tuple(part.casefold() for part in PurePosixPath(value).parts if part not in {"", "."})
 
         for left_scope in left.scope:
             left_parts = normalized(left_scope)
