@@ -2,7 +2,7 @@ from pathlib import Path
 
 from kardecagent.agent.loop import AgentLoop
 from kardecagent.agent.plan import ExecutionPlan
-from kardecagent.agent.state import TaskState
+from kardecagent.agent.state import TaskState, TaskStatus
 from kardecagent.config import Settings
 from kardecagent.llm.client import LLMResponse
 
@@ -376,3 +376,38 @@ def test_shell_git_mutations_cannot_bypass_approval_or_destructive_guards():
     assert executor._is_forbidden_git_command("git reset --hard HEAD~1")
     assert executor._is_forbidden_git_command("git checkout -- .")
     assert not executor._is_forbidden_git_command("git pull --ff-only origin main")
+
+
+
+def test_model_request_failure_is_journaled_and_task_is_terminal(tmp_path: Path):
+    class FailingLLM:
+        model = "fixture-model"
+
+        def chat(self, messages):
+            raise TimeoutError("model request timed out")
+
+    loop = AgentLoop(FailingLLM(), Settings(max_iterations=2, llm_timeout_seconds=17))
+    plan = ExecutionPlan("Approved", ["Inspect"], ["checks"], [], ["done"])
+    state = make_state(tmp_path)
+    state.transition(TaskStatus.RUNNING)
+    persisted = []
+
+    result = loop.executor.execute(
+        tmp_path,
+        "inspect",
+        plan,
+        state,
+        persistence_callback=lambda current, current_plan: persisted.append(
+            (current.status.value, current.events[-1].event_type)
+        ),
+    )
+
+    assert result.status is TaskStatus.FAILED
+    started = next(event for event in result.events if event.event_type == "model_request_started")
+    failed = next(event for event in result.events if event.event_type == "model_request_failed")
+    assert started.data["model"] == "fixture-model"
+    assert started.data["timeout_seconds"] == 17
+    assert failed.data["error"] == "TimeoutError: model request timed out"
+    assert failed.data["duration_seconds"] >= 0
+    assert any(status == "failed" for status, _event in persisted)
+    assert not any(event.event_type == "model_response" for event in result.events)
