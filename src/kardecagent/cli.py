@@ -309,13 +309,16 @@ def _ollama_health(settings: Settings) -> int:
         client = _build_llm(settings)
         inventory_client.model = client.model
         response = inventory_client.health_check()
+        base_client = client.clients[0] if getattr(client, "clients", None) else client
+        fast_client = getattr(base_client, "fast", None)
+        selected_fast_model = getattr(fast_client, "model", None)
         if response.content.strip() != "KARDECAGENT_OK":
             raise RuntimeError("Ollama responded, but the health-check content was unexpected.")
         print(json.dumps({
             "version": version,
             "models": names,
             "model": client.model,
-            "fast_model": settings.llm_fast_model or None,
+            "fast_model": selected_fast_model,
             "routing_enabled": settings.llm_routing_enabled,
             "response": response.content.strip(),
         }, ensure_ascii=True))
