@@ -359,7 +359,8 @@ def test_git_mutation_executes_only_after_high_risk_approval(tmp_path: Path):
         high_risk_approval_callback=lambda proposed: approvals.append(proposed) or True,
     )
 
-    assert result.status.value == "max_iterations"
+    assert result.status.value == "failed"
+    assert any(event.event_type == "plan_execution_stalled" for event in result.events)
     assert approvals and approvals[0].security_level == "high_risk"
     assert any(event.event_type == "git_approval_granted" for event in result.events)
     assert "feature/approved" in subprocess.run(
