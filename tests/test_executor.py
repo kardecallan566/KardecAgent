@@ -412,3 +412,45 @@ def test_model_request_failure_is_journaled_and_task_is_terminal(tmp_path: Path)
     assert ("running", "model_request_started") in persisted
     assert any(status == "failed" for status, _event in persisted)
     assert not any(event.event_type == "model_response" for event in result.events)
+
+
+
+def test_executor_stops_repeated_future_step_actions_instead_of_burning_iterations(tmp_path: Path):
+    llm = FakeLLM([
+        '{"tool":"write_file","arguments":{"path":"teste.py","content":"for i in range(11):\\n    print(i)"},"plan_step":2}',
+        '{"tool":"create_directory","arguments":{"path":"./"},"plan_step":1}',
+        '{"tool":"write_file","arguments":{"path":"teste.py","content":"for i in range(11):\\n    print(i)"},"plan_step":2}',
+    ])
+    loop = AgentLoop(llm, Settings(max_iterations=20))
+    plan = ExecutionPlan(
+        "Create a counter",
+        ["Inspect whether teste.py exists", "Create teste.py if missing", "Write a counter from 0 to 10"],
+        ["Read back teste.py"],
+        [],
+        ["teste.py contains a counter from 0 to 10"],
+    )
+
+    result = loop.execute_approved_plan(tmp_path, "create counter", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.FAILED
+    assert not (tmp_path / "teste.py").exists()
+    assert sum(event.event_type == "iteration_started" for event in result.events) == 3
+    stalled = next(event for event in result.events if event.event_type == "plan_execution_stalled")
+    assert stalled.data["active_step"] == 1
+    assert stalled.data["consecutive_no_progress"] == 3
+    assert any(event.event_type == "plan_scope_violation" for event in result.events)
+    assert any(event.event_type == "execution_no_progress" for event in result.events)
+
+
+def test_create_directory_reports_existing_directory_as_noop(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings())
+    action = __import__("kardecagent.agent.tools_schema", fromlist=["parse_tool_call"]).parse_tool_call(
+        '{"tool":"create_directory","arguments":{"path":"./"},"plan_step":1}'
+    )
+
+    result = loop.executor._execute_tool(tmp_path, action, None)
+
+    import json
+    payload = json.loads(result)
+    assert payload["created"] is False
+    assert payload["changed"] is False
