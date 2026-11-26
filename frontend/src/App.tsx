@@ -35,6 +35,8 @@ type RecentProject = { path: string; name: string; lastOpenedAt: string };
 type SemanticAction = "complete" | "definition" | "references" | "diagnostics" | "signature";
 type SemanticItem = { name?: string; insert_text?: string; kind?: string; detail?: string; doc?: string; path?: string | null; line?: number | null; column?: number | null; description?: string; parameters?: string[]; active_parameter?: number | null };
 type SemanticResponse = { available: boolean; action: SemanticAction; items: SemanticItem[]; message?: string | null };
+type PythonCodeAction = { id: string; title: string; code: string; applicability: "safe"; edits: Array<{ start: number; end: number; content: string }> };
+type PythonCodeActionsResponse = { available: boolean; actions: PythonCodeAction[]; message?: string | null };
 
 function ExplorerEntry({ entry, projectRoot, onOpenFile, refreshKey }: { entry: ProjectEntry; projectRoot: string; onOpenFile: (entry: ProjectEntry) => void; refreshKey: number }) {
   const [expanded, setExpanded] = useState(false);
@@ -228,6 +230,10 @@ function App() {
   const [editorCompletions, setEditorCompletions] = useState<EditorCompletion[]>([]);
   const [activeCompletionIndex, setActiveCompletionIndex] = useState(0);
   const [toolEditorDiagnostics, setToolEditorDiagnostics] = useState<EditorDiagnostic[]>([]);
+  const [codeActions, setCodeActions] = useState<PythonCodeAction[]>([]);
+  const [codeActionsBusy, setCodeActionsBusy] = useState(false);
+  const codeActionRequest = useRef<{ commandId: string; source: string; path: string; cursor: number } | null>(null);
+  const codeActionSource = useRef<string | null>(null);
   const semanticRequests = useRef(new Map<string, { action: SemanticAction; source: string; path: string; cursor: number }>());
   const latestSemanticRequest = useRef<Partial<Record<SemanticAction, string>>>({});
   const semanticCompletionTimer = useRef<number | null>(null);
@@ -404,6 +410,28 @@ function App() {
         return;
       }
       if (message.type === "editor.rename.cancel.response") return;
+      if (message.type === "editor.code_actions.response") {
+        const commandId = typeof message.command_id === "string" ? message.command_id : "";
+        const request = codeActionRequest.current;
+        if (!request || request.commandId !== commandId) return;
+        codeActionRequest.current = null;
+        setCodeActionsBusy(false);
+        if (openedPath !== request.path || editorRef.current?.value !== request.source) {
+          setSemanticNotice("O arquivo mudou durante a análise. Solicite as ações rápidas novamente.");
+          return;
+        }
+        const result = message.payload as PythonCodeActionsResponse | undefined;
+        if (!result?.available) {
+          setCodeActions([]);
+          codeActionSource.current = null;
+          setSemanticNotice(result?.message || "Não foi possível obter ações rápidas.");
+          return;
+        }
+        codeActionSource.current = request.source;
+        setCodeActions(result.actions || []);
+        setSemanticNotice(result.message || ((result.actions || []).length + " ação(ões) rápida(s) disponível(is)."));
+        return;
+      }
       if (message.type === "editor.semantic.response") {
         const commandId = typeof message.command_id === "string" ? message.command_id : "";
         const request = semanticRequests.current.get(commandId);
@@ -825,6 +853,79 @@ function App() {
         setSemanticNotice("Não foi possível solicitar inteligência Python: " + String(error));
       }
     });
+  }
+
+  function requestPythonCodeActions(source: string, cursor: number) {
+    if (!projectRoot || !openedPath || runtimeStatus !== "online" || codeActionsBusy) return;
+    const extension = openedPath.split(".").pop()?.toLowerCase() || "";
+    if (extension !== "py" && extension !== "pyi") {
+      setSemanticNotice("Code Actions estão disponíveis para arquivos Python.");
+      return;
+    }
+    const before = source.slice(0, cursor);
+    const line = before.split("\\n").length;
+    const column = before.length - before.lastIndexOf("\\n") - 1;
+    const commandId = "code-actions-" + crypto.randomUUID();
+    codeActionRequest.current = { commandId, source, path: openedPath, cursor };
+    codeActionSource.current = source;
+    setCodeActions([]);
+    setCodeActionsBusy(true);
+    setSemanticNotice("Analisando correções rápidas seguras...");
+    void invoke("send_runtime_command", {
+      message: {
+        type: "editor.code_actions",
+        schema_version: 1,
+        command_id: commandId,
+        payload: { project_root: projectRoot, file_path: openedPath, source, line, column },
+      },
+    }).catch(error => {
+      if (codeActionRequest.current?.commandId === commandId) {
+        codeActionRequest.current = null;
+        setCodeActionsBusy(false);
+        setSemanticNotice("Não foi possível solicitar Code Actions: " + String(error));
+      }
+    });
+  }
+
+  function applyPythonCodeAction(action: PythonCodeAction) {
+    const source = codeActionSource.current;
+    if (source === null || !openedPath || editorRef.current?.value !== source || fileContent !== source) {
+      setCodeActions([]);
+      codeActionSource.current = null;
+      setSemanticNotice("O conteúdo do arquivo mudou. Solicite as ações rápidas novamente.");
+      return;
+    }
+    let next = source;
+    for (const edit of action.edits) {
+      if (!Number.isInteger(edit.start) || !Number.isInteger(edit.end) || edit.start < 0 || edit.end < edit.start || edit.end > source.length) {
+        setSemanticNotice("A ação retornou uma edição inválida e foi descartada.");
+        return;
+      }
+      next = next.slice(0, edit.start) + edit.content + next.slice(edit.end);
+    }
+    const oldLines = source.split("\\n");
+    const newLines = next.split("\\n");
+    let prefix = 0;
+    while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix++;
+    let suffix = 0;
+    while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix &&
+      oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]) suffix++;
+    const oldPreview = oldLines.slice(Math.max(0, prefix - 2), Math.min(oldLines.length - suffix, prefix + 8)).join("\\n").slice(0, 1200);
+    const newPreview = newLines.slice(Math.max(0, prefix - 2), Math.min(newLines.length - suffix, prefix + 8)).join("\\n").slice(0, 1200);
+    const approved = window.confirm(
+      action.title + "\\n\\nPrévia da alteração (apenas no buffer do editor):\\n\\nANTES:\\n" +
+      (oldPreview || "(vazio)") + "\\n\\nDEPOIS:\\n" + (newPreview || "(vazio)") +
+      "\\n\\n" + action.edits.length + " edição(ões). Aplicar ao editor? O arquivo em disco só será alterado quando você salvar."
+    );
+    if (!approved) return;
+    setFileContent(next);
+    setFileDirty(true);
+    setToolEditorDiagnostics([]);
+    setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: next, dirty: true } : tab));
+    setCodeActions([]);
+    codeActionSource.current = null;
+    setSemanticNotice("Correção aplicada ao buffer. Revise e salve com Ctrl+S.");
+    requestAnimationFrame(() => editorRef.current?.focus());
   }
 
   function requestSymbolRename(source: string, cursor: number) {
@@ -1660,20 +1761,20 @@ function App() {
             </div>
           ) : (
             <>
-              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
+              <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => requestPythonCodeActions(fileContent, editorRef.current?.selectionStart ?? 0)} disabled={codeActionsBusy || runtimeStatus !== "online" || !["py", "pyi"].includes((openedPath.split(".").pop() || "").toLowerCase())} title="Ações rápidas · Ctrl+." aria-label="Ações rápidas"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · F2 renomear · F12 definição · Shift+F12 referências</span><span>{semanticNotice || (editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados")}</span></div>{signatureHelp && <div className="editor-signature-help"><strong>{signatureHelp.detail || signatureHelp.name}</strong>{signatureHelp.parameters?.length ? <span>{signatureHelp.parameters.map((parameter, index) => <em className={index === signatureHelp.active_parameter ? "active" : ""} key={parameter + index}>{parameter}{index < (signatureHelp.parameters?.length || 0) - 1 ? ", " : ""}</em>)}</span> : null}{signatureHelp.doc && <small>{signatureHelp.doc}</small>}</div>}<div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); const beforeCursor = event.target.value.slice(0, event.target.selectionStart); if (signatureTimer.current !== null) window.clearTimeout(signatureTimer.current); if (/[A-Za-z_]\w*\([^()\n]*$/.test(beforeCursor)) { const value = event.target.value; const cursor = event.target.selectionStart; signatureTimer.current = window.setTimeout(() => requestPythonSemantic("signature", value, cursor), 180); } else setSignatureHelp(null); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · Ctrl+. ações rápidas · F2 renomear · F12 definição · Shift+F12 referências</span><span>{semanticNotice || (editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados")}</span></div>{signatureHelp && <div className="editor-signature-help"><strong>{signatureHelp.detail || signatureHelp.name}</strong>{signatureHelp.parameters?.length ? <span>{signatureHelp.parameters.map((parameter, index) => <em className={index === signatureHelp.active_parameter ? "active" : ""} key={parameter + index}>{parameter}{index < (signatureHelp.parameters?.length || 0) - 1 ? ", " : ""}</em>)}</span> : null}{signatureHelp.doc && <small>{signatureHelp.doc}</small>}</div>}<div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setCodeActions([]); codeActionSource.current = null; codeActionRequest.current = null; setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); const beforeCursor = event.target.value.slice(0, event.target.selectionStart); if (signatureTimer.current !== null) window.clearTimeout(signatureTimer.current); if (/[A-Za-z_]\w*\([^()\n]*$/.test(beforeCursor)) { const value = event.target.value; const cursor = event.target.selectionStart; signatureTimer.current = window.setTimeout(() => requestPythonSemantic("signature", value, cursor), 180); } else setSignatureHelp(null); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
                   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); return; }
-                  if ((event.ctrlKey || event.metaKey) && event.code === "Space") { event.preventDefault(); refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart, true); return; }
+                  if ((event.ctrlKey || event.metaKey) && event.code === "Space") { event.preventDefault(); refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart, true); return; }\n                  if ((event.ctrlKey || event.metaKey) && event.key === ".") { event.preventDefault(); requestPythonCodeActions(event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (event.key === "F2") { event.preventDefault(); requestSymbolRename(event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (event.key === "F12" && !event.shiftKey) { event.preventDefault(); requestPythonSemantic("definition", event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (event.key === "F12" && event.shiftKey) { event.preventDefault(); requestPythonSemantic("references", event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (editorCompletions.length && event.key === "ArrowDown") { event.preventDefault(); setActiveCompletionIndex(index => (index + 1) % editorCompletions.length); return; }
                   if (editorCompletions.length && event.key === "ArrowUp") { event.preventDefault(); setActiveCompletionIndex(index => (index - 1 + editorCompletions.length) % editorCompletions.length); return; }
                   if (editorCompletions.length && (event.key === "Enter" || event.key === "Tab")) { event.preventDefault(); applyEditorCompletion(editorCompletions[activeCompletionIndex]); return; }
-                  if (event.key === "Escape") { setEditorCompletions([]); return; }
+                  if (event.key === "Escape") { setEditorCompletions([]); setCodeActions([]); codeActionSource.current = null; return; }
                   if (event.key === "Tab") { event.preventDefault(); const target = event.currentTarget; const start = target.selectionStart; const end = target.selectionEnd; const value = target.value.slice(0, start) + "  " + target.value.slice(end); setFileContent(value); setFileDirty(true); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: value, dirty: true } : tab)); requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 2; }); }
-                }} aria-label="Editor de código" /></div>{editorCompletions.length > 0 && <div className="editor-completions" role="listbox" aria-label="Sugestões de código">{editorCompletions.map((item, index) => <button key={item.kind + ":" + item.label} className={index === activeCompletionIndex ? "selected" : ""} role="option" aria-selected={index === activeCompletionIndex} onMouseDown={event => { event.preventDefault(); applyEditorCompletion(item); }}><span className={"completion-kind " + item.kind}>{item.kind === "keyword" ? "K" : item.kind === "symbol" ? "ƒ" : "F"}</span><strong>{item.label}</strong><small>{item.detail}</small></button>)}</div>}</div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
+                }} aria-label="Editor de código" /></div>{codeActions.length > 0 && <div className="editor-completions code-actions-menu" role="listbox" aria-label="Ações rápidas de Python">{codeActions.map(action => <button key={action.id} onMouseDown={event => { event.preventDefault(); applyPythonCodeAction(action); }}><span className="completion-kind symbol">⚡</span><strong>{action.title}</strong><small>{action.code} · correção segura</small></button>)}</div>}{editorCompletions.length > 0 && <div className="editor-completions" role="listbox" aria-label="Sugestões de código">{editorCompletions.map((item, index) => <button key={item.kind + ":" + item.label} className={index === activeCompletionIndex ? "selected" : ""} role="option" aria-selected={index === activeCompletionIndex} onMouseDown={event => { event.preventDefault(); applyEditorCompletion(item); }}><span className={"completion-kind " + item.kind}>{item.kind === "keyword" ? "K" : item.kind === "symbol" ? "ƒ" : "F"}</span><strong>{item.label}</strong><small>{item.detail}</small></button>)}</div>}</div></div> : <div className="welcome"><div className="welcome-icon"><Zap size={24}/></div><h1>KardecAgent <span>Studio</span></h1><p>Seu ambiente de desenvolvimento orientado por agentes.</p><div className="welcome-actions"><button onClick={openProject}><Folder size={15}/> Abrir projeto</button><button className="secondary" onClick={() => setActiveNav("tasks")}><Plus size={15}/> Ver processos</button></div><div className="quick-grid"><div><span className="quick-label">WORKSPACE</span><strong>{projectRoot ? projectRoot.replaceAll("\\\\", "/").split("/").filter(Boolean).pop() : "Projeto local"}</strong><small>{projectRoot || "Selecione uma pasta para começar"}</small></div><div><span className="quick-label">RUNTIME</span><strong className="status-muted">{runtimeStatus === "online" ? "Conectado" : runtimeStatus === "connecting" ? "Conectando" : "Desconectado"}</strong><small>{runtimeError || (runtimeStatus === "online" ? "Gestor pronto para receber instruções" : "Abra um projeto para iniciar o core Python")}</small></div></div></div>}
               </div>
               <div className="bottom-panel"><div className="panel-tabs">{["Atividades","Output","Problemas","Terminal","Alterações"].map(tab => <button key={tab} className={bottomPanel === tab ? "panel-tab active" : "panel-tab"} onClick={() => setBottomPanel(tab)}>{tab}</button>)}<button className="panel-collapse"><ChevronDown size={14}/></button></div><div className="panel-content">{bottomPanel === "Alterações" ? <div className="git-panel">
                 <div className="git-toolbar"><div><strong>{gitStatus?.branch || "Git"}</strong><small>{gitStatus ? gitStatus.ahead + " à frente · " + gitStatus.behind + " atrás" + (gitStatus.truncated ? " · primeiros 5.000 arquivos" : "") : "Estado do repositório"}</small></div><button onClick={() => void refreshGitStatus()} disabled={gitLoading}><RefreshCw size={13}/>{gitLoading ? "Atualizando..." : "Atualizar"}</button></div>
