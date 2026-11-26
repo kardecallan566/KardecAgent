@@ -485,6 +485,14 @@ class AgentExecutor:
         resume_step: int = 1,
     ) -> TaskState:
         tracker = PlanTracker.resume_from(plan, resume_step)
+
+        def active_step_number() -> int | None:
+            return None if tracker.completed else tracker.current_step
+
+        def active_step_description() -> str | None:
+            step = active_step_number()
+            return plan.steps[step - 1] if step is not None and 1 <= step <= len(plan.steps) else None
+
         root = root.resolve()
         if state.status in {TaskStatus.PENDING, TaskStatus.RESUMING}:
             state.transition(TaskStatus.RUNNING, reason="Approved plan execution started or resumed.",
@@ -505,12 +513,8 @@ class AgentExecutor:
             "scope": list(allowed_scope or ()),
             "plan_progress": tracker.as_dict(),
             "active_step": {
-                "number": tracker.current_step,
-                "description": (
-                    plan.steps[tracker.current_step - 1]
-                    if tracker.current_step and tracker.current_step <= len(plan.steps)
-                    else None
-                ),
+                "number": active_step_number(),
+                "description": active_step_description(),
             },
             "resume_step": resume_step,
             "instruction": "Resume from the specified active plan step. Do not redo completed steps unless verification requires it. " +
@@ -541,9 +545,8 @@ class AgentExecutor:
                                    requested_step: int | None = None) -> TaskState:
             state.record("plan_execution_stalled",
                 "Execution stopped because the model repeatedly failed to make progress on the active approved plan step.",
-                reason=reason, tool=tool, active_step=tracker.current_step,
-                active_step_description=(plan.steps[tracker.current_step - 1]
-                    if tracker.current_step and tracker.current_step <= len(plan.steps) else None),
+                reason=reason, tool=tool, active_step=active_step_number(),
+                active_step_description=active_step_description(),
                 requested_step=requested_step,
                 consecutive_no_progress=no_progress_count, limit=no_progress_limit)
             state.transition(TaskStatus.FAILED,
@@ -559,7 +562,7 @@ class AgentExecutor:
             no_progress_count += 1
             state.record("execution_no_progress",
                 "The proposed action did not advance the approved plan.",
-                reason=reason, tool=tool, active_step=tracker.current_step,
+                reason=reason, tool=tool, active_step=active_step_number(),
                 requested_step=requested_step,
                 consecutive_no_progress=no_progress_count, limit=no_progress_limit)
             return no_progress_count >= no_progress_limit
@@ -687,11 +690,11 @@ class AgentExecutor:
                 continue
 
             if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS:
-                if action.plan_step != tracker.current_step:
+                if tracker.completed or action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
-                                 active_step=tracker.current_step,
-                                 active_step_description=plan.steps[tracker.current_step - 1])
+                                 active_step=active_step_number(),
+                                 active_step_description=active_step_description())
                     if register_no_progress("model attempted an action for a different plan step",
                                             tool=action.tool, requested_step=action.plan_step):
                         return stop_stalled_execution("The model repeatedly skipped the active plan step.",
@@ -699,8 +702,8 @@ class AgentExecutor:
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": json.dumps({
                                      "error": "plan_scope_violation",
-                                     "active_plan_step": tracker.current_step,
-                                     "active_plan_step_description": plan.steps[tracker.current_step - 1],
+                                     "active_plan_step": active_step_number(),
+                                     "active_plan_step_description": active_step_description(),
                                      "requested_plan_step": action.plan_step,
                                      "instruction": "STOP: the requested future step is not active. Do not execute it. Finish the active step first using evidence gathered for that step. If inspection is complete, call complete_step for the active step with concrete evidence; only then work on the next step.",
                                  }, ensure_ascii=False)}]
@@ -761,9 +764,9 @@ class AgentExecutor:
 
             if action.tool == "complete_step":
                 step = action.arguments["step"]
-                if step != action.plan_step or step != tracker.current_step:
+                if tracker.completed or step != action.plan_step or step != tracker.current_step:
                     state.record("plan_scope_violation", "Step completion rejected.",
-                                 requested_step=step, active_step=tracker.current_step)
+                                 requested_step=step, active_step=active_step_number())
                     continue
                 tracker.complete(step)
                 no_progress_count = 0
@@ -917,7 +920,7 @@ class AgentExecutor:
                                  "plan_progress": tracker.as_dict(),
                                  "active_step": {
                                      "number": tracker.current_step,
-                                     "description": plan.steps[tracker.current_step - 1] if tracker.current_step else None,
+                                     "description": active_step_description(),
                                  },
                                  "instruction": "Continue ONLY with the active_step shown here. For every mutating action, plan_step must exactly equal active_step.number. Complete the active step with evidence before starting the next one.",
                              }, ensure_ascii=False)}]
@@ -930,8 +933,8 @@ class AgentExecutor:
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
                                  "tool": action.tool, "error": str(exc),
-                                 "active_plan_step": tracker.current_step,
-                                 "active_plan_step_description": plan.steps[tracker.current_step - 1],
+                                 "active_plan_step": active_step_number(),
+                                 "active_plan_step_description": active_step_description(),
                                  "instruction": "Diagnose the error, choose a safe correction for the active step, and do not repeat an unchanged failed action.",
                              }, ensure_ascii=False)}]
 
