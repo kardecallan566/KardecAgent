@@ -451,6 +451,84 @@ def test_run_stdio_rejects_semantic_request_for_another_workspace(monkeypatch, t
 
 
 
+def test_run_stdio_routes_python_code_actions(monkeypatch, tmp_path):
+    source = tmp_path / "main.py"
+    source.write_text("import os\\n", encoding="utf-8")
+    command = {
+        "type": "editor.code_actions",
+        "schema_version": 1,
+        "command_id": "code-actions-1",
+        "payload": {
+            "project_root": str(tmp_path),
+            "file_path": "main.py",
+            "source": "import os\\n",
+            "line": 1,
+            "column": 0,
+        },
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+    monkeypatch.setattr(studio_protocol, "python_code_actions", lambda source, file_path, project_root, line, column: {
+        "available": True,
+        "actions": [{"id": "F401-0", "title": "Remover import não utilizado", "edits": [{"start": 0, "end": 10, "content": ""}]}],
+        "message": None,
+    })
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    response = next(item for item in messages if item["type"] == "editor.code_actions.response")
+    assert response["command_id"] == "code-actions-1"
+    assert response["payload"]["actions"][0]["id"] == "F401-0"
+
+
+def test_run_stdio_rejects_code_actions_for_another_workspace(monkeypatch, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    source = other / "main.py"
+    source.write_text("value = 1\\n", encoding="utf-8")
+    command = {
+        "type": "editor.code_actions",
+        "schema_version": 1,
+        "command_id": "code-actions-outside",
+        "payload": {
+            "project_root": str(other),
+            "file_path": str(source),
+            "source": "value = 1\\n",
+            "line": 1,
+            "column": 0,
+        },
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(studio_protocol.sys, "stdout", output)
+
+    class FakeAgent:
+        settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
+
+    assert studio_protocol.run_stdio(tmp_path, FakeAgent()) == 0
+    messages = [json.loads(line) for line in output.getvalue().splitlines()]
+    response = next(item for item in messages if item["type"] == "editor.code_actions.response")
+    assert response["payload"]["available"] is False
+    assert "active runtime workspace" in response["payload"]["message"]
+
+
+def test_read_message_allows_bounded_large_code_action_source(monkeypatch):
+    command = {
+        "type": "editor.code_actions",
+        "schema_version": 1,
+        "command_id": "large-code-actions",
+        "payload": {"source": "x" * (studio_protocol.MAX_MESSAGE_BYTES + 100)},
+    }
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + chr(10)))
+    message = studio_protocol._read_message()
+    assert message["type"] == "editor.code_actions"
+    assert len(message["payload"]["source"]) > studio_protocol.MAX_MESSAGE_BYTES
+
+
 def test_read_message_allows_bounded_large_semantic_source(monkeypatch):
     command = {
         "type": "editor.semantic",
