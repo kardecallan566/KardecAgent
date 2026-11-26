@@ -232,6 +232,13 @@ def gh_create_pr(root: Path, title: str, body: str, base: str = "main",
     if upstream.returncode != 0:
         return GitResult("gh pr create", 1, "",
                          "Current branch has no upstream. Push it first using git_push and its separate approval; PR creation will not trigger an implicit push.")
+    divergence = _git(root, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
+    if divergence.returncode != 0:
+        return divergence
+    counts = divergence.stdout.strip().split()
+    if len(counts) == 2 and int(counts[1]) > 0:
+        return GitResult("gh pr create", 1, "",
+                         "Current branch has unpushed commits. Run git_push and obtain its separate approval before creating the PR.")
     args = ["pr", "create", "--title", title, "--body", body, "--base", base]
     if draft:
         args.append("--draft")
