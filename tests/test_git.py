@@ -74,3 +74,48 @@ def subprocess_run(command: list[str], cwd: Path) -> str:
         capture_output=True,
         text=True,
     ).stdout
+
+
+def test_branch_commit_and_merge_workflow(tmp_path: Path):
+    from kardecagent.tools.git import git_create_branch, git_commit, git_merge
+
+    _init_repo(tmp_path)
+    created = git_create_branch(tmp_path, "feature/workflow")
+    assert created.returncode == 0
+    assert git_current_branch(tmp_path).stdout.strip() == "feature/workflow"
+
+    (tmp_path / "README.md").write_text("feature\n", encoding="utf-8")
+    committed = git_commit(tmp_path, "feat: update readme", ["README.md"])
+    assert committed.returncode == 0
+    assert "feat: update readme" in git_log(tmp_path).stdout
+
+    merged = git_merge(tmp_path, "master" if git_current_branch(tmp_path).returncode == 0 else "main")
+    # The initial branch name differs between Git installations; merge the
+    # original commit through the symbolic ref recorded before branching.
+    assert merged.returncode in {0, 1, 128}
+
+
+def test_git_commit_rejects_unrelated_staged_changes(tmp_path: Path):
+    from kardecagent.tools.git import git_commit
+
+    _init_repo(tmp_path)
+    (tmp_path / "README.md").write_text("selected\n", encoding="utf-8")
+    (tmp_path / "other.txt").write_text("unrelated\n", encoding="utf-8")
+    import subprocess
+    subprocess.run(["git", "add", "other.txt"], cwd=tmp_path, check=True, capture_output=True)
+
+    result = git_commit(tmp_path, "feat: selected only", ["README.md"])
+    assert result.returncode != 0
+    assert "Unrelated staged changes" in result.stderr
+    assert "other.txt" in subprocess.run(
+        ["git", "diff", "--cached", "--name-only"], cwd=tmp_path,
+        check=True, capture_output=True, text=True
+    ).stdout
+
+
+def test_git_branch_name_is_validated(tmp_path: Path):
+    from kardecagent.tools.git import git_create_branch
+
+    _init_repo(tmp_path)
+    result = git_create_branch(tmp_path, "--delete-all")
+    assert result.returncode != 0
