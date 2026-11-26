@@ -65,7 +65,7 @@ def test_ollama_health_emits_machine_readable_json(monkeypatch, capsys):
             return "0.13.0"
 
         def list_models(self):
-            return [{"name": "qwen2.5-coder:3b"}]
+            return [{"name": "qwen2.5-coder:3b", "size": 2_000_000_000}]
 
         def health_check(self):
             return SimpleNamespace(content="KARDECAGENT_OK")
@@ -95,15 +95,21 @@ def test_ollama_health_returns_json_error_when_model_is_missing(monkeypatch, cap
         def server_version(self):
             return "0.13.0"
 
+        model = "other-model"
+
         def list_models(self):
-            return [{"name": "other-model"}]
+            return [{"name": "other-model", "size": 2_000_000_000}]
+
+        def health_check(self):
+            return SimpleNamespace(content="KARDECAGENT_OK")
 
     monkeypatch.setattr(cli, "OllamaClient", FakeOllama)
 
-    assert _ollama_health(Settings()) == 1
+    assert _ollama_health(Settings()) == 0
     import json
     payload = json.loads(capsys.readouterr().out)
-    assert "not installed" in payload["error"]
+    assert payload["model"] == "other-model"
+    assert payload["models"] == ["other-model"]
 
 
 def test_build_llm_wraps_primary_and_fast_clients_when_routing_enabled(monkeypatch):
@@ -112,6 +118,12 @@ def test_build_llm_wraps_primary_and_fast_clients_when_routing_enabled(monkeypat
     class FakeClient:
         def __init__(self, base_url, model, timeout):
             self.model = model
+
+        def list_models(self):
+            return [
+                {"name": "qwen3.5:9b", "size": 9_000_000_000},
+                {"name": "qwen3.5:0.8b", "size": 800_000_000},
+            ]
 
     class FakeRouter:
         def __init__(self, primary, fast):
@@ -128,9 +140,9 @@ def test_build_llm_wraps_primary_and_fast_clients_when_routing_enabled(monkeypat
 
     client = _build_llm(settings)
 
-    assert isinstance(client, FakeRouter)
-    assert client.primary.model == "qwen3.5:9b"
-    assert client.fast.model == "qwen3.5:0.8b"
+    assert isinstance(client.clients[0], FakeRouter)
+    assert client.clients[0].primary.model == "qwen3.5:9b"
+    assert client.clients[0].fast.model == "qwen3.5:0.8b"
 
 
 def test_build_llm_keeps_single_model_when_routing_is_disabled(monkeypatch):
@@ -140,33 +152,62 @@ def test_build_llm_keeps_single_model_when_routing_is_disabled(monkeypatch):
         def __init__(self, base_url, model, timeout):
             self.model = model
 
+        def list_models(self):
+            return [{"name": "qwen3.5:9b", "size": 9_000_000_000}]
+
     monkeypatch.setattr(cli, "OllamaClient", FakeClient)
     settings = Settings(llm_model="qwen3.5:9b", llm_fast_model="qwen3.5:0.8b")
 
     client = _build_llm(settings)
 
-    assert isinstance(client, FakeClient)
     assert client.model == "qwen3.5:9b"
+    assert client.clients[0].model == "qwen3.5:9b"
 
 
-def test_build_llm_rejects_enabled_routing_without_fast_model():
+def test_build_llm_auto_selects_fast_model_without_manual_configuration(monkeypatch):
     from kardecagent import cli
 
-    settings = Settings(llm_routing_enabled=True, llm_fast_model="")
+    class FakeClient:
+        def __init__(self, base_url, model, timeout):
+            self.model = model
 
-    with pytest.raises(ValueError, match="FAST_MODEL"):
-        _build_llm(settings)
+        def list_models(self):
+            return [
+                {"name": "qwen3.5:9b", "size": 9_000_000_000},
+                {"name": "qwen3.5:0.8b", "size": 800_000_000},
+            ]
+
+    class FakeRouter:
+        def __init__(self, primary, fast):
+            self.primary = primary
+            self.fast = fast
+
+    monkeypatch.setattr(cli, "OllamaClient", FakeClient)
+    monkeypatch.setattr(cli, "AdaptiveLLMClient", FakeRouter)
+
+    client = _build_llm(Settings(
+        llm_model="qwen3.5:9b",
+        llm_fast_model="",
+        llm_routing_enabled=True,
+    ))
+
+    assert isinstance(client.clients[0], FakeRouter)
+    assert client.clients[0].primary.model == "qwen3.5:9b"
+    assert client.clients[0].fast.model == "qwen3.5:0.8b"
 
 
-def test_doctor_rejects_routing_when_fast_ollama_model_is_not_installed(tmp_path: Path, monkeypatch, capsys):
+def test_doctor_uses_available_models_when_configured_fast_model_is_missing(tmp_path: Path, monkeypatch, capsys):
     from kardecagent import cli
 
     class FakeOllama:
         def __init__(self, *args, **kwargs):
-            pass
+            self.model = args[1] if len(args) > 1 else "qwen3.5:9b"
 
         def list_models(self):
-            return [{"name": "qwen3.5:9b"}]
+            return [{"name": "qwen3.5:9b", "size": 9_000_000_000}]
+
+        def health_check(self):
+            return SimpleNamespace(content="KARDECAGENT_OK")
 
     monkeypatch.setattr(cli, "OllamaClient", FakeOllama)
     settings = Settings(
@@ -175,31 +216,40 @@ def test_doctor_rejects_routing_when_fast_ollama_model_is_not_installed(tmp_path
         llm_routing_enabled=True,
     )
 
-    assert _doctor(settings, tmp_path) == 1
-    assert "Fast Ollama model not installed" in capsys.readouterr().out
+    assert _doctor(settings, tmp_path) == 0
+    output = capsys.readouterr().out
+    assert "Active primary model: qwen3.5:9b" in output
+    assert "[OK] Local LLM: reachable and responding" in output
 
 
-def test_ollama_health_requires_fast_model_when_routing_is_enabled(monkeypatch, capsys):
+def test_ollama_health_auto_selects_fast_model_when_available(monkeypatch, capsys):
     from kardecagent import cli
 
     class FakeOllama:
         def __init__(self, *args, **kwargs):
-            pass
+            self.model = args[1] if len(args) > 1 else "qwen3.5:9b"
 
         def server_version(self):
             return "0.13.0"
 
         def list_models(self):
-            return [{"name": "qwen3.5:9b"}]
+            return [
+                {"name": "qwen3.5:9b", "size": 9_000_000_000},
+                {"name": "qwen3.5:0.8b", "size": 800_000_000},
+            ]
+
+        def health_check(self):
+            return SimpleNamespace(content="KARDECAGENT_OK")
 
     monkeypatch.setattr(cli, "OllamaClient", FakeOllama)
     settings = Settings(
         llm_model="qwen3.5:9b",
-        llm_fast_model="qwen3.5:0.8b",
+        llm_fast_model="",
         llm_routing_enabled=True,
     )
 
-    assert _ollama_health(settings) == 1
+    assert _ollama_health(settings) == 0
     import json
     payload = json.loads(capsys.readouterr().out)
-    assert "Fast model" in payload["error"]
+    assert payload["model"] == "qwen3.5:9b"
+    assert payload["fast_model"] == "qwen3.5:0.8b"
