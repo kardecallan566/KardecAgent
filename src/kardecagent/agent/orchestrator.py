@@ -152,7 +152,11 @@ class Orchestrator:
                 if not batch:
                     return [candidate]
                 continue
-            if any(self._scope_paths_conflict(candidate, selected) for selected in batch):
+            if any(
+                self._scope_paths_conflict(candidate, selected)
+                or bool(set(candidate.plan_steps) & set(selected.plan_steps))
+                for selected in batch
+            ):
                 continue
             batch.append(candidate)
             if len(batch) >= limit:
