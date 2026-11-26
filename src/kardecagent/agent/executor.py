@@ -209,12 +209,21 @@ class AgentExecutor:
     @staticmethod
     def _contains_git_mutation_command(command: str) -> bool:
         pattern = (
-            r"(?im)(?:^|[;&|\n]\s*)"
-            r"(?:git\s+(?:-C\s+[^\s]+\s+)?"
-            r"(?:push|pull|fetch|checkout|switch|branch|commit|merge|reset|rebase|cherry-pick|tag|remote|worktree)\b"
-            r"|gh\s+pr\s+(?:create|merge|close|edit)\b)"
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?"
+            r"(?:add|commit|push|pull|fetch|checkout|switch|branch|merge|reset|rebase|cherry-pick|revert|tag|remote|worktree|update-ref|stash|clean|config|submodule|clone|restore|apply)\b"
+            r"|\bgh\s+pr\s+(?:create|merge|close|edit|ready|review)\b"
         )
         return re.search(pattern, command) is not None
+
+    @staticmethod
+    def _is_forbidden_git_command(command: str) -> bool:
+        patterns = (
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?push\b[^\n]*(?:--force(?:-with-lease)?|\s-f(?:\s|$))",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?reset\s+--hard\b",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?clean\b[^\n]*(?:-[^\s]*[fd]|--force)",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?branch\s+-D\b",
+        )
+        return any(re.search(pattern, command, re.IGNORECASE) for pattern in patterns)
 
     @staticmethod
     def _redact_git_command(command: str) -> str:
@@ -603,6 +612,15 @@ class AgentExecutor:
                     state.record("plan_step_started", f"Started plan step {action.plan_step}.",
                                  step=action.plan_step,
                                  description=plan.steps[action.plan_step - 1])
+
+            if action.tool == "run_command" and self._is_forbidden_git_command(action.arguments.get("command", "")):
+                state.record("git_command_blocked",
+                             "A destructive Git command is permanently blocked by the safety policy.",
+                             tool=action.tool, reason="force push, hard reset, destructive clean, or forced branch deletion")
+                messages += [{"role": "assistant", "content": response.content},
+                             {"role": "user", "content":
+                              "This destructive Git command is blocked and cannot be authorized through run_command. Use the dedicated safe Git tools or explain why the requested operation cannot be performed safely."}]
+                continue
 
             git_command_requires_approval = (
                 action.tool == "run_command"
