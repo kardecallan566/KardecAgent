@@ -4,7 +4,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
+from threading import RLock
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,94 @@ class RoutingDecision:
     tier: str
     model: str
     reason: str
+
+@dataclass(frozen=True)
+class ModelSwitchRequest:
+    current_model: str
+    target_model: str
+    reason: str
+    trigger: str = "capability"
+
+    @property
+    def security_level(self) -> str:
+        return "normal"
+
+    def format_for_review(self) -> str:
+        return (
+            "Solicitação de troca de modelo\n"
+            f"Modelo atual: {self.current_model}\n"
+            f"Modelo sugerido: {self.target_model}\n"
+            f"Motivo: {self.reason}\n"
+            "A conversa e as evidências da tarefa serão preservadas. "
+            "Nenhuma troca ocorrerá sem aprovação."
+        )
+
+
+class EscalatingLLMClient:
+    """Bounded model escalation that never changes models without explicit consent."""
+
+    def __init__(self, primary: ChatClient, alternatives: list[ChatClient] | None = None) -> None:
+        self.clients = [primary, *(alternatives or [])]
+        self.active_index = 0
+        self.approval_callback: Callable[[ModelSwitchRequest], bool] | None = None
+        self._lock = RLock()
+        self.last_switch: dict[str, str] | None = None
+
+    @property
+    def model(self) -> str:
+        return str(getattr(self.clients[self.active_index], "model", "unknown"))
+
+    def set_approval_callback(self, callback: Callable[[ModelSwitchRequest], bool] | None) -> None:
+        with self._lock:
+            self.approval_callback = callback
+            for client in self.clients:
+                setter = getattr(client, "set_approval_callback", None)
+                if callable(setter):
+                    setter(callback)
+
+    def request_escalation(self, reason: str, *, trigger: str = "capability") -> tuple[bool, ModelSwitchRequest | None]:
+        with self._lock:
+            if self.active_index + 1 >= len(self.clients):
+                return False, None
+            current = self.model
+            target = str(getattr(self.clients[self.active_index + 1], "model", "unknown"))
+            request = ModelSwitchRequest(current, target, reason, trigger)
+            callback = self.approval_callback
+            if callback is None or not bool(callback(request)):
+                return False, request
+            self.active_index += 1
+            self.last_switch = {
+                "from_model": current,
+                "to_model": target,
+                "reason": reason,
+                "trigger": trigger,
+            }
+            return True, request
+
+    def chat(self, messages: list[dict[str, Any]], *, temperature: float = 0.2):
+        # Serialize model calls so an approved switch cannot change the active
+        # model underneath another parallel subtask's in-flight request.
+        with self._lock:
+            while True:
+                client = self.clients[self.active_index]
+                try:
+                    response = client.chat(messages, temperature=temperature)
+                    raw = dict(getattr(response, "raw", {}) or {})
+                    if self.last_switch:
+                        raw["_kardecagent_escalation"] = dict(self.last_switch)
+                        self.last_switch = None
+                    try:
+                        return replace(response, raw=raw)
+                    except TypeError:
+                        response.raw = raw
+                        return response
+                except Exception as exc:
+                    approved, _request = self.request_escalation(
+                        f"Falha do modelo {self.model}: {type(exc).__name__}: {exc}",
+                        trigger="provider_error",
+                    )
+                    if not approved:
+                        raise
 
 
 _COMPLEX_SIGNALS = (
