@@ -35,7 +35,7 @@ def _context(source: str, file_path: str, project_root: str, line: int, column: 
 
 def _offset(source: str, row: int, column: int) -> int:
     lines = source.splitlines(keepends=True)
-    if row < 1 or row > len(lines) + (1 if source.endswith("\\n") else 0):
+    if row < 1 or row > len(lines) + (1 if source.endswith("\n") else 0):
         raise ValueError("Ruff returned an edit outside the source document.")
     start = sum(len(item) for item in lines[:row - 1])
     line_text = lines[row - 1] if row <= len(lines) else ""
