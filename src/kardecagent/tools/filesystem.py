@@ -15,10 +15,12 @@ class ProjectFilesystem:
         if path.exists() and not path.is_file():raise IsADirectoryError(relative_path)
         path.parent.mkdir(parents=True,exist_ok=True)
         path.write_text(content,encoding="utf-8",newline="")
-    def create_directory(self,relative_path:str)->None:
+    def create_directory(self,relative_path:str)->bool:
         path=self.safe_path(relative_path)
         if path.exists() and not path.is_dir():raise NotADirectoryError(relative_path)
+        created = not path.exists()
         path.mkdir(parents=True,exist_ok=True)
+        return created
     def append_file(self,relative_path:str,content:str)->None:
         path=self.safe_path(relative_path)
         if path.exists() and not path.is_file():raise IsADirectoryError(relative_path)
