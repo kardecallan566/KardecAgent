@@ -541,7 +541,10 @@ def main() -> int:
                           high_risk_approval_callback=_approve_high_risk,
                           model_switch_approval_callback=_approve_model_switch)
     else:
-        state = agent.resume(root, args.task)
+        state = agent.resume(
+            root, args.task,
+            model_switch_approval_callback=_approve_model_switch,
+        )
     print(f"Status: {state.status.value}")
     print(f"Iterations: {state.iteration}")
     for event in state.events[-10:]:
