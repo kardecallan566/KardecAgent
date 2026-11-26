@@ -105,8 +105,8 @@ Example:
 
 ```dotenv
 KARDECAGENT_LLM_MODEL=qwen2.5-coder:3b
-KARDECAGENT_ESCALATION_MODELS=qwen2.5-coder:14b;deepseek-coder:16b
+KARDECAGENT_ESCALATION_MODELS=qwen2.5-coder:14b,deepseek-coder:16b
 KARDECAGENT_MAX_PARALLEL_SUBTASKS=2
 ```
 
-Use comma-separated model tags in the environment variable (the semicolon above is only illustrative when copying through documentation systems; prefer commas in `.env` files).
+Use comma-separated model tags in the environment variable. Configure only models installed in the selected provider.
