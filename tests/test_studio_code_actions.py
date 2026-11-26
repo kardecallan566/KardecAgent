@@ -96,7 +96,7 @@ def test_code_actions_reject_overlapping_ruff_edits(tmp_path: Path, monkeypatch:
     assert result["actions"] == []
 
 
-def test_real_ruff_exposes_safe_unused_import_fix(tmp_path: Path) -> None:
+def test_real_ruff_exposes_safe_quick_fix(tmp_path: Path) -> None:
     import importlib.util
 
     if importlib.util.find_spec("ruff") is None:
