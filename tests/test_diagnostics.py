@@ -104,3 +104,21 @@ def test_diagnose_accepts_one_shot_iterables():
 
     assert result.category is FailureCategory.TOOL_EXECUTION
     assert result.error == "permission denied"
+
+
+
+def test_diagnose_model_provider_timeout_as_transient_provider_failure():
+    result = diagnose_failure(
+        [event(
+            "model_request_failed",
+            "Model request failed.",
+            error="TimeoutError: model request timed out",
+            model="fixture-model",
+            duration_seconds=180.0,
+        )],
+        "failed",
+    )
+
+    assert result.category is FailureCategory.MODEL_PROVIDER
+    assert result.retryable is True
+    assert result.source_event == "model_request_failed"
