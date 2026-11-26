@@ -351,6 +351,59 @@ function App() {
           if (oldest) seenEventIds.current.delete(oldest);
         }
       }
+      if (message.type === "editor.rename.preview.response") {
+        const result = message.payload as { available?: boolean; preview_id?: string; old_name?: string; new_name?: string; changes?: Array<{ path: string }>; diff?: string; message?: string } | undefined;
+        if (!result?.available || !result.preview_id) {
+          setSemanticNotice(result?.message || "Não foi possível preparar a renomeação.");
+          return;
+        }
+        const files = (result.changes || []).map(change => change.path);
+        const diff = result.diff || "(Jedi não retornou um diff textual.)";
+        const excerpt = diff.length > 12000 ? diff.slice(0, 12000) + "\n\n[Diff truncado na prévia]" : diff;
+        const approved = window.confirm(
+          "Renomear símbolo " + (result.old_name || "selecionado") + " para " + (result.new_name || "") +
+          "?\n\nArquivos afetados (" + files.length + "):\n" + files.join("\n") +
+          "\n\nPRÉVIA DAS ALTERAÇÕES\n" + excerpt +
+          "\n\nSomente confirme se deseja aplicar estas alterações."
+        );
+        const commandId = "rename-" + crypto.randomUUID();
+        void invoke("send_runtime_command", {
+          message: {
+            type: approved ? "editor.rename.apply" : "editor.rename.cancel",
+            schema_version: 1,
+            command_id: commandId,
+            payload: { preview_id: result.preview_id },
+          },
+        }).catch(error => setSemanticNotice("Falha ao responder à prévia de renomeação: " + String(error)));
+        setSemanticNotice(approved ? "Aplicando renomeação semântica..." : "Renomeação cancelada.");
+        return;
+      }
+      if (message.type === "editor.rename.apply.response") {
+        const result = message.payload as { available?: boolean; applied?: boolean; files?: string[]; message?: string } | undefined;
+        if (!result?.available || !result.applied) {
+          setSemanticNotice(result?.message || "Não foi possível aplicar a renomeação.");
+          return;
+        }
+        const changed = new Set(result.files || []);
+        void Promise.all([...changed].map(async path => [path, await invoke<string>("read_project_file", { projectRoot, filePath: path })] as const))
+          .then(entries => {
+            const contentByPath = new Map(entries);
+            setOpenTabs(tabs => tabs.map(tab => contentByPath.has(tab.path)
+              ? { ...tab, content: contentByPath.get(tab.path)!, dirty: false }
+              : tab));
+            if (openedPath && contentByPath.has(openedPath)) {
+              setFileContent(contentByPath.get(openedPath)!);
+              setFileDirty(false);
+            }
+            return invoke<ProjectEntry[]>("read_project_entries", { projectRoot, projectPath: projectRoot });
+          })
+          .then(entries => setProjectEntries(entries))
+          .catch(error => setSemanticNotice("Renomeação aplicada, mas falhou a atualização dos arquivos abertos: " + String(error)));
+        setToolEditorDiagnostics([]);
+        setSemanticNotice("Símbolo renomeado em " + (result.files || []).length + " arquivo(s).");
+        return;
+      }
+      if (message.type === "editor.rename.cancel.response") return;
       if (message.type === "editor.semantic.response") {
         const commandId = typeof message.command_id === "string" ? message.command_id : "";
         const request = semanticRequests.current.get(commandId);
@@ -772,6 +825,42 @@ function App() {
         setSemanticNotice("Não foi possível solicitar inteligência Python: " + String(error));
       }
     });
+  }
+
+  function requestSymbolRename(source: string, cursor: number) {
+    if (!projectRoot || !openedPath || runtimeStatus !== "online") return;
+    const extension = openedPath.split(".").pop()?.toLowerCase() || "";
+    if (extension !== "py" && extension !== "pyi") {
+      setSemanticNotice("Rename Symbol semântico está disponível apenas para Python.");
+      return;
+    }
+    if (openTabs.some(tab => tab.dirty)) {
+      setSemanticNotice("Salve todos os arquivos abertos antes de renomear símbolos (Ctrl+S).");
+      return;
+    }
+    const before = source.slice(0, cursor);
+    const match = before.match(/[A-Za-z_]\w*$/);
+    const symbol = match?.[0] || source.slice(cursor).match(/^[A-Za-z_]\w*/)?.[0] || "";
+    if (!symbol) {
+      setSemanticNotice("Posicione o cursor sobre um símbolo Python para renomeá-lo.");
+      return;
+    }
+    const newName = window.prompt("Novo nome para '" + symbol + "':", symbol);
+    if (!newName || newName === symbol) return;
+    const symbolStart = match ? cursor - symbol.length : cursor;
+    const position = source.slice(0, symbolStart);
+    const line = position.split("\n").length;
+    const column = position.length - position.lastIndexOf("\n") - 1;
+    const commandId = "rename-preview-" + crypto.randomUUID();
+    void invoke("send_runtime_command", {
+      message: {
+        type: "editor.rename.preview",
+        schema_version: 1,
+        command_id: commandId,
+        payload: { project_root: projectRoot, file_path: openedPath, source, line, column, new_name: newName.trim() },
+      },
+    }).catch(error => setSemanticNotice("Não foi possível preparar a renomeação: " + String(error)));
+    setSemanticNotice("Analisando referências e preparando a prévia...");
   }
 
   function refreshEditorCompletions(source: string, cursor: number, force = false) {
@@ -1573,9 +1662,10 @@ function App() {
             <>
               <div className="tabs">{openTabs.map(tab => <button key={tab.path} className={openedPath === tab.path ? "tab active" : "tab"} onClick={() => { setOpenedPath(tab.path); setSelectedFile(tab.name); setFileContent(tab.content); setFileDirty(tab.dirty); }}><FileCode2 size={14}/>{tab.name}{tab.dirty && <span className="dirty-dot"/>}<span className="tab-close" onClick={event => { event.stopPropagation(); const remaining = openTabs.filter(item => item.path !== tab.path); setOpenTabs(remaining); if (openedPath === tab.path) { const next = remaining[remaining.length - 1]; setOpenedPath(next?.path || null); setSelectedFile(next?.name || "App.tsx"); setFileContent(next?.content || ""); setFileDirty(next?.dirty || false); } }}>×</span></button>)}<div className="tab-placeholder">{openedPath || "KardecAgent Studio"}</div>{openedPath && <><button className="save-file-button icon-only" onClick={() => void runQuality(false)} disabled={qualityBusy} title="Analisar lint" aria-label="Analisar lint"><Activity size={15}/></button><button className="save-file-button icon-only" onClick={() => void runQuality(true)} disabled={qualityBusy} title="Corrigir problemas de lint" aria-label="Corrigir problemas de lint"><Zap size={15}/></button><button className="save-file-button icon-only" onClick={() => void formatCurrentFile()} disabled={qualityBusy} title="Corrigir indentação e formatar" aria-label="Corrigir indentação e formatar"><IndentIncrease size={15}/></button><button className="save-file-button icon-only" onClick={runCurrentFile} disabled={runningFile} title="Executar arquivo" aria-label="Executar arquivo"><Play size={15}/></button><button className="save-file-button icon-only" onClick={saveCurrentFile} disabled={!fileDirty || fileSaving} title="Salvar arquivo" aria-label="Salvar arquivo"><Save size={15}/></button></>}</div>
               <div className="editor">
-                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · F12 definição · Shift+F12 referências</span><span>{semanticNotice || (editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados")}</span></div>{signatureHelp && <div className="editor-signature-help"><strong>{signatureHelp.detail || signatureHelp.name}</strong>{signatureHelp.parameters?.length ? <span>{signatureHelp.parameters.map((parameter, index) => <em className={index === signatureHelp.active_parameter ? "active" : ""} key={parameter + index}>{parameter}{index < (signatureHelp.parameters?.length || 0) - 1 ? ", " : ""}</em>)}</span> : null}{signatureHelp.doc && <small>{signatureHelp.doc}</small>}</div>}<div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); const beforeCursor = event.target.value.slice(0, event.target.selectionStart); if (signatureTimer.current !== null) window.clearTimeout(signatureTimer.current); if (/[A-Za-z_]\w*\([^()\n]*$/.test(beforeCursor)) { const value = event.target.value; const cursor = event.target.selectionStart; signatureTimer.current = window.setTimeout(() => requestPythonSemantic("signature", value, cursor), 180); } else setSignatureHelp(null); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
+                {openedPath ? <div className="file-view"><div className="file-path"><span>{openedPath}</span><span>{openedPath.split(".").pop()?.toUpperCase()} · UTF-8 · Ctrl+Space completar · F2 renomear · F12 definição · Shift+F12 referências</span><span>{semanticNotice || (editorDiagnostics.length ? editorDiagnostics.length + " problema(s)" : "Sem problemas detectados")}</span></div>{signatureHelp && <div className="editor-signature-help"><strong>{signatureHelp.detail || signatureHelp.name}</strong>{signatureHelp.parameters?.length ? <span>{signatureHelp.parameters.map((parameter, index) => <em className={index === signatureHelp.active_parameter ? "active" : ""} key={parameter + index}>{parameter}{index < (signatureHelp.parameters?.length || 0) - 1 ? ", " : ""}</em>)}</span> : null}{signatureHelp.doc && <small>{signatureHelp.doc}</small>}</div>}<div className="code-editor-wrap">{settings.showLineNumbers && <div className="line-numbers">{fileContent.split("\n").map((_, index) => <span key={index}>{index + 1}</span>)}</div>}<div className="code-surface"><pre className="syntax-highlight" aria-hidden="true" style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }}>{highlightSource(fileContent, openedPath.split(".").pop() || "")}{"\n"}</pre><textarea ref={editorRef} className="code-editor" spellCheck={false} value={fileContent} style={{ fontFamily: settings.editorFontFamily, fontSize: `${settings.editorFontSize}px`, lineHeight: settings.lineHeight, tabSize: settings.tabSize, whiteSpace: settings.wordWrap ? "pre-wrap" : "pre" }} onChange={event => { setFileContent(event.target.value); setFileDirty(true); setToolEditorDiagnostics([]); setOpenTabs(tabs => tabs.map(tab => tab.path === openedPath ? { ...tab, content: event.target.value, dirty: true } : tab)); refreshEditorCompletions(event.target.value, event.target.selectionStart); const beforeCursor = event.target.value.slice(0, event.target.selectionStart); if (signatureTimer.current !== null) window.clearTimeout(signatureTimer.current); if (/[A-Za-z_]\w*\([^()\n]*$/.test(beforeCursor)) { const value = event.target.value; const cursor = event.target.selectionStart; signatureTimer.current = window.setTimeout(() => requestPythonSemantic("signature", value, cursor), 180); } else setSignatureHelp(null); }} onClick={event => refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart)} onScroll={event => { const overlay = event.currentTarget.previousElementSibling as HTMLElement | null; if (overlay) { overlay.scrollTop = event.currentTarget.scrollTop; overlay.scrollLeft = event.currentTarget.scrollLeft; } }} onKeyDown={event => {
                   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveCurrentFile(); return; }
                   if ((event.ctrlKey || event.metaKey) && event.code === "Space") { event.preventDefault(); refreshEditorCompletions(event.currentTarget.value, event.currentTarget.selectionStart, true); return; }
+                  if (event.key === "F2") { event.preventDefault(); requestSymbolRename(event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (event.key === "F12" && !event.shiftKey) { event.preventDefault(); requestPythonSemantic("definition", event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (event.key === "F12" && event.shiftKey) { event.preventDefault(); requestPythonSemantic("references", event.currentTarget.value, event.currentTarget.selectionStart); return; }
                   if (editorCompletions.length && event.key === "ArrowDown") { event.preventDefault(); setActiveCompletionIndex(index => (index + 1) % editorCompletions.length); return; }

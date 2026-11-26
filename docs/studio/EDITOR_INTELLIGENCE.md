@@ -24,3 +24,17 @@ This is an initial lexical completion provider, not a full language server. It d
 ## Next language-service work
 
 A full LSP integration is still a separate milestone. It should use project-local tool discovery, explicit user settings, bounded subprocess lifetimes, cancellation and diagnostics versioning before enabling semantic completion or background analysis.
+
+## Rename Symbol semântico
+
+O editor Python oferece Rename Symbol com Jedi por meio de `F2`:
+
+- O arquivo ativo precisa estar salvo antes da análise, evitando misturar buffer não persistido com o conteúdo real do workspace.
+- Jedi calcula as referências e produz uma prévia multi-arquivo; o editor mostra os caminhos afetados e o diff antes de solicitar confirmação.
+- A aplicação exige uma confirmação explícita. Cancelar descarta a prévia sem gravar arquivos.
+- O Core limita a prévia a cinco operações pendentes, até 100 arquivos e 10 MB combinados por operação, valida identificadores Python e restringe todos os caminhos ao workspace.
+- Cada arquivo recebe um SHA-256 durante a prévia. Se qualquer arquivo mudar antes da confirmação, a aplicação é recusada e uma nova prévia deve ser gerada.
+- Os arquivos são preparados em temporários no mesmo diretório e substituídos somente depois das validações. Em caso de falha durante a substituição, o Core tenta restaurar os arquivos já substituídos.
+- O recurso é exclusivo para arquivos Python e depende do extra opcional `studio` (Jedi).
+
+Atalho: posicione o cursor sobre o nome do símbolo e pressione `F2`. Use `Esc`/Cancelar na confirmação do sistema para não aplicar a alteração.
