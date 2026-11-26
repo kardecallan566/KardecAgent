@@ -240,7 +240,15 @@ class AdaptiveLLMClient:
         if decision.tier == "primary":
             return self.primary.chat(messages, temperature=temperature)
         if self.fast_disabled_reason:
-            return self.primary.chat(messages, temperature=temperature)
+            response = self.primary.chat(messages, temperature=temperature)
+            raw = dict(getattr(response, "raw", {}) or {})
+            raw["_kardecagent_routing"] = {
+                "tier": "primary",
+                "model": self.primary.model,
+                "reason": "fast model disabled after an earlier failure: " + self.fast_disabled_reason,
+                "fallback": True,
+            }
+            return replace(response, raw=raw)
         try:
             response = self.fast.chat(messages, temperature=temperature)
         except Exception as exc:
