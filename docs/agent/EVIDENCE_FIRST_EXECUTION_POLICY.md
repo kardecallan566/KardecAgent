@@ -58,3 +58,12 @@ For every diagnostic or repair action, record a concise event containing:
 - remaining investigation budget and reason to continue/stop.
 
 A task is not allowed to claim success merely because commands exited successfully; acceptance criteria and relevant tests must pass.
+
+## 8. Prevent duplicate side effects
+
+- The executor records a deterministic signature for every successful tool action.
+- An identical `append_file` or `run_command` call is blocked when the most recent successful workspace mutation is the same action.
+- A different successful workspace mutation establishes new state and permits a justified retry of the same command or append operation.
+- Read-only actions and different commands are unaffected.
+- When blocked, the model receives the prior action category and is instructed to use recorded evidence, inspect the outcome, or make a justified change before trying again.
+- This guard is a loop-prevention measure, not a substitute for user approval, command sandboxing, or idempotency guarantees for external systems.

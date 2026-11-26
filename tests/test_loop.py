@@ -4,6 +4,7 @@ from kardecagent.agent.loop import AgentLoop
 from kardecagent.agent.plan import ExecutionPlan, PlanTracker
 from kardecagent.agent.recovery import RecoveryResult
 from kardecagent.agent.state import TaskState, TaskStatus
+from kardecagent.agent.tools_schema import ToolCall
 from kardecagent.config import Settings
 from kardecagent.llm.client import LLMResponse
 
@@ -312,3 +313,43 @@ def test_execution_context_is_unchanged_below_compaction_threshold(tmp_path: Pat
     ]
 
     assert loop.executor._bound_messages(messages, TaskState("task", str(tmp_path)), PlanTracker(plan)) is messages
+
+
+def test_identical_append_is_blocked_until_workspace_mutation(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings(max_iterations=10))
+    state = TaskState("append-guard", str(tmp_path))
+    action = ToolCall("append_file", {"path": "notes.txt", "content": "same line"})
+    signature = loop.executor._action_signature(action)
+    state.record("tool_result", "append succeeded", tool="append_file", action_signature=signature)
+
+    assert loop.executor._is_repeated_side_effect(state, action)
+
+    state.record(
+        "tool_result",
+        "file rewritten",
+        tool="write_file",
+        action_signature="different",
+    )
+    assert not loop.executor._is_repeated_side_effect(state, action)
+
+
+def test_identical_command_is_blocked_but_changed_command_is_allowed(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings(max_iterations=10))
+    state = TaskState("command-guard", str(tmp_path))
+    action = ToolCall("run_command", {"command": "pytest -q"})
+    signature = loop.executor._action_signature(action)
+    state.record("tool_result", "tests completed", tool="run_command", action_signature=signature)
+
+    assert loop.executor._is_repeated_side_effect(state, action)
+    assert not loop.executor._is_repeated_side_effect(
+        state, ToolCall("run_command", {"command": "pytest -q tests/unit"})
+    )
+
+
+def test_read_only_calls_are_not_subject_to_side_effect_guard(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings(max_iterations=10))
+    state = TaskState("read-guard", str(tmp_path))
+    action = ToolCall("read_file", {"path": "README.md"})
+    state.record("tool_result", "read completed", tool="read_file")
+
+    assert not loop.executor._is_repeated_side_effect(state, action)
