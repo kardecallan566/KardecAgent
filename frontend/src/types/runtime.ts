@@ -86,6 +86,7 @@ export interface RuntimeSubtask {
   plan_steps: number[];
   result?: string | null;
   iterations: number;
+  current_step?: number;
 }
 
 export interface RuntimeLimits {
