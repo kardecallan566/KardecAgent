@@ -22,6 +22,8 @@ class Settings:
     llm_model: str = "qwen2.5-coder:3b"
     llm_fast_model: str = ""
     llm_routing_enabled: bool = False
+    llm_escalation_models: tuple[str, ...] = ()
+    max_parallel_subtasks: int = 2
     llm_api_key: str = "local"
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_timeout_seconds: float = 180.0
@@ -42,6 +44,8 @@ class Settings:
             llm_model=_env("KARDECAGENT_LLM_MODEL", "KARDEC_LLM_MODEL", cls.llm_model),
             llm_fast_model=_env("KARDECAGENT_FAST_MODEL", "KARDEC_FAST_MODEL", cls.llm_fast_model).strip(),
             llm_routing_enabled=_env("KARDECAGENT_MODEL_ROUTING_ENABLED", "KARDEC_MODEL_ROUTING_ENABLED", str(cls.llm_routing_enabled)).lower() in {"1", "true", "yes", "on"},
+            llm_escalation_models=_csv_env("KARDECAGENT_ESCALATION_MODELS") or _csv_env("KARDEC_ESCALATION_MODELS"),
+            max_parallel_subtasks=max(1, min(4, int(_env("KARDECAGENT_MAX_PARALLEL_SUBTASKS", "KARDEC_MAX_PARALLEL_SUBTASKS", str(cls.max_parallel_subtasks))))),
             llm_api_key=_env("KARDECAGENT_LLM_API_KEY", "KARDEC_LLM_API_KEY", cls.llm_api_key),
             ollama_base_url=_env("KARDECAGENT_OLLAMA_BASE_URL", "KARDEC_OLLAMA_BASE_URL", cls.ollama_base_url).rstrip("/"),
             llm_timeout_seconds=float(_env("KARDECAGENT_LLM_TIMEOUT", "KARDEC_LLM_TIMEOUT", str(cls.llm_timeout_seconds))),
