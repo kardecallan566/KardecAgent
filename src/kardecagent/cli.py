@@ -163,6 +163,13 @@ def _doctor(settings: Settings, root) -> int:
                     print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
                     return 1
                 print(f"[OK] Adaptive routing: {settings.llm_fast_model} for simple requests; {settings.llm_model} for engineering work")
+            missing_escalation = [model for model in settings.llm_escalation_models if model not in names]
+            if missing_escalation:
+                print("[FAIL] Escalation models not installed: " + ", ".join(missing_escalation))
+                print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
+                return 1
+            if settings.llm_escalation_models:
+                print("[OK] Consent-gated escalation models: " + ", ".join(settings.llm_escalation_models))
             response = client.health_check()
         else:
             client = _build_llm(settings)
