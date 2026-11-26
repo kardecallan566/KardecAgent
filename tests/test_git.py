@@ -124,3 +124,13 @@ def test_git_branch_name_is_validated(tmp_path: Path):
     import pytest
     with pytest.raises(ValueError, match="invalid"):
         git_create_branch(tmp_path, "--delete-all")
+
+
+def test_create_pr_refuses_implicit_push_without_upstream(tmp_path: Path):
+    from kardecagent.tools.git import gh_create_pr
+
+    _init_repo(tmp_path)
+    result = gh_create_pr(tmp_path, "Feature", "Description", "main")
+    assert result.returncode != 0
+    assert "Push it first" in result.stderr
+    assert "implicit push" in result.stderr
