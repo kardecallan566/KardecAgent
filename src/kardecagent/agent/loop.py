@@ -118,8 +118,12 @@ class AgentLoop:
         event_callback=None,
         conversation_history: list[dict] | None = None,
         active_editor_context: dict | None = None,
+        model_switch_approval_callback=None,
     ) -> TaskState:
         root = project_root.resolve()
+        setter = getattr(self.llm, "set_approval_callback", None)
+        if callable(setter):
+            setter(model_switch_approval_callback)
         state = TaskState(task, str(root), event_callback=event_callback)
         state.transition(TaskStatus.RUNNING, reason="Task execution initialized.")
         profile = detect_project(root)
@@ -211,9 +215,13 @@ class AgentLoop:
                                           high_risk_approval_callback=high_risk_approval_callback,
                                           persistence_callback=lambda s, p: store.save(s, plan=p, approved=True))
 
-    def resume(self, project_root: Path, task: str, *, event_callback=None) -> TaskState:
+    def resume(self, project_root: Path, task: str, *, event_callback=None,
+               model_switch_approval_callback=None) -> TaskState:
         """Resume an approved persisted task without creating a new plan or approval gate."""
         root = project_root.resolve()
+        setter = getattr(self.llm, "set_approval_callback", None)
+        if callable(setter):
+            setter(model_switch_approval_callback)
         store = TaskStore(root)
         state, plan, board = store.load(task)
         state.event_callback = event_callback
@@ -251,6 +259,15 @@ class AgentLoop:
 
         state.record("resume_started", "Resuming previously approved persisted task.")
         if board is not None:
+            recovered_subtasks = board.recover_interrupted()
+            if recovered_subtasks:
+                state.record(
+                    "subtasks_recovered",
+                    "Interrupted parallel subtasks were returned to the scheduler with their individual cursors preserved.",
+                    subtask_ids=recovered_subtasks,
+                    board=board.as_dict(),
+                )
+                store.save(state, plan=plan, board=board, approved=True)
             from .orchestrator import Orchestrator
             orchestrator = Orchestrator(self.llm, self.settings)
             board = orchestrator.execute_approved_plan(

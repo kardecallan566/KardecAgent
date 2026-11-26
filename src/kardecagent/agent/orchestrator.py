@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import PurePosixPath
+from threading import RLock
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -26,7 +29,7 @@ Rules:
 - Every subtask must map to one or more approved plan steps.
 - Every implementation subtask must declare a non-empty project-relative scope.
 - Dependencies must be explicit.
-- Execution is sequential.
+- Independent subtasks may run in parallel only when dependencies and file scopes do not overlap.
 - Return ONLY JSON:
 {"subtasks":[{"id":"1","title":"...","objective":"...","scope":["src/..."],"dependencies":[],"completion_criteria":["..."],"plan_steps":[1]}]}
 """
@@ -52,6 +55,7 @@ class Orchestrator:
         self.agent_loop = AgentLoop(llm, settings)
         self.recovery = RecoveryManager()
         self.retry_policy = RetryPolicy()
+        self._progress_lock = RLock()
 
     def should_decompose(self, plan: ExecutionPlan, project_root: Path) -> bool:
         manager = SubtaskManager(project_root)
@@ -118,6 +122,51 @@ class Orchestrator:
             security_requirements=list(parent.security_requirements),
         )
 
+    @staticmethod
+    def _scope_paths_conflict(left: Subtask, right: Subtask) -> bool:
+        def normalized(scope: str) -> tuple[str, ...]:
+            value = str(scope).replace("\\", "/").strip("/")
+            if not value or value == ".":
+                return ()
+            return tuple(part.casefold() for part in PurePosixPath(value).parts if part not in {"", "."})
+
+        for left_scope in left.scope:
+            left_parts = normalized(left_scope)
+            if not left_parts or any(
+                part == ".." or "*" in part or "?" in part for part in left_parts
+            ):
+                return True
+            for right_scope in right.scope:
+                right_parts = normalized(right_scope)
+                if not right_parts or any(
+                    part == ".." or "*" in part or "?" in part for part in right_parts
+                ):
+                    return True
+                common = min(len(left_parts), len(right_parts))
+                if left_parts[:common] == right_parts[:common]:
+                    return True
+        return False
+
+    def _parallel_batch(self, ready: list[Subtask], *, limit: int) -> list[Subtask]:
+        if limit <= 1 or len(ready) <= 1:
+            return ready[:1]
+        batch: list[Subtask] = []
+        for candidate in ready:
+            if not candidate.scope:
+                if not batch:
+                    return [candidate]
+                continue
+            if any(
+                self._scope_paths_conflict(candidate, selected)
+                or bool(set(candidate.plan_steps) & set(selected.plan_steps))
+                for selected in batch
+            ):
+                continue
+            batch.append(candidate)
+            if len(batch) >= limit:
+                break
+        return batch or ready[:1]
+
     def execute_sequentially(
         self,
         board: TaskBoard,
@@ -141,52 +190,85 @@ class Orchestrator:
                         ", ".join(unfinished)
                     )
                 break
-            subtask = next(
-                (item for item in ready if item.id == resume_subtask_id),
-                ready[0],
-            )
-            board.mark_running(subtask.id)
-            if parent_state is not None:
-                parent_state.record(
-                    "subtask_started",
-                    "Logical subtask execution started.",
-                    subtask_id=subtask.id,
-                    plan_steps=list(subtask.plan_steps),
-                    board=board.as_dict(),
+
+            if resume_subtask_id is not None:
+                batch = [next((item for item in ready if item.id == resume_subtask_id), ready[0])]
+            else:
+                batch = self._parallel_batch(
+                    ready, limit=max(1, min(4, self.settings.max_parallel_subtasks))
                 )
-                if progress_callback is not None:
-                    progress_callback(board)
-            requested_step = resume_step if subtask.id == resume_subtask_id else 1
-            result = executor(subtask, requested_step) if resume_subtask_id is not None else executor(subtask)
+
+            for subtask in batch:
+                board.mark_running(subtask.id)
+                if parent_state is not None:
+                    parent_state.record(
+                        "subtask_started",
+                        "Logical subtask execution started.",
+                        subtask_id=subtask.id,
+                        plan_steps=list(subtask.plan_steps),
+                        parallel_batch=[item.id for item in batch],
+                        board=board.as_dict(),
+                    )
+            if progress_callback is not None:
+                progress_callback(board)
+
+            def run_one(subtask: Subtask) -> SubtaskExecutionResult:
+                try:
+                    requested_step = (
+                        resume_step if subtask.id == resume_subtask_id
+                        else max(1, int(subtask.current_step))
+                    )
+                    if requested_step > 1:
+                        return executor(subtask, requested_step)
+                    return executor(subtask)
+                except Exception as exc:
+                    return SubtaskExecutionResult(
+                        subtask.id, "failed",
+                        f"Subtask executor raised {type(exc).__name__}: {exc}", [],
+                    )
+
+            if len(batch) == 1:
+                results = [run_one(batch[0])]
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=len(batch), thread_name_prefix="kardecagent-subtask"
+                ) as pool:
+                    futures = [pool.submit(run_one, item) for item in batch]
+                    results = [future.result() for future in futures]
+
             resume_subtask_id = None
             resume_step = 1
-            subtask.iterations += 1
-            if result.status == "completed":
-                board.complete(subtask.id, result=result.summary, evidence=result.evidence)
-                if parent_state is not None:
-                    parent_state.record(
-                        "subtask_completed",
-                        "Logical subtask completed.",
-                        subtask_id=subtask.id,
-                        plan_steps=list(subtask.plan_steps),
-                        result=result.summary,
-                        evidence=list(result.evidence),
-                        resume_step=result.resume_step,
-                        board=board.as_dict(),
-                    )
-            else:
-                board.fail(subtask.id, result=result.summary)
-                if parent_state is not None:
-                    parent_state.record(
-                        "subtask_failed",
-                        "Logical subtask failed.",
-                        subtask_id=subtask.id,
-                        plan_steps=list(subtask.plan_steps),
-                        result=result.summary,
-                        diagnostic=result.diagnostic,
-                        resume_step=result.resume_step,
-                        board=board.as_dict(),
-                    )
+            failed = False
+            for subtask, result in zip(batch, results):
+                subtask.iterations += 1
+                if result.status == "completed":
+                    board.complete(subtask.id, result=result.summary, evidence=result.evidence)
+                    if parent_state is not None:
+                        parent_state.record(
+                            "subtask_completed",
+                            "Logical subtask completed.",
+                            subtask_id=subtask.id,
+                            plan_steps=list(subtask.plan_steps),
+                            result=result.summary,
+                            evidence=list(result.evidence),
+                            resume_step=result.resume_step,
+                            board=board.as_dict(),
+                        )
+                else:
+                    failed = True
+                    board.fail(subtask.id, result=result.summary)
+                    if parent_state is not None:
+                        parent_state.record(
+                            "subtask_failed",
+                            "Logical subtask failed.",
+                            subtask_id=subtask.id,
+                            plan_steps=list(subtask.plan_steps),
+                            result=result.summary,
+                            diagnostic=result.diagnostic,
+                            resume_step=result.resume_step,
+                            board=board.as_dict(),
+                        )
+            if failed:
                 self._mark_blocked(board)
                 if parent_state is not None:
                     for blocked in board.subtasks.values():
@@ -197,11 +279,10 @@ class Orchestrator:
                                 subtask_id=blocked.id,
                                 board=board.as_dict(),
                             )
-                if progress_callback is not None:
-                    progress_callback(board)
-                break
             if progress_callback is not None:
                 progress_callback(board)
+            if failed:
+                break
         return board
 
     @staticmethod
@@ -236,22 +317,40 @@ class Orchestrator:
                 project_root=str(project_root.resolve()),
             )
             state.transition(TaskStatus.RUNNING, reason="Subtask execution initialized.")
+            propagated_model_events = 0
+
             def persist_subtask_progress(current_state, current_plan):
+                nonlocal propagated_model_events
                 if parent_state is not None:
-                    parent_state.record(
-                        "subtask_progress",
-                        "Logical subtask execution cursor persisted.",
-                        subtask_id=subtask.id,
-                        plan_step=current_state.active_plan_step,
-                        parent_plan_step=(
-                            subtask.plan_steps[current_state.active_plan_step - 1]
-                            if 1 <= current_state.active_plan_step <= len(subtask.plan_steps)
-                            else subtask.plan_steps[-1]
-                        ),
-                        status=current_state.status.value,
-                    )
-                    if progress_callback is not None:
-                        progress_callback(board)
+                    with self._progress_lock:
+                        subtask.current_step = max(1, int(current_state.active_plan_step))
+                        for event in current_state.events[propagated_model_events:]:
+                            if event.event_type in {
+                                "model_switch_approved", "model_switch_rejected",
+                                "model_escalated", "model_escalation_unavailable",
+                            }:
+                                parent_state.record(
+                                    "subtask_" + event.event_type,
+                                    event.message,
+                                    subtask_id=subtask.id,
+                                    **event.data,
+                                )
+                        propagated_model_events = len(current_state.events)
+                        parent_state.record(
+                            "subtask_progress",
+                            "Logical subtask execution cursor persisted.",
+                            subtask_id=subtask.id,
+                            plan_step=current_state.active_plan_step,
+                            parent_plan_step=(
+                                subtask.plan_steps[current_state.active_plan_step - 1]
+                                if 1 <= current_state.active_plan_step <= len(subtask.plan_steps)
+                                else subtask.plan_steps[-1]
+                            ),
+                            status=current_state.status.value,
+                            board=board.as_dict(),
+                        )
+                        if progress_callback is not None:
+                            progress_callback(board)
 
             result_state = self.agent_loop.execute_approved_plan(
                 project_root,
@@ -390,7 +489,7 @@ class Orchestrator:
                         f"retry not performed: {decision.reason}."
                     )
             else:
-                summary = "Subtask completed and verified."
+                summary = "Subtask completed with evidence; final project verification is deferred to the parent plan."
             evidence = [
                 event.data.get("result") or event.message
                 for event in result_state.events

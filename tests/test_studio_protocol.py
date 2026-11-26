@@ -143,7 +143,7 @@ def test_run_stdio_resumes_a_persisted_task_and_streams_new_events(monkeypatch, 
     class FakeAgent:
         settings = SimpleNamespace(max_iterations=4, max_command_output_chars=1200, llm_timeout_seconds=30.0, command_timeout_seconds=15.0)
 
-        def resume(self, root, task, *, event_callback=None):
+        def resume(self, root, task, *, event_callback=None, model_switch_approval_callback=None):
             assert task == "resume this task"
             event = AgentEvent(2, "resume_started", "Resume started", {}, sequence=2)
             event_callback(event)

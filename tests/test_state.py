@@ -70,3 +70,28 @@ def test_execution_cursor_tracks_plan_and_subtask():
     state.record("subtask_completed", "done", subtask_id="1")
     assert state.active_subtask_id is None
     assert state.active_subtask_step == 1
+
+
+
+def test_parallel_subtask_progress_does_not_overwrite_other_resume_cursor():
+    state = TaskState("parallel", "/tmp/project")
+    state.record("subtask_started", "Started first", subtask_id="first", plan_steps=[1, 2])
+    state.record("subtask_started", "Started second", subtask_id="second", plan_steps=[3, 4])
+
+    state.record(
+        "subtask_progress", "First advanced",
+        subtask_id="first", plan_step=2, parent_plan_step=2,
+    )
+
+    assert state.active_subtask_id == "second"
+    assert state.active_subtask_step == 1
+    assert state.active_plan_step == 3
+
+    state.record(
+        "subtask_progress", "Second advanced",
+        subtask_id="second", plan_step=2, parent_plan_step=4,
+    )
+
+    assert state.active_subtask_id == "second"
+    assert state.active_subtask_step == 2
+    assert state.active_plan_step == 4

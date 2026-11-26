@@ -491,3 +491,75 @@ def test_executor_advances_only_after_explicit_step_completion(tmp_path: Path):
     assert result.status is TaskStatus.COMPLETED
     assert (tmp_path / "teste.py").read_text(encoding="utf-8") == "for i in range(11):\n    print(i)\n"
     assert [event.data["step"] for event in result.events if event.event_type == "plan_step_completed"] == [1, 2, 3]
+
+
+
+def test_executor_escalates_after_repeated_invalid_tool_protocol_with_approval(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='escalation-fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test_example.py").write_text(
+        "def test_example():\n    assert True\n",
+        encoding="utf-8",
+    )
+    from kardecagent.llm.client import LLMResponse
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    class SequenceClient:
+        def __init__(self, model, responses):
+            self.model = model
+            self.responses = iter(responses)
+            self.calls = 0
+
+        def chat(self, messages, *, temperature=0.2):
+            self.calls += 1
+            return LLMResponse(next(self.responses), {"model": self.model})
+
+    weak = SequenceClient("small-coder", ["not-json", "not-json"])
+    strong = SequenceClient("strong-coder", [
+        '{"tool":"complete_step","arguments":{"step":1,"evidence":"step completed"},"plan_step":1}',
+        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":[{"criterion":"done","evidence":"verified"}]}}',
+    ])
+    approvals = []
+    llm = EscalatingLLMClient(weak, [strong])
+    llm.set_approval_callback(lambda request: approvals.append(request) or True)
+    loop = AgentLoop(llm, Settings(max_iterations=6))
+    plan = ExecutionPlan("Small task", ["Inspect and finish"], ["checks"], [], ["done"])
+
+    result = loop.execute_approved_plan(tmp_path, "small task", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.COMPLETED
+    assert len(approvals) == 1
+    assert approvals[0].current_model == "small-coder"
+    assert approvals[0].target_model == "strong-coder"
+    assert any(event.event_type == "model_switch_approved" for event in result.events)
+    assert any(event.event_type == "model_escalated" for event in result.events)
+
+
+
+def test_subtask_defers_global_verification_until_parent_integration(tmp_path: Path):
+    llm = FakeLLM([
+        '{"tool":"complete_step","arguments":{"step":1,"evidence":"component implemented"},"plan_step":1}',
+        '{"tool":"finish","arguments":{"reason":"component ready","criteria_evidence":[{"criterion":"component exists","evidence":"component implementation is present"}]}}',
+    ])
+    loop = AgentLoop(llm, Settings(max_iterations=3))
+    plan = ExecutionPlan(
+        "Implement component",
+        ["Implement component"],
+        ["Run full project tests"],
+        [],
+        ["component exists"],
+    )
+
+    result = loop.execute_approved_plan(
+        tmp_path,
+        "implement component",
+        plan,
+        make_state(tmp_path),
+        context={"subtask": {"id": "component"}},
+    )
+
+    assert result.status is TaskStatus.COMPLETED
+    assert any(event.event_type == "verification_deferred" for event in result.events)
+    assert not any(event.event_type == "verification" for event in result.events)

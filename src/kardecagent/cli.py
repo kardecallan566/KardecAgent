@@ -7,6 +7,7 @@ import logging
 from .agent import AgentLoop
 from .config import Settings, resolve_project_root
 from .llm import AdaptiveLLMClient, LocalLLMClient, OllamaClient
+from .llm.router import EscalatingLLMClient
 from .llm.benchmark import default_models, run_benchmark, run_agentic_benchmark
 from .llm.catalog import LOCAL_MODEL_CATALOG
 from .project import detect_project
@@ -81,6 +82,19 @@ def _approve_high_risk(plan) -> bool:
         print("Resposta inválida. Digite 's' para aprovar ou Enter/N para rejeitar.")
 
 
+def _approve_model_switch(request) -> bool:
+    print()
+    print(request.format_for_review())
+    print()
+    while True:
+        answer = input("Autorizar a troca de modelo? [s/N]: ").strip().lower()
+        if answer in {"s", "sim", "y", "yes"}:
+            return True
+        if answer in {"", "n", "nao", "não", "no"}:
+            return False
+        print("Resposta inválida. Digite 's' para aprovar ou Enter/N para rejeitar.")
+
+
 def _build_llm(settings: Settings):
     def build_client(model: str):
         if settings.llm_provider == "ollama":
@@ -99,16 +113,23 @@ def _build_llm(settings: Settings):
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
     primary = build_client(settings.llm_model)
-    if not settings.llm_routing_enabled:
-        return primary
-    if not settings.llm_fast_model:
-        raise ValueError(
-            "Model routing is enabled but KARDECAGENT_FAST_MODEL is empty. "
-            "Configure a fast model or disable KARDECAGENT_MODEL_ROUTING_ENABLED."
-        )
-    if settings.llm_fast_model == settings.llm_model:
-        return primary
-    return AdaptiveLLMClient(primary, build_client(settings.llm_fast_model))
+    base = primary
+    if settings.llm_routing_enabled:
+        if not settings.llm_fast_model:
+            raise ValueError(
+                "Model routing is enabled but KARDECAGENT_FAST_MODEL is empty. "
+                "Configure a fast model or disable KARDECAGENT_MODEL_ROUTING_ENABLED."
+            )
+        if settings.llm_fast_model != settings.llm_model:
+            base = AdaptiveLLMClient(primary, build_client(settings.llm_fast_model))
+    alternatives = [
+        build_client(model)
+        for model in settings.llm_escalation_models
+        if model and model not in {settings.llm_model, settings.llm_fast_model}
+    ]
+    if not alternatives:
+        return base
+    return EscalatingLLMClient(base, alternatives)
 
 
 def _doctor(settings: Settings, root) -> int:
@@ -144,6 +165,13 @@ def _doctor(settings: Settings, root) -> int:
                     print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
                     return 1
                 print(f"[OK] Adaptive routing: {settings.llm_fast_model} for simple requests; {settings.llm_model} for engineering work")
+            missing_escalation = [model for model in settings.llm_escalation_models if model not in names]
+            if missing_escalation:
+                print("[FAIL] Escalation models not installed: " + ", ".join(missing_escalation))
+                print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
+                return 1
+            if settings.llm_escalation_models:
+                print("[OK] Consent-gated escalation models: " + ", ".join(settings.llm_escalation_models))
             response = client.health_check()
         else:
             client = _build_llm(settings)
@@ -510,9 +538,13 @@ def main() -> int:
     root = resolve_project_root(args.project)
     if args.command == "run":
         state = agent.run(root, args.task, approval_callback=_approve_plan,
-                          high_risk_approval_callback=_approve_high_risk)
+                          high_risk_approval_callback=_approve_high_risk,
+                          model_switch_approval_callback=_approve_model_switch)
     else:
-        state = agent.resume(root, args.task)
+        state = agent.resume(
+            root, args.task,
+            model_switch_approval_callback=_approve_model_switch,
+        )
     print(f"Status: {state.status.value}")
     print(f"Iterations: {state.iteration}")
     for event in state.events[-10:]:

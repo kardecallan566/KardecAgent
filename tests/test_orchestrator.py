@@ -169,3 +169,82 @@ def test_subtask_does_not_retry_non_transient_command_failure(tmp_path: Path, mo
     assert not result.completed
     assert result.get("1").status is SubtaskStatus.FAILED
     assert "external side effects" in result.get("1").result
+
+
+
+def test_independent_subtasks_run_in_parallel_with_disjoint_scopes(tmp_path: Path):
+    import threading
+    import time
+
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings(max_parallel_subtasks=2))
+    board = TaskBoard()
+    board.add(Subtask("1", "Core", "Core", scope=("src/core",), plan_steps=(1,)))
+    board.add(Subtask("2", "Tests", "Tests", scope=("tests",), plan_steps=(2,)))
+    active = 0
+    maximum = 0
+    lock = threading.Lock()
+
+    def execute(subtask):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return SubtaskExecutionResult(subtask.id, "completed", "ok", ["verified"])
+
+    result = orchestrator.execute_sequentially(board, execute)
+
+    assert result.completed
+    assert maximum == 2
+
+
+def test_overlapping_subtask_scopes_are_never_run_in_parallel(tmp_path: Path):
+    import threading
+    import time
+
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings(max_parallel_subtasks=4))
+    board = TaskBoard()
+    board.add(Subtask("1", "Parent scope", "Parent", scope=("src",), plan_steps=(1,)))
+    board.add(Subtask("2", "Nested scope", "Nested", scope=("src/module",), plan_steps=(2,)))
+    active = 0
+    maximum = 0
+    lock = threading.Lock()
+
+    def execute(subtask):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return SubtaskExecutionResult(subtask.id, "completed", "ok", ["verified"])
+
+    result = orchestrator.execute_sequentially(board, execute)
+
+    assert result.completed
+    assert maximum == 1
+
+
+
+def test_parallel_resume_uses_each_subtasks_persisted_cursor(tmp_path: Path):
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings(max_parallel_subtasks=2))
+    board = TaskBoard()
+    first = Subtask("1", "Core", "Core", scope=("src/core",), plan_steps=(1, 2, 3))
+    second = Subtask("2", "UI", "UI", scope=("src/ui",), plan_steps=(4, 5, 6))
+    first.current_step = 2
+    second.current_step = 3
+    board.add(first)
+    board.add(second)
+    received_steps = {}
+
+    def execute(subtask, resume_step=1):
+        received_steps[subtask.id] = resume_step
+        return SubtaskExecutionResult(subtask.id, "completed", "ok", ["evidence"])
+
+    result = orchestrator.execute_sequentially(board, execute)
+
+    assert result.completed
+    assert received_steps == {"1": 2, "2": 3}

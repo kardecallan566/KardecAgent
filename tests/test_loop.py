@@ -55,7 +55,14 @@ def test_failed_verification_returns_to_model(tmp_path: Path):
         "def test_example():\n    assert False\n",
         encoding="utf-8",
     )
-    llm = FakeLLM([
+    class ExhaustingLLM(FakeLLM):
+        def chat(self, messages: list[dict]) -> LLMResponse:
+            try:
+                return LLMResponse(next(self.responses), {})
+            except StopIteration as exc:
+                raise RuntimeError("test model fixture exhausted") from exc
+
+    llm = ExhaustingLLM([
         _plan(),
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"attempted"},"plan_step":1}',
         '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["verified"]}}',

@@ -248,6 +248,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
     """Serve a bounded JSONL command/event stream for the desktop Studio."""
     root = project_root.resolve()
     seen_command_ids: dict[str, None] = {}
+    parallel_limit = max(1, min(4, int(getattr(agent.settings, "max_parallel_subtasks", 1))))
     _write({
         "type": "runtime.ready",
         "schema_version": 1,
@@ -255,7 +256,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
         "limits": {
             "max_concurrent_tasks": 1,
             "max_subtasks": 6,
-            "max_concurrent_subtasks": 1,
+            "max_concurrent_subtasks": parallel_limit,
             "max_llm_iterations": agent.settings.max_iterations,
             "max_command_output_chars": agent.settings.max_command_output_chars,
             "max_project_snapshot_files": 500,
@@ -263,7 +264,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             "max_command_timeout_seconds": agent.settings.command_timeout_seconds,
             "max_instruction_chars": MAX_INSTRUCTION_LENGTH,
             "max_event_bytes": MAX_EVENT_BYTES,
-            "execution_mode": "sequential",
+            "execution_mode": "bounded_parallel" if parallel_limit > 1 else "sequential",
         },
     })
 
@@ -768,7 +769,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                         },
                     })
 
-                state = agent.resume(root, persisted_state.task, event_callback=forward_resumed_event)
+                state = agent.resume(root, persisted_state.task, event_callback=forward_resumed_event,
+                                         model_switch_approval_callback=lambda request: _approval(
+                                             identifier, execution_id, request, kind="model_switch"
+                                         ))
                 summary = state.events[-1].message if state.events else f"Task ended with status {state.status.value}."
                 completed = state.status.value == "completed"
                 _write({
@@ -910,6 +914,9 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 active_editor_context=active_editor,
                 approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="plan"),
                 high_risk_approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="high_risk"),
+                model_switch_approval_callback=lambda request: _approval(
+                    identifier, execution_id, request, kind="model_switch"
+                ),
             )
             result_summary = (
                 state.events[-1].message if state.events

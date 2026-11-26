@@ -87,3 +87,27 @@ KARDECAGENT_MODEL_ROUTING_ENABLED=true
 ```
 
 This first milestone does not yet use benchmark scores, hardware headroom, model context metadata, multi-tier escalation, or UI overrides. Keep routing disabled until both models are installed and the selected fast model has been validated on the local agentic benchmark. The primary model remains the safe default.
+
+
+
+## Consent-gated escalation and parallel execution
+
+The agent now supports an explicit escalation list and a bounded parallel-subtask scheduler:
+
+- `KARDECAGENT_ESCALATION_MODELS` is a comma-separated, ordered list of installed models to try after the configured primary model.
+- A model switch is never automatic. The Studio/CLI approval request identifies the current model, proposed model, trigger and reason. Rejecting the request leaves the active model unchanged and the task stops safely when it cannot proceed.
+- Escalation can be requested after repeated no-progress actions, repeated invalid tool protocol, repeated verification failures, or a provider failure. The approved plan, prior tool results and verification evidence remain in the conversation.
+- The selected model is journaled with `model_switch_approved` / `model_switch_rejected` and `model_escalated` events.
+- `KARDECAGENT_MAX_PARALLEL_SUBTASKS` controls concurrency (1–4, default 2). Only ready subtasks with disjoint project-relative scopes and distinct approved plan steps can run together. Dependencies, overlapping paths, and broad/empty scopes force sequential execution.
+- Subtasks persist independent execution cursors, so interrupted parallel workers can resume without overwriting each other's progress. Subtasks submit their own completion evidence, while project-wide tests/security/build verification is deferred until all subtasks are integrated; this avoids validating a deliberately incomplete intermediate workspace.
+- Parallel subtasks share the same configured model pool. In-flight model requests finish on the model they started with; an approved escalation affects subsequent requests. Tool execution and independent subtask work can overlap.
+
+Example:
+
+```dotenv
+KARDECAGENT_LLM_MODEL=qwen2.5-coder:3b
+KARDECAGENT_ESCALATION_MODELS=qwen2.5-coder:14b,deepseek-coder:16b
+KARDECAGENT_MAX_PARALLEL_SUBTASKS=2
+```
+
+Use comma-separated model tags in the environment variable. Configure only models installed in the selected provider.

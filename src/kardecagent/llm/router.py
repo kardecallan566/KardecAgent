@@ -4,7 +4,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
+from threading import RLock
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,106 @@ class RoutingDecision:
     tier: str
     model: str
     reason: str
+
+@dataclass(frozen=True)
+class ModelSwitchRequest:
+    current_model: str
+    target_model: str
+    reason: str
+    trigger: str = "capability"
+
+    @property
+    def security_level(self) -> str:
+        return "normal"
+
+    def format_for_review(self) -> str:
+        return (
+            "Solicitação de troca de modelo\n"
+            f"Modelo atual: {self.current_model}\n"
+            f"Modelo sugerido: {self.target_model}\n"
+            f"Motivo: {self.reason}\n"
+            f"Gatilho: {self.trigger}\n"
+            "A conversa e as evidências da tarefa serão preservadas. "
+            "Nenhuma troca ocorrerá sem aprovação."
+        )
+
+
+class EscalatingLLMClient:
+    """Bounded model escalation that never changes models without explicit consent."""
+
+    def __init__(self, primary: ChatClient, alternatives: list[ChatClient] | None = None) -> None:
+        self.clients = [primary, *(alternatives or [])]
+        self.active_index = 0
+        self.approval_callback: Callable[[ModelSwitchRequest], bool] | None = None
+        self._lock = RLock()
+        self.last_switch: dict[str, str] | None = None
+
+    @property
+    def model(self) -> str:
+        return str(getattr(self.clients[self.active_index], "model", "unknown"))
+
+    def set_approval_callback(self, callback: Callable[[ModelSwitchRequest], bool] | None) -> None:
+        with self._lock:
+            self.approval_callback = callback
+            # Each task starts from the configured primary model; approvals
+            # authorize switches for the current task, not future tasks.
+            self.active_index = 0
+            self.last_switch = None
+            for client in self.clients:
+                setter = getattr(client, "set_approval_callback", None)
+                if callable(setter):
+                    setter(callback)
+
+    def request_escalation(self, reason: str, *, trigger: str = "capability") -> tuple[bool, ModelSwitchRequest | None]:
+        with self._lock:
+            if self.active_index + 1 >= len(self.clients):
+                return False, None
+            current = self.model
+            target = str(getattr(self.clients[self.active_index + 1], "model", "unknown"))
+            request = ModelSwitchRequest(current, target, reason, trigger)
+            callback = self.approval_callback
+            if callback is None or not bool(callback(request)):
+                return False, request
+            self.active_index += 1
+            self.last_switch = {
+                "from_model": current,
+                "to_model": target,
+                "reason": reason,
+                "trigger": trigger,
+            }
+            return True, request
+
+    def chat(self, messages: list[dict[str, Any]], *, temperature: float = 0.2):
+        while True:
+            with self._lock:
+                selected_index = self.active_index
+                client = self.clients[selected_index]
+            try:
+                # Inference calls remain concurrent. A model switch affects only
+                # requests started after the approval, never an in-flight call.
+                response = client.chat(messages, temperature=temperature)
+                raw = dict(getattr(response, "raw", {}) or {})
+                with self._lock:
+                    if self.last_switch:
+                        raw["_kardecagent_escalation"] = dict(self.last_switch)
+                        self.last_switch = None
+                try:
+                    return replace(response, raw=raw)
+                except TypeError:
+                    response.raw = raw
+                    return response
+            except Exception as exc:
+                if isinstance(exc, RuntimeError) and "not approved" in str(exc).lower():
+                    raise
+                with self._lock:
+                    if self.active_index != selected_index:
+                        continue
+                    approved, _request = self.request_escalation(
+                        f"Falha do modelo {self.model}: {type(exc).__name__}: {exc}",
+                        trigger="provider_error",
+                    )
+                if not approved:
+                    raise
 
 
 _COMPLEX_SIGNALS = (
@@ -106,13 +207,10 @@ class ModelRouter:
         fallback_reason = ""
         try:
             response = selected.chat(messages, temperature=temperature)
-        except Exception as exc:
-            if decision.tier != "fast":
-                raise
-            fallback_reason = f"fast model failed: {type(exc).__name__}"
-            logger.warning("Fast model %s failed; falling back to %s: %s", self.fast_model, self.primary_model, exc)
-            response = primary.chat(messages, temperature=temperature)
-            decision = RoutingDecision("primary", self.primary_model, fallback_reason)
+        except Exception:
+            # A route change is a user-visible decision. The adaptive client
+            # owns the approval gate and may retry on the primary model.
+            raise
 
         raw = dict(getattr(response, "raw", {}) or {})
         raw["_kardecagent_routing"] = {
@@ -137,10 +235,17 @@ class AdaptiveLLMClient:
         self.model = primary.model
         self.router = ModelRouter(primary.model, fast.model)
         self.fast_disabled_reason: str | None = None
+        self.approval_callback: Callable[[ModelSwitchRequest], bool] | None = None
+
+    def set_approval_callback(self, callback: Callable[[ModelSwitchRequest], bool] | None) -> None:
+        self.approval_callback = callback
+        self.fast_disabled_reason = None
 
     def chat(self, messages: list[dict[str, Any]], *, temperature: float = 0.2):
         decision = self.router.decide(messages)
-        if decision.tier == "fast" and self.fast_disabled_reason:
+        if decision.tier == "primary":
+            return self.primary.chat(messages, temperature=temperature)
+        if self.fast_disabled_reason:
             response = self.primary.chat(messages, temperature=temperature)
             raw = dict(getattr(response, "raw", {}) or {})
             raw["_kardecagent_routing"] = {
@@ -150,8 +255,38 @@ class AdaptiveLLMClient:
                 "fallback": True,
             }
             return replace(response, raw=raw)
-        response = self.router.chat(self.primary, self.fast, messages, temperature=temperature)
-        route = getattr(response, "raw", {}).get("_kardecagent_routing", {})
-        if route.get("fallback"):
-            self.fast_disabled_reason = str(route.get("reason") or "fast model unavailable")
-        return response
+        try:
+            response = self.fast.chat(messages, temperature=temperature)
+        except Exception as exc:
+            request = ModelSwitchRequest(
+                self.fast.model,
+                self.primary.model,
+                f"O modelo rápido falhou: {type(exc).__name__}: {exc}",
+                trigger="provider_error",
+            )
+            if self.approval_callback is None or not self.approval_callback(request):
+                raise RuntimeError("Model switch was not approved; the fast-model failure was not retried.") from exc
+            self.fast_disabled_reason = str(exc)
+            response = self.primary.chat(messages, temperature=temperature)
+            raw = dict(getattr(response, "raw", {}) or {})
+            raw["_kardecagent_routing"] = {
+                "tier": "primary",
+                "model": self.primary.model,
+                "reason": request.reason,
+                "fallback": True,
+            }
+            raw["_kardecagent_escalation"] = {
+                "from_model": self.fast.model,
+                "to_model": self.primary.model,
+                "reason": request.reason,
+                "trigger": "provider_error",
+            }
+            return replace(response, raw=raw)
+        raw = dict(getattr(response, "raw", {}) or {})
+        raw["_kardecagent_routing"] = {
+            "tier": "fast",
+            "model": self.fast.model,
+            "reason": decision.reason,
+            "fallback": False,
+        }
+        return replace(response, raw=raw)

@@ -30,6 +30,7 @@ class Subtask:
     result: str | None = None
     evidence: list[str] = field(default_factory=list)
     iterations: int = 0
+    current_step: int = 1
 
     def as_dict(self) -> dict:
         return {
@@ -45,6 +46,7 @@ class Subtask:
             "result": self.result,
             "evidence": list(self.evidence),
             "iterations": self.iterations,
+            "current_step": self.current_step,
         }
 
 
@@ -71,6 +73,15 @@ class TaskBoard:
             if all(self.get(dep).status is SubtaskStatus.COMPLETED for dep in subtask.dependencies):
                 ready.append(subtask)
         return ready
+
+    def recover_interrupted(self) -> list[str]:
+        """Return interrupted RUNNING subtasks to PENDING without losing their cursors."""
+        recovered: list[str] = []
+        for subtask in self.subtasks.values():
+            if subtask.status is SubtaskStatus.RUNNING:
+                subtask.status = SubtaskStatus.PENDING
+                recovered.append(subtask.id)
+        return recovered
 
     def mark_running(self, subtask_id: str) -> None:
         subtask = self.get(subtask_id)
