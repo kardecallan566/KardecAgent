@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from kardecagent.agent.loop import AgentLoop
-from kardecagent.agent.plan import ExecutionPlan
+from kardecagent.agent.plan import ExecutionPlan, PlanTracker
 from kardecagent.agent.recovery import RecoveryResult
 from kardecagent.agent.state import TaskState, TaskStatus
 from kardecagent.config import Settings
@@ -275,3 +275,40 @@ def test_approved_plan_does_not_retry_non_transient_run_command_failure(tmp_path
     decision = next(event for event in result.events if event.event_type == "retry_decision")
     assert decision.data["allowed"] is False
     assert "external side effects" in decision.data["reason"]
+
+
+
+def test_execution_context_compaction_preserves_contract_progress_and_recent_turns(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings(max_iterations=40))
+    plan = ExecutionPlan("Approved", ["Inspect", "Implement"], ["tests"], [], ["done"])
+    tracker = PlanTracker(plan)
+    state = TaskState("task", str(tmp_path))
+    state.record("tool_result", "Read source file.", tool="read_file", result="important source evidence")
+    messages = [
+        {"role": "system", "content": "system contract"},
+        {"role": "user", "content": "initial approved task context"},
+    ] + [
+        {"role": "assistant" if index % 2 == 0 else "user", "content": f"turn-{index}"}
+        for index in range(40)
+    ]
+
+    bounded = loop.executor._bound_messages(messages, state, tracker)
+
+    assert len(bounded) == 21
+    assert bounded[0] == messages[0]
+    assert bounded[1] == messages[1]
+    assert "important source evidence" in bounded[2]["content"]
+    assert "approved_plan_progress" in bounded[2]["content"]
+    assert bounded[3:] == messages[-18:]
+
+
+def test_execution_context_is_unchanged_below_compaction_threshold(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings(max_iterations=10))
+    plan = ExecutionPlan("Approved", ["Implement"], ["tests"], [], ["done"])
+    messages = [
+        {"role": "system", "content": "system contract"},
+        {"role": "user", "content": "initial task"},
+        {"role": "assistant", "content": "recent turn"},
+    ]
+
+    assert loop.executor._bound_messages(messages, TaskState("task", str(tmp_path)), PlanTracker(plan)) is messages
