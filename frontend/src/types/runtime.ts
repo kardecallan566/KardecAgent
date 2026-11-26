@@ -110,7 +110,7 @@ export interface RuntimeBoardSnapshot {
 export interface RuntimePlanStep {
   step: number;
   title: string;
-  status: "pending" | "running" | "completed";
+  status: "pending" | "running" | "interrupted" | "failed" | "completed";
   evidence?: string;
   updated_at?: string;
 }
