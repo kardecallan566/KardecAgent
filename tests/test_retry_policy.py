@@ -224,3 +224,43 @@ def test_denies_verification_failure_without_progress_to_resume():
 
     assert not decision.allowed
     assert "no recovered progress" in decision.reason
+
+
+
+def test_model_provider_retry_requires_transient_error():
+    policy = RetryPolicy()
+    non_transient = FailureDiagnostic(
+        FailureCategory.MODEL_PROVIDER,
+        "authentication failed",
+        retryable=False,
+        source_event="model_request_failed",
+    )
+    transient = FailureDiagnostic(
+        FailureCategory.MODEL_PROVIDER,
+        "request timed out",
+        retryable=True,
+        source_event="model_request_failed",
+    )
+
+    denied = policy.decide(
+        events=[],
+        retry_event="resume_retry_started",
+        status="failed",
+        diagnostic=non_transient,
+        recovery=recovery(),
+        base_iteration_limit=4,
+        max_retries=1,
+    )
+    allowed = policy.decide(
+        events=[],
+        retry_event="resume_retry_started",
+        status="failed",
+        diagnostic=transient,
+        recovery=recovery(),
+        base_iteration_limit=4,
+        max_retries=1,
+    )
+
+    assert denied.allowed is False
+    assert "not transient" in denied.reason
+    assert allowed.allowed is True

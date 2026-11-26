@@ -55,7 +55,14 @@ def test_failed_verification_returns_to_model(tmp_path: Path):
         "def test_example():\n    assert False\n",
         encoding="utf-8",
     )
-    llm = FakeLLM([
+    class ExhaustingLLM(FakeLLM):
+        def chat(self, messages: list[dict]) -> LLMResponse:
+            try:
+                return LLMResponse(next(self.responses), {})
+            except StopIteration as exc:
+                raise RuntimeError("test model fixture exhausted") from exc
+
+    llm = ExhaustingLLM([
         _plan(),
         '{"tool":"complete_step","arguments":{"step":1,"evidence":"attempted"},"plan_step":1}',
         '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["verified"]}}',
@@ -64,8 +71,9 @@ def test_failed_verification_returns_to_model(tmp_path: Path):
     state = AgentLoop(llm, Settings(max_iterations=4)).run(
         tmp_path, "fix task", approval_callback=lambda plan: True
     )
-    assert state.status.value == "max_iterations"
-    assert any(event.event_type == "verification_failed" for event in state.events)
+    assert state.status.value == "failed"
+    assert sum(event.event_type == "verification_failed" for event in state.events) == 2
+    assert any(event.event_type == "model_request_failed" for event in state.events)
 
 
 def test_static_html_finish_is_verified(tmp_path: Path):

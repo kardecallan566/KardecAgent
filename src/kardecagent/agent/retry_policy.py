@@ -24,6 +24,7 @@ class RetryPolicy:
 
     _RETRYABLE_CATEGORIES = frozenset({
         FailureCategory.MODEL_PROTOCOL,
+        FailureCategory.MODEL_PROVIDER,
         FailureCategory.TOOL_EXECUTION,
         FailureCategory.VERIFICATION,
         FailureCategory.ITERATION_LIMIT,
@@ -85,6 +86,8 @@ class RetryPolicy:
             return deny("recovery reported an error")
         if diagnostic.category not in self._RETRYABLE_CATEGORIES:
             return deny(f"failure category '{diagnostic.category.value}' is not retryable")
+        if diagnostic.category is FailureCategory.MODEL_PROVIDER and not diagnostic.retryable:
+            return deny("model provider failure is not transient; automatic retry was skipped")
         if diagnostic.tool == "run_command" and not diagnostic.retryable:
             return deny("non-transient command failures are not retried because commands may have external side effects")
         recovered_progress = bool(getattr(recovery, "rolled_back_events", ())) or (

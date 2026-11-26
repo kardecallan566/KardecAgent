@@ -2,7 +2,7 @@ from pathlib import Path
 
 from kardecagent.agent.loop import AgentLoop
 from kardecagent.agent.plan import ExecutionPlan
-from kardecagent.agent.state import TaskState
+from kardecagent.agent.state import TaskState, TaskStatus
 from kardecagent.config import Settings
 from kardecagent.llm.client import LLMResponse
 
@@ -359,7 +359,8 @@ def test_git_mutation_executes_only_after_high_risk_approval(tmp_path: Path):
         high_risk_approval_callback=lambda proposed: approvals.append(proposed) or True,
     )
 
-    assert result.status.value == "max_iterations"
+    assert result.status.value == "failed"
+    assert any(event.event_type == "plan_execution_stalled" for event in result.events)
     assert approvals and approvals[0].security_level == "high_risk"
     assert any(event.event_type == "git_approval_granted" for event in result.events)
     assert "feature/approved" in subprocess.run(
@@ -376,3 +377,117 @@ def test_shell_git_mutations_cannot_bypass_approval_or_destructive_guards():
     assert executor._is_forbidden_git_command("git reset --hard HEAD~1")
     assert executor._is_forbidden_git_command("git checkout -- .")
     assert not executor._is_forbidden_git_command("git pull --ff-only origin main")
+
+
+
+def test_model_request_failure_is_journaled_and_task_is_terminal(tmp_path: Path):
+    class FailingLLM:
+        model = "fixture-model"
+
+        def chat(self, messages):
+            raise TimeoutError("model request timed out")
+
+    loop = AgentLoop(FailingLLM(), Settings(max_iterations=2, llm_timeout_seconds=17))
+    plan = ExecutionPlan("Approved", ["Inspect"], ["checks"], [], ["done"])
+    state = make_state(tmp_path)
+    state.transition(TaskStatus.RUNNING)
+    persisted = []
+
+    result = loop.executor.execute(
+        tmp_path,
+        "inspect",
+        plan,
+        state,
+        persistence_callback=lambda current, current_plan: persisted.append(
+            (current.status.value, current.events[-1].event_type)
+        ),
+    )
+
+    assert result.status is TaskStatus.FAILED
+    started = next(event for event in result.events if event.event_type == "model_request_started")
+    failed = next(event for event in result.events if event.event_type == "model_request_failed")
+    assert started.data["model"] == "fixture-model"
+    assert started.data["timeout_seconds"] == 17
+    assert failed.data["error"] == "TimeoutError: model request timed out"
+    assert failed.data["duration_seconds"] >= 0
+    assert ("running", "model_request_started") in persisted
+    assert any(status == "failed" for status, _event in persisted)
+    assert not any(event.event_type == "model_response" for event in result.events)
+
+
+
+def test_executor_stops_repeated_future_step_actions_instead_of_burning_iterations(tmp_path: Path):
+    llm = FakeLLM([
+        '{"tool":"write_file","arguments":{"path":"teste.py","content":"for i in range(11):\\n    print(i)"},"plan_step":2}',
+        '{"tool":"create_directory","arguments":{"path":"./"},"plan_step":1}',
+        '{"tool":"write_file","arguments":{"path":"teste.py","content":"for i in range(11):\\n    print(i)"},"plan_step":2}',
+    ])
+    loop = AgentLoop(llm, Settings(max_iterations=20))
+    plan = ExecutionPlan(
+        "Create a counter",
+        ["Inspect whether teste.py exists", "Create teste.py if missing", "Write a counter from 0 to 10"],
+        ["Read back teste.py"],
+        [],
+        ["teste.py contains a counter from 0 to 10"],
+    )
+
+    result = loop.execute_approved_plan(tmp_path, "create counter", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.FAILED
+    assert not (tmp_path / "teste.py").exists()
+    assert sum(event.event_type == "iteration_started" for event in result.events) == 3
+    stalled = next(event for event in result.events if event.event_type == "plan_execution_stalled")
+    assert stalled.data["active_step"] == 1
+    assert stalled.data["consecutive_no_progress"] == 3
+    assert any(event.event_type == "plan_scope_violation" for event in result.events)
+    assert any(event.event_type == "execution_no_progress" for event in result.events)
+
+
+def test_create_directory_reports_existing_directory_as_noop(tmp_path: Path):
+    loop = AgentLoop(FakeLLM([]), Settings())
+    action = __import__("kardecagent.agent.tools_schema", fromlist=["parse_tool_call"]).parse_tool_call(
+        '{"tool":"create_directory","arguments":{"path":"./"},"plan_step":1}'
+    )
+
+    result = loop.executor._execute_tool(tmp_path, action, None)
+
+    import json
+    payload = json.loads(result)
+    assert payload["created"] is False
+    assert payload["changed"] is False
+
+
+
+def test_executor_advances_only_after_explicit_step_completion(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='counter-fixture'\nversion='0.1.0'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_example.py").write_text(
+        "def test_example():\n    assert True\n",
+        encoding="utf-8",
+    )
+    llm = FakeLLM([
+        '{"tool":"list_files","arguments":{"path":"."}}',
+        '{"tool":"complete_step","arguments":{"step":1,"evidence":"Directory listing inspected; teste.py is absent."},"plan_step":1}',
+        '{"tool":"write_file","arguments":{"path":"teste.py","content":""},"plan_step":2}',
+        '{"tool":"complete_step","arguments":{"step":2,"evidence":"Created teste.py and verified it exists."},"plan_step":2}',
+        '{"tool":"append_file","arguments":{"path":"teste.py","content":"for i in range(11):\\n    print(i)\\n"},"plan_step":3}',
+        '{"tool":"complete_step","arguments":{"step":3,"evidence":"Read back the file and confirmed the loop prints values 0 through 10."},"plan_step":3}',
+        '{"tool":"finish","arguments":{"reason":"Counter file created and verified.","criteria_evidence":[{"criterion":"teste.py contains a counter from 0 to 10","evidence":"Read-back confirms range(11) and print(i)."}]}}',
+    ])
+    loop = AgentLoop(llm, Settings(max_iterations=10))
+    plan = ExecutionPlan(
+        "Create a counter",
+        ["Inspect whether teste.py exists", "Create teste.py if missing", "Write a counter from 0 to 10"],
+        ["Read back teste.py"],
+        [],
+        ["teste.py contains a counter from 0 to 10"],
+    )
+
+    result = loop.execute_approved_plan(tmp_path, "create counter", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.COMPLETED
+    assert (tmp_path / "teste.py").read_text(encoding="utf-8") == "for i in range(11):\n    print(i)\n"
+    assert [event.data["step"] for event in result.events if event.event_type == "plan_step_completed"] == [1, 2, 3]

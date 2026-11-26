@@ -28,7 +28,7 @@ type RuntimeEventItem = { id: string; type: string; message: string; timestamp?:
 
 function runtimeEventDetails(data?: Record<string, unknown>): string[] {
   if (!data) return [];
-  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "details", "changes", "verification", "result"];
+  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "details", "changes", "verification", "result", "model", "duration_seconds", "timeout_seconds", "plan_step", "iteration", "response_chars"];
   const details: string[] = [];
   for (const key of visibleKeys) {
     const value = data[key];
@@ -309,6 +309,7 @@ function App() {
   const pendingInstructionCommandId = useRef<string | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeActivity, setRuntimeActivity] = useState("");
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEventItem[]>([]);
   const [eventSearch, setEventSearch] = useState("");
@@ -321,6 +322,7 @@ function App() {
   const runtimeCompletedSteps = runtimePlanSteps.filter(step => step.status === "completed").length;
   const runtimeProgressPercent = runtimePlanSteps.length ? Math.round(runtimeCompletedSteps / runtimePlanSteps.length * 100) : 0;
   const runtimeNextSteps = runtimePlanSteps.filter(step => step.status === "pending").slice(0, 3);
+  const recoverableTaskCount = runtimeTasks.filter(task => task.recoverable).length;
   const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
   const [activeRuntimeStep, setActiveRuntimeStep] = useState<number | null>(null);
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
@@ -589,11 +591,20 @@ function App() {
             || { name: requestedPath.split("/").pop() || requestedPath, path: requestedPath, is_dir: false };
           void openEntry(entry);
         }
+        if (coreType === "model_request_started") setRuntimeActivity("Aguardando resposta do modelo");
+        if (coreType === "model_response_received") setRuntimeActivity("Interpretando resposta do modelo");
+        if (coreType === "tool_started") setRuntimeActivity("Executando ferramenta: " + String(eventData.tool || "ação"));
+        if (["tool_result", "tool_error", "model_request_failed"].includes(coreType)) setRuntimeActivity("Atualizando estado da execução");
         if (coreType === "plan_created" && Array.isArray(eventData.plan?.steps)) {
           setRuntimePlanSteps(eventData.plan.steps.map((title: string, index: number) => ({ step: index + 1, title, status: "pending" })));
         }
         if ((coreType === "plan_step_started" || coreType === "subtask_started") && message.execution_id) {
-          setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: "Em execução" } : task));
+          if (message.type === "task.failed") {
+          setRuntimePlanSteps(items => items.map(step => step.status === "running"
+            ? { ...step, status: message.payload?.recoverable ? "interrupted" : "failed" }
+            : step));
+        }
+        setRuntimeTasks(items => items.map(task => task.executionId === message.execution_id ? { ...task, status: "Em execução" } : task));
         }
         if (coreType === "plan_step_started" && Number.isInteger(eventData.step)) {
           setActiveRuntimeStep(eventData.step);
@@ -634,6 +645,7 @@ function App() {
       } else if (message.type === "task.created") {
         // Restored records are history only; they are not live executions.
         setRuntimeBusy(!message.payload?.restored);
+        setRuntimeActivity(message.payload?.restored ? "Histórico restaurado; aguardando retomada explícita" : "Iniciando execução");
         setRuntimeSubtasks([]);
         setRuntimePlanSteps([]);
         setActiveRuntimeSubtask(null);
@@ -647,6 +659,7 @@ function App() {
           || String(message.execution_id || "").startsWith("restored:");
         if (!restoredExecution) {
           setRuntimeBusy(false);
+          setRuntimeActivity("");
           // Live task results are useful conversation output. Historical terminal
           // events (including older runtimes without payload.restored) stay in Tasks.
           const summary = message.payload?.result_summary || message.payload?.message
@@ -1889,11 +1902,11 @@ function App() {
                 </> : runtimePlanSteps.length ? <>
                   <h3>Plano aprovado</h3>
                   <div className="inspector-section-head"><strong>Etapas do plano</strong></div>
-                  {runtimePlanSteps.map(step => <div className="runtime-inspector-item" key={step.step}><strong>Etapa {step.step} · {step.title}</strong><small>Estado: {step.status}</small></div>)}
+                  {runtimePlanSteps.map(step => <div className="runtime-inspector-item" key={step.step}><strong>Etapa {step.step} · {step.title}</strong><small>Estado: {step.status === "interrupted" ? "interrompida · disponível para retomada" : step.status === "failed" ? "falhou" : step.status}</small></div>)}
                 </> : <div className="runtime-graph-empty"><Workflow size={20}/><strong>Nenhum plano recebido</strong><p>O inspetor será preenchido quando o gestor publicar o plano aprovado.</p></div>}
                 <div className="inspector-divider"/>
                 <div className="inspector-section-head"><strong>Runtime Python</strong></div>
-                <div className="selected-agent-card"><div className={"agent-avatar-small " + (runtimeBusy ? "running" : "done")}><Bot size={15}/></div><div><strong>AgentLoop / Orchestrator</strong><small>{runtimeBusy ? "Ativo" : "Ocioso"} · {runtimeLimits?.execution_mode || "modo não informado"}</small></div></div>
+                <div className="selected-agent-card"><div className={"agent-avatar-small " + (runtimeBusy ? "running" : "done")}><Bot size={15}/></div><div><strong>AgentLoop / Orchestrator</strong><small>{runtimeBusy ? (runtimeActivity || "Ativo") : recoverableTaskCount ? `Parado · ${recoverableTaskCount} tarefa(s) recuperável(is)` : "Ocioso"} · {runtimeLimits?.execution_mode || "modo não informado"}</small></div></div>
                 <div className="inspector-note"><AlertCircle size={14}/><span>O núcleo atual utiliza um executor Python sequencial. Agentes concorrentes só serão exibidos quando existirem workers reais no runtime.</span></div>
               </div>
             </div>

@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import re
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -49,7 +50,10 @@ class AgentExecutor:
     @classmethod
     def _is_repeated_side_effect(cls, state: TaskState, action) -> bool:
         """Block an identical append/command when no successful workspace mutation intervened."""
-        if action.tool not in {"append_file", "run_command"} | GIT_MUTATING_TOOLS:
+        if action.tool not in {
+            "write_file", "create_directory", "append_file",
+            "replace_in_file", "apply_patch", "run_command",
+        } | GIT_MUTATING_TOOLS:
             return False
         signature = cls._action_signature(action)
         workspace_mutations = {
@@ -275,8 +279,11 @@ class AgentExecutor:
                 ensure_ascii=False)
         if action.tool == "create_directory":
             self._check_scope(root, [args["path"]], scope)
-            fs.create_directory(args["path"])
-            return json.dumps({"ok": True, "path": args["path"], "kind": "directory"}, ensure_ascii=False)
+            created = fs.create_directory(args["path"])
+            return json.dumps({
+                "ok": True, "path": args["path"], "kind": "directory",
+                "created": created, "changed": created,
+            }, ensure_ascii=False)
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
             fs.write_file(args["path"], args["content"])
@@ -481,6 +488,14 @@ class AgentExecutor:
         resume_step: int = 1,
     ) -> TaskState:
         tracker = PlanTracker.resume_from(plan, resume_step)
+
+        def active_step_number() -> int | None:
+            return None if tracker.completed else tracker.current_step
+
+        def active_step_description() -> str | None:
+            step = active_step_number()
+            return plan.steps[step - 1] if step is not None and 1 <= step <= len(plan.steps) else None
+
         root = root.resolve()
         if state.status in {TaskStatus.PENDING, TaskStatus.RESUMING}:
             state.transition(TaskStatus.RUNNING, reason="Approved plan execution started or resumed.",
@@ -500,10 +515,15 @@ class AgentExecutor:
             "security_requirements": plan.security_requirements,
             "scope": list(allowed_scope or ()),
             "plan_progress": tracker.as_dict(),
+            "active_step": {
+                "number": active_step_number(),
+                "description": active_step_description(),
+            },
             "resume_step": resume_step,
             "instruction": "Resume from the specified active plan step. Do not redo completed steps unless verification requires it. " +
-                           "Execute only the approved plan. Mutating actions must use the active plan_step. " +
-                           "Complete each step with evidence. Never expand scope.",
+                           "The active_step is the ONLY step you may execute now. Every mutating action's plan_step MUST exactly equal active_step.number. " +
+                           "Never jump to a future step. After gathering concrete evidence for the active step, call complete_step for that exact step number; wait for the executor to advance before acting on the next step. " +
+                           "Do not use meaningless actions such as creating the project root directory. Complete each step with evidence. Never expand scope.",
         }
         messages = [
             {"role": "system", "content": compose_system_prompt(
@@ -521,13 +541,87 @@ class AgentExecutor:
         limit = max_iterations or self.settings.max_iterations
         last_invalid_signature = None
         repeated_invalid_count = 0
+        no_progress_count = 0
+        no_progress_limit = 3
+
+        def stop_stalled_execution(reason: str, *, tool: str | None = None,
+                                   requested_step: int | None = None) -> TaskState:
+            state.record("plan_execution_stalled",
+                "Execution stopped because the model repeatedly failed to make progress on the active approved plan step.",
+                reason=reason, tool=tool, active_step=active_step_number(),
+                active_step_description=active_step_description(),
+                requested_step=requested_step,
+                consecutive_no_progress=no_progress_count, limit=no_progress_limit)
+            state.transition(TaskStatus.FAILED,
+                reason="Execution stalled on the active approved plan step; no further actions were run.",
+                failure_source="plan_execution_stalled")
+            if persistence_callback is not None:
+                persistence_callback(state, plan)
+            return state
+
+        def register_no_progress(reason: str, *, tool: str | None = None,
+                                 requested_step: int | None = None) -> bool:
+            nonlocal no_progress_count
+            no_progress_count += 1
+            state.record("execution_no_progress",
+                "The proposed action did not advance the approved plan.",
+                reason=reason, tool=tool, active_step=active_step_number(),
+                requested_step=requested_step,
+                consecutive_no_progress=no_progress_count, limit=no_progress_limit)
+            return no_progress_count >= no_progress_limit
+
         for iteration in range(1, limit + 1):
             state.iteration = iteration
             state.record("iteration_started", f"Starting iteration {iteration}.")
             if persistence_callback is not None:
                 persistence_callback(state, plan)
             messages = self._bound_messages(messages, state, tracker)
-            response = self.llm.chat(messages)
+            model_started = time.monotonic()
+            model_name = getattr(self.llm, "model", None)
+            request_timeout = getattr(self.settings, "llm_timeout_seconds", None)
+            state.record(
+                "model_request_started",
+                "Waiting for the model provider to return the next execution action.",
+                iteration=iteration,
+                plan_step=state.active_plan_step,
+                model=model_name,
+                timeout_seconds=request_timeout,
+            )
+            if persistence_callback is not None:
+                persistence_callback(state, plan)
+            try:
+                response = self.llm.chat(messages)
+            except Exception as exc:
+                duration = round(time.monotonic() - model_started, 3)
+                error = f"{type(exc).__name__}: {exc}"
+                state.record(
+                    "model_request_failed",
+                    "The model request failed before an execution action was returned.",
+                    iteration=iteration,
+                    plan_step=state.active_plan_step,
+                    model=model_name,
+                    duration_seconds=duration,
+                    timeout_seconds=request_timeout,
+                    error=error,
+                )
+                state.transition(
+                    TaskStatus.FAILED,
+                    reason="The model provider request failed; the task can be diagnosed and safely resumed.",
+                    failure_source="model_provider",
+                )
+                if persistence_callback is not None:
+                    persistence_callback(state, plan)
+                return state
+            duration = round(time.monotonic() - model_started, 3)
+            state.record(
+                "model_response_received",
+                "The model provider returned a response.",
+                iteration=iteration,
+                plan_step=state.active_plan_step,
+                model=model_name,
+                duration_seconds=duration,
+                response_chars=len(response.content),
+            )
             state.record("model_response", response.content)
             try:
                 action = parse_tool_call(response.content)
@@ -599,15 +693,23 @@ class AgentExecutor:
                 continue
 
             if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS:
-                if action.plan_step != tracker.current_step:
+                if tracker.completed or action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
-                                 active_step=tracker.current_step)
+                                 active_step=active_step_number(),
+                                 active_step_description=active_step_description())
+                    if register_no_progress("model attempted an action for a different plan step",
+                                            tool=action.tool, requested_step=action.plan_step):
+                        return stop_stalled_execution("The model repeatedly skipped the active plan step.",
+                            tool=action.tool, requested_step=action.plan_step)
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": json.dumps({
                                      "error": "plan_scope_violation",
-                                     "active_plan_step": tracker.current_step,
-                                 })}]
+                                     "active_plan_step": active_step_number(),
+                                     "active_plan_step_description": active_step_description(),
+                                     "requested_plan_step": action.plan_step,
+                                     "instruction": "STOP: the requested future step is not active. Do not execute it. Finish the active step first using evidence gathered for that step. If inspection is complete, call complete_step for the active step with concrete evidence; only then work on the next step.",
+                                 }, ensure_ascii=False)}]
                     continue
                 if action.plan_step not in tracker.started_steps:
                     tracker.start(action.plan_step)
@@ -665,11 +767,12 @@ class AgentExecutor:
 
             if action.tool == "complete_step":
                 step = action.arguments["step"]
-                if step != action.plan_step or step != tracker.current_step:
+                if tracker.completed or step != action.plan_step or step != tracker.current_step:
                     state.record("plan_scope_violation", "Step completion rejected.",
-                                 requested_step=step, active_step=tracker.current_step)
+                                 requested_step=step, active_step=active_step_number())
                     continue
                 tracker.complete(step)
+                no_progress_count = 0
                 state.record("plan_step_completed", f"Completed plan step {step}.",
                              step=step, evidence=action.arguments["evidence"], progress=tracker.as_dict())
                 messages += [{"role": "assistant", "content": response.content},
@@ -682,9 +785,23 @@ class AgentExecutor:
             if action.tool == "finish":
                 if not tracker.completed:
                     state.record("plan_scope_violation", "Finish rejected: plan has incomplete steps.",
-                                 progress=tracker.as_dict())
+                                 progress=tracker.as_dict(), active_step=active_step_number(),
+                                 active_step_description=active_step_description())
+                    if register_no_progress("model attempted to finish before completing the active plan",
+                                            tool="finish", requested_step=active_step_number()):
+                        return stop_stalled_execution(
+                            "The model repeatedly attempted to finish while approved steps remained incomplete.",
+                            tool="finish", requested_step=active_step_number())
                     messages += [{"role": "assistant", "content": response.content},
-                                 {"role": "user", "content": "Complete every approved plan step before finishing."}]
+                                 {"role": "user", "content": json.dumps({
+                                     "error": "plan_incomplete",
+                                     "plan_progress": tracker.as_dict(),
+                                     "active_step": {
+                                         "number": active_step_number(),
+                                         "description": active_step_description(),
+                                     },
+                                     "instruction": "Do not finish yet. Execute and explicitly complete the active approved step, then continue in order.",
+                                 }, ensure_ascii=False)}]
                     continue
                 evidence_result = evaluate_completion_evidence(
                     plan.completion_criteria,
@@ -753,6 +870,9 @@ class AgentExecutor:
                 if any(event.data.get("key") == investigation_key for event in prior):
                     state.record("investigation_blocked", "Repeated investigation action was blocked.",
                                  tool=action.tool, key=investigation_key)
+                    if register_no_progress("identical read-only investigation was repeated", tool=action.tool):
+                        return stop_stalled_execution("The model repeatedly requested the same investigation without advancing the plan.",
+                            tool=action.tool, requested_step=action.plan_step)
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "This exact investigation was already performed. Use its recorded result or choose a materially different, justified action."}]
                     continue
@@ -769,6 +889,9 @@ class AgentExecutor:
                     tool=action.tool,
                     action_signature=self._action_signature(action),
                 )
+                if register_no_progress("identical side effect was blocked", tool=action.tool):
+                    return stop_stalled_execution("The model repeated an ineffective side effect without advancing the plan.",
+                        tool=action.tool, requested_step=action.plan_step)
                 messages += [
                     {"role": "assistant", "content": response.content},
                     {"role": "user", "content": json.dumps({
@@ -791,20 +914,45 @@ class AgentExecutor:
                 if action.tool in investigation_tools:
                     state.record("investigation_action", "Read-only investigation action recorded.",
                                  tool=action.tool, key=investigation_key)
+                parsed_result = None
+                try:
+                    parsed_result = json.loads(result)
+                except (TypeError, json.JSONDecodeError):
+                    pass
+                no_op = isinstance(parsed_result, dict) and (
+                    parsed_result.get("changed") is False or parsed_result.get("created") is False
+                )
                 state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result,
-                             action_signature=self._action_signature(action))
+                             action_signature=self._action_signature(action), no_op=no_op)
+                if no_op:
+                    if register_no_progress("tool completed without changing or advancing the workspace",
+                                            tool=action.tool):
+                        return stop_stalled_execution("The model repeatedly selected actions that made no progress.",
+                            tool=action.tool, requested_step=action.plan_step)
+                else:
+                    no_progress_count = 0
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
                                  "tool": action.tool, "result": result,
                                  "plan_progress": tracker.as_dict(),
+                                 "active_step": {
+                                     "number": tracker.current_step,
+                                     "description": active_step_description(),
+                                 },
+                                 "instruction": "Continue ONLY with the active_step shown here. For every mutating action, plan_step must exactly equal active_step.number. Complete the active step with evidence before starting the next one.",
                              }, ensure_ascii=False)}]
             except Exception as exc:
                 state.record("tool_error", f"{action.tool} failed: {exc}",
                              tool=action.tool, error=str(exc))
+                if register_no_progress("tool execution failed", tool=action.tool):
+                    return stop_stalled_execution("The model repeatedly selected actions that failed.",
+                        tool=action.tool, requested_step=action.plan_step)
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
                                  "tool": action.tool, "error": str(exc),
-                                 "instruction": "Diagnose the error and choose a safe correction.",
+                                 "active_plan_step": active_step_number(),
+                                 "active_plan_step_description": active_step_description(),
+                                 "instruction": "Diagnose the error, choose a safe correction for the active step, and do not repeat an unchanged failed action.",
                              }, ensure_ascii=False)}]
 
         state.transition(TaskStatus.MAX_ITERATIONS, reason="Maximum execution iterations reached.")
