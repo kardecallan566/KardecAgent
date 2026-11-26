@@ -18,6 +18,8 @@ from ..tools import (
     git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
     fetch_web_page,
     WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change,
+    git_branch_list, git_remote_list, git_fetch, git_pull, git_push, git_create_branch,
+    git_checkout, git_commit, git_merge, gh_create_pr, gh_pr_status, gh_merge_pr,
 )
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
 from .security import assess_security, security_requirements_for
@@ -25,7 +27,7 @@ from .security_review import (
     SecurityReviewError, parse_security_review, security_review_instructions,
 )
 from .state import TaskState, TaskStatus
-from .tools_schema import ToolCallError, parse_tool_call, tool_instructions
+from .tools_schema import GIT_MUTATING_TOOLS, ToolCallError, parse_tool_call, tool_instructions
 from .verification import evaluate_completion_evidence, summarize_check_results
 
 CHECK_KINDS = ("test", "typecheck", "lint", "build", "validate")
@@ -348,6 +350,30 @@ class AgentExecutor:
             return json.dumps(git_diff(root).__dict__, ensure_ascii=False)
         if action.tool == "git_log":
             return json.dumps(git_log(root, args.get("limit", 10)).__dict__, ensure_ascii=False)
+        if action.tool == "git_branches":
+            return json.dumps(git_branch_list(root).__dict__, ensure_ascii=False)
+        if action.tool == "git_remotes":
+            return json.dumps(git_remote_list(root).__dict__, ensure_ascii=False)
+        if action.tool == "git_pr_status":
+            return json.dumps(gh_pr_status(root).__dict__, ensure_ascii=False)
+        git_operations = {
+            "git_fetch": lambda: git_fetch(root, args.get("remote", "origin"), prune=args.get("prune", False)),
+            "git_pull": lambda: git_pull(root, args.get("remote", "origin"), args.get("branch")),
+            "git_push": lambda: git_push(root, args.get("remote", "origin"), args.get("branch"),
+                                         set_upstream=args.get("set_upstream", False)),
+            "git_create_branch": lambda: git_create_branch(root, args["branch"], args.get("base", "HEAD")),
+            "git_checkout": lambda: git_checkout(root, args["branch"]),
+            "git_commit": lambda: git_commit(root, args["message"], args["paths"]),
+            "git_merge": lambda: git_merge(root, args["branch"]),
+            "git_create_pr": lambda: gh_create_pr(root, args["title"], args.get("body", ""),
+                                                  args.get("base", "main"), draft=args.get("draft", False)),
+            "git_merge_pr": lambda: gh_merge_pr(root, args["number"], args.get("method", "squash")),
+        }
+        if action.tool in git_operations:
+            if scope:
+                raise PermissionError("Git repository mutations are disabled inside scoped subtasks.")
+            result = git_operations[action.tool]()
+            return json.dumps(result.__dict__, ensure_ascii=False)
         raise ToolCallError("unsupported tool: " + action.tool)
 
     def rollback_operation(self, root: Path, state: TaskState, event_index: int) -> TaskState:
@@ -501,6 +527,33 @@ class AgentExecutor:
             last_invalid_signature = None
             repeated_invalid_count = 0
 
+            if action.tool in GIT_MUTATING_TOOLS:
+                approval_plan = ExecutionPlan(
+                    summary=f"Autorização Git necessária: {action.tool}",
+                    steps=[f"Executar {action.tool} com os argumentos informados: {json.dumps(action.arguments, ensure_ascii=False, sort_keys=True)}"],
+                    validation=["Verificar o código de saída e o resultado retornado pelo Git."],
+                    risks=["Esta operação altera referências, histórico local ou remoto do repositório."],
+                    completion_criteria=["A operação Git autorizada foi executada e seu resultado foi verificado."],
+                    security_level="high_risk",
+                    security_requirements=[
+                        "Aprovação explícita do usuário para esta operação Git específica.",
+                        "Não executar push forçado nem sobrescrever alterações locais.",
+                        "Registrar o resultado da operação no journal.",
+                    ],
+                )
+                state.record("git_approval_requested",
+                             "Git mutation is paused until explicit user approval.",
+                             tool=action.tool, arguments=action.arguments)
+                if high_risk_approval_callback is None or not high_risk_approval_callback(approval_plan):
+                    state.record("git_approval_denied", "Git operation was not authorized.",
+                                 tool=action.tool)
+                    messages += [{"role": "assistant", "content": response.content},
+                                 {"role": "user", "content":
+                                  "A operação Git foi recusada ou não recebeu autorização explícita. Não tente contornar a aprovação. Continue apenas com consultas ou explique o bloqueio."}]
+                    continue
+                state.record("git_approval_granted", "User explicitly authorized this Git operation.",
+                             tool=action.tool, arguments=action.arguments)
+
             if action.tool == "request_plan_change":
                 if not allow_plan_changes:
                     state.record("plan_change_blocked",
@@ -546,7 +599,7 @@ class AgentExecutor:
                     persistence_callback(state, plan)
                 continue
 
-            if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"}:
+            if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS:
                 if action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
