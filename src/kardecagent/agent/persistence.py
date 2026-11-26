@@ -439,6 +439,7 @@ def _board_from_dict(payload: dict | None) -> TaskBoard | None:
             result=item.get("result"),
             evidence=list(item.get("evidence", [])),
             iterations=int(item.get("iterations", 0)),
+            current_step=max(1, int(item.get("current_step", 1))),
         ))
     return board
 
