@@ -28,7 +28,7 @@ type RuntimeEventItem = { id: string; type: string; message: string; timestamp?:
 
 function runtimeEventDetails(data?: Record<string, unknown>): string[] {
   if (!data) return [];
-  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "details", "changes", "verification", "result"];
+  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "details", "changes", "verification", "result", "model", "duration_seconds", "timeout_seconds", "plan_step", "iteration", "response_chars"];
   const details: string[] = [];
   for (const key of visibleKeys) {
     const value = data[key];
@@ -1889,11 +1889,11 @@ function App() {
                 </> : runtimePlanSteps.length ? <>
                   <h3>Plano aprovado</h3>
                   <div className="inspector-section-head"><strong>Etapas do plano</strong></div>
-                  {runtimePlanSteps.map(step => <div className="runtime-inspector-item" key={step.step}><strong>Etapa {step.step} · {step.title}</strong><small>Estado: {step.status}</small></div>)}
+                  {runtimePlanSteps.map(step => <div className="runtime-inspector-item" key={step.step}><strong>Etapa {step.step} · {step.title}</strong><small>Estado: {step.status === "interrupted" ? "interrompida · disponível para retomada" : step.status === "failed" ? "falhou" : step.status}</small></div>)}
                 </> : <div className="runtime-graph-empty"><Workflow size={20}/><strong>Nenhum plano recebido</strong><p>O inspetor será preenchido quando o gestor publicar o plano aprovado.</p></div>}
                 <div className="inspector-divider"/>
                 <div className="inspector-section-head"><strong>Runtime Python</strong></div>
-                <div className="selected-agent-card"><div className={"agent-avatar-small " + (runtimeBusy ? "running" : "done")}><Bot size={15}/></div><div><strong>AgentLoop / Orchestrator</strong><small>{runtimeBusy ? "Ativo" : "Ocioso"} · {runtimeLimits?.execution_mode || "modo não informado"}</small></div></div>
+                <div className="selected-agent-card"><div className={"agent-avatar-small " + (runtimeBusy ? "running" : "done")}><Bot size={15}/></div><div><strong>AgentLoop / Orchestrator</strong><small>{runtimeBusy ? (runtimeActivity || "Ativo") : recoverableTaskCount ? `Parado · ${recoverableTaskCount} tarefa(s) recuperável(is)` : "Ocioso"} · {runtimeLimits?.execution_mode || "modo não informado"}</small></div></div>
                 <div className="inspector-note"><AlertCircle size={14}/><span>O núcleo atual utiliza um executor Python sequencial. Agentes concorrentes só serão exibidos quando existirem workers reais no runtime.</span></div>
               </div>
             </div>
