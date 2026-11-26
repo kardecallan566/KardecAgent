@@ -658,3 +658,22 @@ body { min-width:900px; }
 .editor-signature-help{display:flex;flex-direction:column;gap:5px;padding:8px 14px;border-bottom:1px solid #34303f;background:#211e2a;color:#c9c2d8;font-size:11px}.editor-signature-help strong{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e4dcff}.editor-signature-help span{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#a9a2b8}.editor-signature-help em{font-style:normal}.editor-signature-help em.active{color:#fff;background:#57468a;border-radius:3px;padding:1px 2px}.editor-signature-help small{color:#858b98;white-space:pre-wrap;max-height:48px;overflow:hidden}
 
 .agent-chat-message-body p{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}.agent-chat-message-body p:last-child{margin-bottom:0}.chat-code-block{margin:8px 0;padding:10px 12px;max-width:100%;overflow:auto;border:1px solid #34313f;border-radius:6px;background:#111119;color:#d8d5e3;font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre}.chat-inline-code{padding:1px 4px;border-radius:3px;background:#2b2735;color:#d9caff;font:10px ui-monospace,SFMono-Regular,Menlo,monospace}
+
+/* Execution map: progress, upcoming work, and inspectable evidence */
+.runtime-progress-overview{margin:12px 0;padding:14px 16px;border:1px solid #34313e;border-radius:8px;background:#191720}
+.runtime-progress-heading{display:flex;justify-content:space-between;gap:12px;color:#d9d2e2;font-size:11px}
+.runtime-progress-heading span{color:#a99bbb;font-variant-numeric:tabular-nums}
+.runtime-progress-track{height:6px;margin:10px 0 12px;border-radius:8px;background:#302c39;overflow:hidden}
+.runtime-progress-track i{display:block;height:100%;border-radius:8px;background:#9b83df;transition:width .2s ease}
+.runtime-next-steps{display:grid;gap:6px;color:#9e96aa;font-size:10px}
+.runtime-next-steps strong{color:#c9bdd7;font-size:10px}
+.runtime-next-steps span{overflow-wrap:anywhere}
+.runtime-step-evidence{display:grid;gap:4px;margin-top:8px;padding:8px 10px;border-left:2px solid #547c68;background:rgba(57,105,78,.09);font-size:10px}
+.runtime-step-evidence b{color:#9cc9ad}.runtime-step-evidence span{color:#aab5ad;overflow-wrap:anywhere}
+.process-event-detailed{grid-template-columns:7px 66px 145px minmax(0,1fr);align-items:start}
+.process-event-detailed>span:not(.event-marker){white-space:normal;overflow-wrap:anywhere;line-height:1.45}
+.process-event-details{grid-column:3 / -1;min-width:0;color:#a99fb3;font-size:9px}
+.process-event-details summary{cursor:pointer;color:#b9a6d1;padding:3px 0}
+.process-event-details ul{margin:5px 0 2px;padding:8px 10px 8px 25px;border-radius:5px;background:#121118;line-height:1.6}
+.process-event-details li{overflow-wrap:anywhere}
+@media(max-width:700px){.process-event-detailed{grid-template-columns:7px 52px minmax(0,1fr)}.process-event-detailed>strong{grid-column:3}.process-event-detailed>span:not(.event-marker){grid-column:3}.process-event-details{grid-column:3}}
