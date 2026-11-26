@@ -863,8 +863,8 @@ function App() {
       return;
     }
     const before = source.slice(0, cursor);
-    const line = before.split("\\n").length;
-    const column = before.length - before.lastIndexOf("\\n") - 1;
+    const line = before.split("\n").length;
+    const column = before.length - before.lastIndexOf("\n") - 1;
     const commandId = "code-actions-" + crypto.randomUUID();
     codeActionRequest.current = { commandId, source, path: openedPath, cursor };
     codeActionSource.current = source;
@@ -903,19 +903,19 @@ function App() {
       }
       next = next.slice(0, edit.start) + edit.content + next.slice(edit.end);
     }
-    const oldLines = source.split("\\n");
-    const newLines = next.split("\\n");
+    const oldLines = source.split("\n");
+    const newLines = next.split("\n");
     let prefix = 0;
     while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix++;
     let suffix = 0;
     while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix &&
       oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]) suffix++;
-    const oldPreview = oldLines.slice(Math.max(0, prefix - 2), Math.min(oldLines.length - suffix, prefix + 8)).join("\\n").slice(0, 1200);
-    const newPreview = newLines.slice(Math.max(0, prefix - 2), Math.min(newLines.length - suffix, prefix + 8)).join("\\n").slice(0, 1200);
+    const oldPreview = oldLines.slice(Math.max(0, prefix - 2), Math.min(oldLines.length - suffix, prefix + 8)).join("\n").slice(0, 1200);
+    const newPreview = newLines.slice(Math.max(0, prefix - 2), Math.min(newLines.length - suffix, prefix + 8)).join("\n").slice(0, 1200);
     const approved = window.confirm(
-      action.title + "\\n\\nPrévia da alteração (apenas no buffer do editor):\\n\\nANTES:\\n" +
-      (oldPreview || "(vazio)") + "\\n\\nDEPOIS:\\n" + (newPreview || "(vazio)") +
-      "\\n\\n" + action.edits.length + " edição(ões). Aplicar ao editor? O arquivo em disco só será alterado quando você salvar."
+      action.title + "\n\nPrévia da alteração (apenas no buffer do editor):\n\nANTES:\n" +
+      (oldPreview || "(vazio)") + "\n\nDEPOIS:\n" + (newPreview || "(vazio)") +
+      "\n\n" + action.edits.length + " edição(ões). Aplicar ao editor? O arquivo em disco só será alterado quando você salvar."
     );
     if (!approved) return;
     setFileContent(next);
