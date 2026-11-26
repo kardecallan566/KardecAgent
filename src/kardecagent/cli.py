@@ -13,6 +13,8 @@ from .llm.catalog import LOCAL_MODEL_CATALOG
 from .project import detect_project
 from .agent.persistence import TaskStore, PersistenceError
 
+logger = logging.getLogger(__name__)
+
 
 def build_parser():
     parser = argparse.ArgumentParser(
