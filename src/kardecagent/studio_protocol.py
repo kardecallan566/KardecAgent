@@ -768,7 +768,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                         },
                     })
 
-                state = agent.resume(root, persisted_state.task, event_callback=forward_resumed_event)
+                state = agent.resume(root, persisted_state.task, event_callback=forward_resumed_event,
+                                         model_switch_approval_callback=lambda request: _approval(
+                                             identifier, execution_id, request, kind="model_switch"
+                                         ))
                 summary = state.events[-1].message if state.events else f"Task ended with status {state.status.value}."
                 completed = state.status.value == "completed"
                 _write({
@@ -910,6 +913,9 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 active_editor_context=active_editor,
                 approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="plan"),
                 high_risk_approval_callback=lambda plan: _approval(identifier, execution_id, plan, kind="high_risk"),
+                model_switch_approval_callback=lambda request: _approval(
+                    identifier, execution_id, request, kind="model_switch"
+                ),
             )
             result_summary = (
                 state.events[-1].message if state.events
