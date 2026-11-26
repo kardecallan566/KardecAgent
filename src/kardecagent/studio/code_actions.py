@@ -56,6 +56,10 @@ def python_code_actions(
     root, path = _context(source, file_path, project_root, line, column)
     relative = path.relative_to(root).as_posix()
     executable = shutil.which("ruff")
+    if not executable and getattr(sys, "frozen", False):
+        bundled_ruff = Path(sys.executable).resolve().parent / ("ruff.exe" if sys.platform == "win32" else "ruff")
+        if bundled_ruff.is_file():
+            executable = str(bundled_ruff)
     if executable:
         command = [executable]
     elif not getattr(sys, "frozen", False):
