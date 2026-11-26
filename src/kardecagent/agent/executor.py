@@ -131,6 +131,7 @@ class AgentExecutor:
             }, ensure_ascii=False)},
         ]
         for _ in range(3):
+            messages = self._bound_messages(messages, state, tracker)
             response = self.llm.chat(messages)
             try:
                 return parse_security_review(response.content).as_dict()
@@ -342,6 +343,47 @@ class AgentExecutor:
         if not paths:
             raise ValueError("patch contains no file paths")
         return paths
+
+    @staticmethod
+    def _bound_messages(messages: list[dict], state: TaskState, tracker: PlanTracker) -> list[dict]:
+        """Keep the initial task contract and recent turns while summarizing older tool evidence."""
+        max_messages = 26
+        recent_messages = 18
+        if len(messages) <= max_messages:
+            return messages
+
+        omitted_count = len(messages) - 2 - recent_messages
+        evidence_lines = []
+        for event in state.events:
+            if event.event_type not in {"tool_result", "tool_error", "verification_failed", "plan_step_completed"}:
+                continue
+            data = event.data or {}
+            if event.event_type == "tool_result":
+                detail = str(data.get("result", ""))
+            elif event.event_type == "tool_error":
+                detail = str(data.get("error", ""))
+            elif event.event_type == "verification_failed":
+                detail = json.dumps(data.get("verification", {}), ensure_ascii=False)
+            else:
+                detail = str(data.get("evidence", ""))
+            detail = " ".join(detail.split())
+            if len(detail) > 900:
+                detail = detail[:900] + "…"
+            evidence_lines.append(f"- {event.event_type} ({data.get('tool', 'agent')}): {detail}")
+        evidence_lines = evidence_lines[-10:]
+        summary = {
+            "notice": "Earlier conversation turns were compacted to keep the working context bounded.",
+            "omitted_message_count": omitted_count,
+            "approved_plan_progress": tracker.as_dict(),
+            "recent_evidence": evidence_lines,
+            "instruction": "Continue the approved plan. Re-read project files when exact older contents are needed; do not assume omitted details.",
+        }
+        summary_text = json.dumps(summary, ensure_ascii=False)
+        if len(summary_text) > 10000:
+            summary_text = summary_text[:10000] + "…"
+        return messages[:2] + [
+            {"role": "user", "content": summary_text}
+        ] + messages[-recent_messages:]
 
     def execute(
         self, root: Path, task: str, plan: ExecutionPlan, state: TaskState,
