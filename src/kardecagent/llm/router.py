@@ -61,6 +61,10 @@ class EscalatingLLMClient:
     def set_approval_callback(self, callback: Callable[[ModelSwitchRequest], bool] | None) -> None:
         with self._lock:
             self.approval_callback = callback
+            # Each task starts from the configured primary model; approvals
+            # authorize switches for the current task, not future tasks.
+            self.active_index = 0
+            self.last_switch = None
             for client in self.clients:
                 setter = getattr(client, "set_approval_callback", None)
                 if callable(setter):
@@ -234,6 +238,7 @@ class AdaptiveLLMClient:
 
     def set_approval_callback(self, callback: Callable[[ModelSwitchRequest], bool] | None) -> None:
         self.approval_callback = callback
+        self.fast_disabled_reason = None
 
     def chat(self, messages: list[dict[str, Any]], *, temperature: float = 0.2):
         decision = self.router.decide(messages)
