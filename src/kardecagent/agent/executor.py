@@ -353,7 +353,7 @@ class AgentExecutor:
 
         omitted_count = len(messages) - 2 - recent_messages
         evidence_lines = []
-        for event in state.events:
+        for event in reversed(state.events):
             if event.event_type not in {"tool_result", "tool_error", "verification_failed", "plan_step_completed"}:
                 continue
             data = event.data or {}
@@ -369,7 +369,9 @@ class AgentExecutor:
             if len(detail) > 900:
                 detail = detail[:900] + "…"
             evidence_lines.append(f"- {event.event_type} ({data.get('tool', 'agent')}): {detail}")
-        evidence_lines = evidence_lines[-10:]
+            if len(evidence_lines) == 10:
+                break
+        evidence_lines.reverse()
         summary = {
             "notice": "Earlier conversation turns were compacted to keep the working context bounded.",
             "omitted_message_count": omitted_count,
