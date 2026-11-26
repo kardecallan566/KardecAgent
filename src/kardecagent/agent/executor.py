@@ -209,17 +209,17 @@ class AgentExecutor:
     @staticmethod
     def _contains_git_mutation_command(command: str) -> bool:
         pattern = (
-            r"(?im)(?:^|[;&|\\n]\\s*)"
-            r"(?:git\\s+(?:-C\\s+[^\\s]+\\s+)?"
-            r"(?:push|pull|fetch|checkout|switch|branch|commit|merge|reset|rebase|cherry-pick|tag|remote|worktree)\\b"
-            r"|gh\\s+pr\\s+(?:create|merge|close|edit)\\b)"
+            r"(?im)(?:^|[;&|\n]\s*)"
+            r"(?:git\s+(?:-C\s+[^\s]+\s+)?"
+            r"(?:push|pull|fetch|checkout|switch|branch|commit|merge|reset|rebase|cherry-pick|tag|remote|worktree)\b"
+            r"|gh\s+pr\s+(?:create|merge|close|edit)\b)"
         )
         return re.search(pattern, command) is not None
 
     @staticmethod
     def _redact_git_command(command: str) -> str:
-        command = re.sub(r"(?i)(token|password|secret|authorization)(\\s*[=:]\\s*)[^\\s]+", r"\\1\\2[REDACTED]", command)
-        return re.sub(r"(https?://)[^/@\\s]+@", r"\\1[REDACTED]@", command)
+        command = re.sub(r"(?i)(token|password|secret|authorization)(\s*[=:]\s*)[^\s]+", r"\1\2[REDACTED]", command)
+        return re.sub(r"(https?://)[^/@\s]+@", r"\1[REDACTED]@", command)
 
     @staticmethod
     def _is_dependency_install_command(command: str) -> bool:
