@@ -82,7 +82,6 @@ def diagnose_failure(
     priorities = (
         ("model_request_failed", FailureCategory.MODEL_PROVIDER),
         ("plan_execution_stalled", FailureCategory.PLAN),
-        ("plan_scope_violation", FailureCategory.PLAN),
         # Prefer the underlying execution failure over a later rollback failure.
         ("model_protocol_stalled", FailureCategory.MODEL_PROTOCOL),
         ("tool_error", FailureCategory.TOOL_EXECUTION),
