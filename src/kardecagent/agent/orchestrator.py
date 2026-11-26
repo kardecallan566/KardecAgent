@@ -323,9 +323,7 @@ class Orchestrator:
                 nonlocal propagated_model_events
                 if parent_state is not None:
                     with self._progress_lock:
-                        subtask.current_step = max(
-                            1, min(int(current_state.active_plan_step), max(1, len(subtask.plan_steps)))
-                        )
+                        subtask.current_step = max(1, int(current_state.active_plan_step))
                         for event in current_state.events[propagated_model_events:]:
                             if event.event_type in {
                                 "model_switch_approved", "model_switch_rejected",
