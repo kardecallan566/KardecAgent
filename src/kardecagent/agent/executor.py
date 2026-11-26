@@ -732,6 +732,13 @@ class AgentExecutor:
                 ]
                 continue
 
+            safe_action_details = {
+                key: action.arguments[key]
+                for key in ("path", "branch", "base", "remote", "number", "title", "kind", "message", "paths", "prune", "set_upstream", "draft", "method")
+                if key in action.arguments
+            }
+            state.record("tool_started", f"Starting {action.tool}.", tool=action.tool,
+                         plan_step=action.plan_step, details=safe_action_details)
             try:
                 result = self._execute_tool(root, action, allowed_scope, state, (context or {}).get("subtask", {}).get("id"))
                 if action.tool in investigation_tools:
