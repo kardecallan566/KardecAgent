@@ -506,7 +506,11 @@ class AgentExecutor:
             "plan_progress": tracker.as_dict(),
             "active_step": {
                 "number": tracker.current_step,
-                "description": plan.steps[tracker.current_step - 1] if tracker.current_step else None,
+                "description": (
+                    plan.steps[tracker.current_step - 1]
+                    if tracker.current_step and tracker.current_step <= len(plan.steps)
+                    else None
+                ),
             },
             "resume_step": resume_step,
             "instruction": "Resume from the specified active plan step. Do not redo completed steps unless verification requires it. " +
