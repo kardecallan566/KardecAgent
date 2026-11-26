@@ -13,6 +13,7 @@ from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
 from .studio.language import python_semantic_request
+from .studio.code_actions import python_code_actions
 from .studio.refactor import RenamePreviewManager
 
 
