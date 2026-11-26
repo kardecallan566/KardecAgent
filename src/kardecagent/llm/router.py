@@ -48,8 +48,15 @@ class ModelSwitchRequest:
 class EscalatingLLMClient:
     """Bounded model escalation that never changes models without explicit consent."""
 
-    def __init__(self, primary: ChatClient, alternatives: list[ChatClient] | None = None) -> None:
+    def __init__(
+        self,
+        primary: ChatClient,
+        alternatives: list[ChatClient] | None = None,
+        *,
+        alternatives_provider: Callable[[], list[ChatClient]] | None = None,
+    ) -> None:
         self.clients = [primary, *(alternatives or [])]
+        self.alternatives_provider = alternatives_provider
         self.active_index = 0
         self.approval_callback: Callable[[ModelSwitchRequest], bool] | None = None
         self._lock = RLock()
@@ -73,6 +80,20 @@ class EscalatingLLMClient:
 
     def request_escalation(self, reason: str, *, trigger: str = "capability") -> tuple[bool, ModelSwitchRequest | None]:
         with self._lock:
+            if self.alternatives_provider is not None:
+                try:
+                    discovered = self.alternatives_provider()
+                    known = {
+                        str(getattr(client, "model", "unknown"))
+                        for client in self.clients
+                    }
+                    for candidate in discovered:
+                        candidate_name = str(getattr(candidate, "model", "unknown"))
+                        if candidate_name not in known:
+                            self.clients.append(candidate)
+                            known.add(candidate_name)
+                except Exception:
+                    logger.exception("Could not refresh Ollama model inventory before escalation")
             if self.active_index + 1 >= len(self.clients):
                 return False, None
             current = self.model
