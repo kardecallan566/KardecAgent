@@ -453,7 +453,7 @@ def test_run_stdio_rejects_semantic_request_for_another_workspace(monkeypatch, t
 
 def test_run_stdio_routes_python_code_actions(monkeypatch, tmp_path):
     source = tmp_path / "main.py"
-    source.write_text("import os\\n", encoding="utf-8")
+    source.write_text("import os\n", encoding="utf-8")
     command = {
         "type": "editor.code_actions",
         "schema_version": 1,
@@ -461,12 +461,12 @@ def test_run_stdio_routes_python_code_actions(monkeypatch, tmp_path):
         "payload": {
             "project_root": str(tmp_path),
             "file_path": "main.py",
-            "source": "import os\\n",
+            "source": "import os\n",
             "line": 1,
             "column": 0,
         },
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
     monkeypatch.setattr(studio_protocol, "python_code_actions", lambda source, file_path, project_root, line, column: {
@@ -489,7 +489,7 @@ def test_run_stdio_rejects_code_actions_for_another_workspace(monkeypatch, tmp_p
     other = tmp_path / "other"
     other.mkdir()
     source = other / "main.py"
-    source.write_text("value = 1\\n", encoding="utf-8")
+    source.write_text("value = 1\n", encoding="utf-8")
     command = {
         "type": "editor.code_actions",
         "schema_version": 1,
@@ -497,12 +497,12 @@ def test_run_stdio_rejects_code_actions_for_another_workspace(monkeypatch, tmp_p
         "payload": {
             "project_root": str(other),
             "file_path": str(source),
-            "source": "value = 1\\n",
+            "source": "value = 1\n",
             "line": 1,
             "column": 0,
         },
     }
-    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\\n"))
+    monkeypatch.setattr(studio_protocol.sys, "stdin", io.StringIO(json.dumps(command) + "\n"))
     output = io.StringIO()
     monkeypatch.setattr(studio_protocol.sys, "stdout", output)
 
