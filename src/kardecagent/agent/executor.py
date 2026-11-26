@@ -343,6 +343,49 @@ class AgentExecutor:
             raise ValueError("patch contains no file paths")
         return paths
 
+    @staticmethod
+    def _bound_messages(messages: list[dict], state: TaskState, tracker: PlanTracker) -> list[dict]:
+        """Keep the initial task contract and recent turns while summarizing older tool evidence."""
+        max_messages = 26
+        recent_messages = 18
+        if len(messages) <= max_messages:
+            return messages
+
+        omitted_count = len(messages) - 2 - recent_messages
+        evidence_lines = []
+        for event in reversed(state.events):
+            if event.event_type not in {"tool_result", "tool_error", "verification_failed", "plan_step_completed"}:
+                continue
+            data = event.data or {}
+            if event.event_type == "tool_result":
+                detail = str(data.get("result", ""))
+            elif event.event_type == "tool_error":
+                detail = str(data.get("error", ""))
+            elif event.event_type == "verification_failed":
+                detail = json.dumps(data.get("verification", {}), ensure_ascii=False)
+            else:
+                detail = str(data.get("evidence", ""))
+            detail = " ".join(detail.split())
+            if len(detail) > 900:
+                detail = detail[:900] + "…"
+            evidence_lines.append(f"- {event.event_type} ({data.get('tool', 'agent')}): {detail}")
+            if len(evidence_lines) == 10:
+                break
+        evidence_lines.reverse()
+        summary = {
+            "notice": "Earlier conversation turns were compacted to keep the working context bounded.",
+            "omitted_message_count": omitted_count,
+            "approved_plan_progress": tracker.as_dict(),
+            "recent_evidence": evidence_lines,
+            "instruction": "Continue the approved plan. Re-read project files when exact older contents are needed; do not assume omitted details.",
+        }
+        summary_text = json.dumps(summary, ensure_ascii=False)
+        if len(summary_text) > 10000:
+            summary_text = summary_text[:10000] + "…"
+        return messages[:2] + [
+            {"role": "user", "content": summary_text}
+        ] + messages[-recent_messages:]
+
     def execute(
         self, root: Path, task: str, plan: ExecutionPlan, state: TaskState,
         *, context: dict | None = None, allowed_scope: tuple[str, ...] | None = None,
@@ -398,6 +441,7 @@ class AgentExecutor:
             state.record("iteration_started", f"Starting iteration {iteration}.")
             if persistence_callback is not None:
                 persistence_callback(state, plan)
+            messages = self._bound_messages(messages, state, tracker)
             response = self.llm.chat(messages)
             state.record("model_response", response.content)
             try:
