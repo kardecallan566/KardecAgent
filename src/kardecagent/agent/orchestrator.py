@@ -214,8 +214,12 @@ class Orchestrator:
 
             def run_one(subtask: Subtask) -> SubtaskExecutionResult:
                 try:
-                    if subtask.id == resume_subtask_id:
-                        return executor(subtask, resume_step)
+                    requested_step = (
+                        resume_step if subtask.id == resume_subtask_id
+                        else max(1, int(subtask.current_step))
+                    )
+                    if requested_step > 1:
+                        return executor(subtask, requested_step)
                     return executor(subtask)
                 except Exception as exc:
                     return SubtaskExecutionResult(
@@ -319,6 +323,9 @@ class Orchestrator:
                 nonlocal propagated_model_events
                 if parent_state is not None:
                     with self._progress_lock:
+                        subtask.current_step = max(
+                            1, min(int(current_state.active_plan_step), max(1, len(subtask.plan_steps)))
+                        )
                         for event in current_state.events[propagated_model_events:]:
                             if event.event_type in {
                                 "model_switch_approved", "model_switch_rejected",
