@@ -326,9 +326,9 @@ function App() {
   const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
   const [activeRuntimeStep, setActiveRuntimeStep] = useState<number | null>(null);
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string } | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<{ approvalId: string; kind: "plan" | "high_risk" | "model_switch"; summary: string; risk: string } | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
-  const [approvalHistory, setApprovalHistory] = useState<Array<{ approvalId: string; kind: "plan" | "high_risk"; summary: string; risk: string; status: string }>>([]);
+  const [approvalHistory, setApprovalHistory] = useState<Array<{ approvalId: string; kind: "plan" | "high_risk" | "model_switch"; summary: string; risk: string; status: string }>>([]);
   const seenEventIds = useRef(new Set<string>());
   const approvalCommandId = useRef<string | null>(null);
   const runtimeListenersReady = useRef<Promise<void>>(Promise.resolve());
@@ -580,7 +580,7 @@ function App() {
         const approval = { approvalId: message.payload.approval_id, kind: message.payload.kind, summary: message.payload.summary, risk: message.payload.risk };
         setPendingApproval(approval);
         setApprovalHistory(items => [...items.filter(item => item.approvalId !== approval.approvalId), { ...approval, status: "Pendente" }].slice(-30));
-        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: "Plano aguardando sua aprovação." }].slice(-100));
+        setRuntimeEvents(items => [...items, { id: message.event_id, type: message.type, message: approval.kind === "model_switch" ? "Troca de modelo aguardando sua aprovação." : "Plano aguardando sua aprovação." }].slice(-100));
       } else if (message.type === "core.event") {
         const coreType = message.payload?.event_type || "core.event";
         const eventData = message.payload?.data || {};
@@ -1752,7 +1752,7 @@ function App() {
             </div>
           ) : activeNav === "tasks" ? (
             <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => { const removable = !["Em execução", "Validando", "Retomando", "Recebida", "Aguardando aprovação", "Decisão enviada"].includes(task.status); return <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div>{removable && <button className="task-remove-button" title="Remover do histórico (não apaga arquivos)" aria-label={"Remover tarefa " + task.title + " do histórico"} onClick={() => void removeTask(task)}><X size={13}/></button>}</div>; }) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
-          ) : activeNav === "approvals" ? (<>{pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>Solicitações do gestor aparecerão aqui.</small></div> : null}</>) :
+          ) : activeNav === "approvals" ? (<>{pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : pendingApproval.kind === "model_switch" ? "Troca de modelo aguardando sua decisão" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : item.kind === "model_switch" ? "Troca de modelo" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>Solicitações do gestor aparecerão aqui.</small></div> : null}</>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>}
 
@@ -1944,10 +1944,10 @@ function App() {
               })()}
             </div>}
             {pendingApproval ? <div className="approval-prompt">
-              <div className="approval-prompt-head"><ShieldCheck size={18}/><strong>{pendingApproval.kind === "high_risk" ? "Aprovação adicional de alto risco" : "Aprovar plano de execução"}</strong></div>
+              <div className="approval-prompt-head"><ShieldCheck size={18}/><strong>{pendingApproval.kind === "high_risk" ? "Aprovação adicional de alto risco" : pendingApproval.kind === "model_switch" ? "Autorizar troca de modelo" : "Aprovar plano de execução"}</strong></div>
               <span className="approval-risk">RISCO: {pendingApproval.risk.toUpperCase()}</span>
               <pre>{pendingApproval.summary}</pre>
-              <div className="approval-actions"><button onClick={() => respondToApproval("reject")} className="approval-reject" disabled={approvalSubmitting}>Rejeitar</button><button onClick={() => respondToApproval("approve")} className="approval-accept" disabled={approvalSubmitting}>{approvalSubmitting ? "Enviando..." : "Aprovar execução"}</button></div>
+              <div className="approval-actions"><button onClick={() => respondToApproval("reject")} className="approval-reject" disabled={approvalSubmitting}>Rejeitar</button><button onClick={() => respondToApproval("approve")} className="approval-accept" disabled={approvalSubmitting}>{approvalSubmitting ? "Enviando..." : pendingApproval.kind === "model_switch" ? "Aprovar troca" : "Aprovar execução"}</button></div>
             </div> : chatMessages.length === 0 ? <div className="agent-empty"><div className="agent-orb"><Bot size={24}/></div><strong>Pronto para trabalhar</strong><p>Abra um projeto e descreva o que deseja construir. O KardecAgent planeja, executa e valida com você no controle.</p></div> : null}
             <div className="agent-composer">
               <label htmlFor="manager-instruction">Instrução para o gestor</label>
