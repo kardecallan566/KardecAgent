@@ -535,3 +535,31 @@ def test_executor_escalates_after_repeated_invalid_tool_protocol_with_approval(t
     assert approvals[0].target_model == "strong-coder"
     assert any(event.event_type == "model_switch_approved" for event in result.events)
     assert any(event.event_type == "model_escalated" for event in result.events)
+
+
+
+def test_subtask_defers_global_verification_until_parent_integration(tmp_path: Path):
+    llm = FakeLLM([
+        '{"tool":"complete_step","arguments":{"step":1,"evidence":"component implemented"},"plan_step":1}',
+        '{"tool":"finish","arguments":{"reason":"component ready","criteria_evidence":[{"criterion":"component exists","evidence":"component implementation is present"}]}}',
+    ])
+    loop = AgentLoop(llm, Settings(max_iterations=3))
+    plan = ExecutionPlan(
+        "Implement component",
+        ["Implement component"],
+        ["Run full project tests"],
+        [],
+        ["component exists"],
+    )
+
+    result = loop.execute_approved_plan(
+        tmp_path,
+        "implement component",
+        plan,
+        make_state(tmp_path),
+        context={"subtask": {"id": "component"}},
+    )
+
+    assert result.status is TaskStatus.COMPLETED
+    assert any(event.event_type == "verification_deferred" for event in result.events)
+    assert not any(event.event_type == "verification" for event in result.events)
