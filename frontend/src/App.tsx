@@ -224,6 +224,8 @@ function App() {
   const [fileSearchError, setFileSearchError] = useState<string | null>(null);
 
   const [openedPath, setOpenedPath] = useState<string | null>(null);
+  const openedPathRef = useRef<string | null>(null);
+  openedPathRef.current = openedPath;
   const [fileContent, setFileContent] = useState<string>("");
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const completionRange = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
@@ -416,7 +418,7 @@ function App() {
         if (!request || request.commandId !== commandId) return;
         codeActionRequest.current = null;
         setCodeActionsBusy(false);
-        if (openedPath !== request.path || editorRef.current?.value !== request.source) {
+        if (openedPathRef.current !== request.path || editorRef.current?.value !== request.source) {
           setSemanticNotice("O arquivo mudou durante a análise. Solicite as ações rápidas novamente.");
           return;
         }
