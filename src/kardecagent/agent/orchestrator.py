@@ -309,9 +309,24 @@ class Orchestrator:
                 project_root=str(project_root.resolve()),
             )
             state.transition(TaskStatus.RUNNING, reason="Subtask execution initialized.")
+            propagated_model_events = 0
+
             def persist_subtask_progress(current_state, current_plan):
+                nonlocal propagated_model_events
                 if parent_state is not None:
                     with self._progress_lock:
+                        for event in current_state.events[propagated_model_events:]:
+                            if event.event_type in {
+                                "model_switch_approved", "model_switch_rejected",
+                                "model_escalated", "model_escalation_unavailable",
+                            }:
+                                parent_state.record(
+                                    "subtask_" + event.event_type,
+                                    event.message,
+                                    subtask_id=subtask.id,
+                                    **event.data,
+                                )
+                        propagated_model_events = len(current_state.events)
                         parent_state.record(
                             "subtask_progress",
                             "Logical subtask execution cursor persisted.",
