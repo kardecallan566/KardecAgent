@@ -454,3 +454,30 @@ def test_create_directory_reports_existing_directory_as_noop(tmp_path: Path):
     payload = json.loads(result)
     assert payload["created"] is False
     assert payload["changed"] is False
+
+
+
+def test_executor_advances_only_after_explicit_step_completion(tmp_path: Path):
+    llm = FakeLLM([
+        '{"tool":"list_files","arguments":{"path":"."}}',
+        '{"tool":"complete_step","arguments":{"step":1,"evidence":"Directory listing inspected; teste.py is absent."},"plan_step":1}',
+        '{"tool":"write_file","arguments":{"path":"teste.py","content":""},"plan_step":2}',
+        '{"tool":"complete_step","arguments":{"step":2,"evidence":"Created teste.py and verified it exists."},"plan_step":2}',
+        '{"tool":"append_file","arguments":{"path":"teste.py","content":"for i in range(11):\\n    print(i)\\n"},"plan_step":3}',
+        '{"tool":"complete_step","arguments":{"step":3,"evidence":"Read back the file and confirmed the loop prints values 0 through 10."},"plan_step":3}',
+        '{"tool":"finish","arguments":{"reason":"Counter file created and verified.","criteria_evidence":[{"criterion":"teste.py contains a counter from 0 to 10","evidence":"Read-back confirms range(11) and print(i)."}]}}',
+    ])
+    loop = AgentLoop(llm, Settings(max_iterations=10))
+    plan = ExecutionPlan(
+        "Create a counter",
+        ["Inspect whether teste.py exists", "Create teste.py if missing", "Write a counter from 0 to 10"],
+        ["Read back teste.py"],
+        [],
+        ["teste.py contains a counter from 0 to 10"],
+    )
+
+    result = loop.execute_approved_plan(tmp_path, "create counter", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.COMPLETED
+    assert (tmp_path / "teste.py").read_text(encoding="utf-8") == "for i in range(11):\\n    print(i)\\n"
+    assert [event.data["step"] for event in result.events if event.event_type == "plan_step_completed"] == [1, 2, 3]
