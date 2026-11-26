@@ -904,10 +904,15 @@ class AgentExecutor:
             except Exception as exc:
                 state.record("tool_error", f"{action.tool} failed: {exc}",
                              tool=action.tool, error=str(exc))
+                if register_no_progress("tool execution failed", tool=action.tool):
+                    return stop_stalled_execution("The model repeatedly selected actions that failed.",
+                        tool=action.tool, requested_step=action.plan_step)
                 messages += [{"role": "assistant", "content": response.content},
                              {"role": "user", "content": json.dumps({
                                  "tool": action.tool, "error": str(exc),
-                                 "instruction": "Diagnose the error and choose a safe correction.",
+                                 "active_plan_step": tracker.current_step,
+                                 "active_plan_step_description": plan.steps[tracker.current_step - 1],
+                                 "instruction": "Diagnose the error, choose a safe correction for the active step, and do not repeat an unchanged failed action.",
                              }, ensure_ascii=False)}]
 
         state.transition(TaskStatus.MAX_ITERATIONS, reason="Maximum execution iterations reached.")
