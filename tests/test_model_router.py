@@ -138,6 +138,7 @@ def test_fast_model_is_not_retried_for_every_request_after_failure():
     primary = FakeClient("qwen-coder:9b", content="primary response")
     fast = FakeClient("qwen-fast:1b", error=RuntimeError("model not loaded"))
     client = AdaptiveLLMClient(primary, fast)
+    client.set_approval_callback(lambda request: True)
     messages = [{"role": "user", "content": "quanto é 5+3?"}]
 
     first = client.chat(messages)
