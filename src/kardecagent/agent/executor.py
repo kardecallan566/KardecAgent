@@ -222,6 +222,8 @@ class AgentExecutor:
             r"\bgit\s+(?:-C\s+[^\s]+\s+)?reset\s+--hard\b",
             r"\bgit\s+(?:-C\s+[^\s]+\s+)?clean\b[^\n]*(?:-[^\s]*[fd]|--force)",
             r"\bgit\s+(?:-C\s+[^\s]+\s+)?branch\s+-D\b",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?checkout\s+--\b",
+            r"\bgit\s+(?:-C\s+[^\s]+\s+)?restore\b",
         )
         return any(re.search(pattern, command, re.IGNORECASE) for pattern in patterns)
 
