@@ -154,7 +154,7 @@ def _build_llm(settings: Settings):
         primary_size = by_name[primary_name].get("size")
 
         base = primary
-        fast_name = settings.llm_fast_model.strip()
+        fast_name = settings.llm_fast_model.strip() if settings.llm_routing_enabled else ""
         if fast_name not in by_name:
             fast_name = ""
         if settings.llm_routing_enabled and not fast_name:
