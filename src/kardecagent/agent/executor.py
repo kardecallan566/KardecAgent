@@ -527,33 +527,6 @@ class AgentExecutor:
             last_invalid_signature = None
             repeated_invalid_count = 0
 
-            if action.tool in GIT_MUTATING_TOOLS:
-                approval_plan = ExecutionPlan(
-                    summary=f"Autorização Git necessária: {action.tool}",
-                    steps=[f"Executar {action.tool} com os argumentos informados: {json.dumps(action.arguments, ensure_ascii=False, sort_keys=True)}"],
-                    validation=["Verificar o código de saída e o resultado retornado pelo Git."],
-                    risks=["Esta operação altera referências, histórico local ou remoto do repositório."],
-                    completion_criteria=["A operação Git autorizada foi executada e seu resultado foi verificado."],
-                    security_level="high_risk",
-                    security_requirements=[
-                        "Aprovação explícita do usuário para esta operação Git específica.",
-                        "Não executar push forçado nem sobrescrever alterações locais.",
-                        "Registrar o resultado da operação no journal.",
-                    ],
-                )
-                state.record("git_approval_requested",
-                             "Git mutation is paused until explicit user approval.",
-                             tool=action.tool, arguments=action.arguments)
-                if high_risk_approval_callback is None or not high_risk_approval_callback(approval_plan):
-                    state.record("git_approval_denied", "Git operation was not authorized.",
-                                 tool=action.tool)
-                    messages += [{"role": "assistant", "content": response.content},
-                                 {"role": "user", "content":
-                                  "A operação Git foi recusada ou não recebeu autorização explícita. Não tente contornar a aprovação. Continue apenas com consultas ou explique o bloqueio."}]
-                    continue
-                state.record("git_approval_granted", "User explicitly authorized this Git operation.",
-                             tool=action.tool, arguments=action.arguments)
-
             if action.tool == "request_plan_change":
                 if not allow_plan_changes:
                     state.record("plan_change_blocked",
@@ -615,6 +588,39 @@ class AgentExecutor:
                     state.record("plan_step_started", f"Started plan step {action.plan_step}.",
                                  step=action.plan_step,
                                  description=plan.steps[action.plan_step - 1])
+
+            if action.tool in GIT_MUTATING_TOOLS:
+                approval_details = {
+                    key: action.arguments[key]
+                    for key in ("remote", "branch", "base", "number", "method", "title", "paths", "message", "draft", "set_upstream", "prune")
+                    if key in action.arguments
+                }
+                approval_summary = " · ".join(f"{key}={value}" for key, value in approval_details.items())
+                approval_plan = ExecutionPlan(
+                    summary=f"Autorização Git: {action.tool}" + (f" · {approval_summary}" if approval_summary else ""),
+                    steps=[f"Executar {action.tool} após autorização explícita do usuário."],
+                    validation=["Verificar o código de saída e o resultado retornado pelo Git."],
+                    risks=["Esta operação altera referências, histórico local ou remoto do repositório."],
+                    completion_criteria=["A operação Git autorizada foi executada e seu resultado foi verificado."],
+                    security_level="high_risk",
+                    security_requirements=[
+                        "Aprovação explícita do usuário para esta operação Git específica.",
+                        "Não executar push forçado nem sobrescrever alterações locais.",
+                        "Registrar o resultado da operação no journal.",
+                    ],
+                )
+                state.record("git_approval_requested",
+                             "Git mutation is paused until explicit user approval.",
+                             tool=action.tool, details=approval_details)
+                if high_risk_approval_callback is None or not high_risk_approval_callback(approval_plan):
+                    state.record("git_approval_denied", "Git operation was not authorized.",
+                                 tool=action.tool)
+                    messages += [{"role": "assistant", "content": response.content},
+                                 {"role": "user", "content":
+                                  "A operação Git foi recusada ou não recebeu autorização explícita. Não tente contornar a aprovação. Continue apenas com consultas ou explique o bloqueio."}]
+                    continue
+                state.record("git_approval_granted", "User explicitly authorized this Git operation.",
+                             tool=action.tool, details=approval_details)
 
             if action.tool == "complete_step":
                 step = action.arguments["step"]
