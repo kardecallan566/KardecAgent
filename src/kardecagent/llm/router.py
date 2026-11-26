@@ -195,13 +195,10 @@ class ModelRouter:
         fallback_reason = ""
         try:
             response = selected.chat(messages, temperature=temperature)
-        except Exception as exc:
-            if decision.tier != "fast":
-                raise
-            fallback_reason = f"fast model failed: {type(exc).__name__}"
-            logger.warning("Fast model %s failed; falling back to %s: %s", self.fast_model, self.primary_model, exc)
-            response = primary.chat(messages, temperature=temperature)
-            decision = RoutingDecision("primary", self.primary_model, fallback_reason)
+        except Exception:
+            # A route change is a user-visible decision. The adaptive client
+            # owns the approval gate and may retry on the primary model.
+            raise
 
         raw = dict(getattr(response, "raw", {}) or {})
         raw["_kardecagent_routing"] = {
@@ -226,21 +223,49 @@ class AdaptiveLLMClient:
         self.model = primary.model
         self.router = ModelRouter(primary.model, fast.model)
         self.fast_disabled_reason: str | None = None
+        self.approval_callback: Callable[[ModelSwitchRequest], bool] | None = None
+
+    def set_approval_callback(self, callback: Callable[[ModelSwitchRequest], bool] | None) -> None:
+        self.approval_callback = callback
 
     def chat(self, messages: list[dict[str, Any]], *, temperature: float = 0.2):
         decision = self.router.decide(messages)
-        if decision.tier == "fast" and self.fast_disabled_reason:
+        if decision.tier == "primary":
+            return self.primary.chat(messages, temperature=temperature)
+        if self.fast_disabled_reason:
+            return self.primary.chat(messages, temperature=temperature)
+        try:
+            response = self.fast.chat(messages, temperature=temperature)
+        except Exception as exc:
+            request = ModelSwitchRequest(
+                self.fast.model,
+                self.primary.model,
+                f"O modelo rápido falhou: {type(exc).__name__}: {exc}",
+                trigger="provider_error",
+            )
+            if self.approval_callback is None or not self.approval_callback(request):
+                raise RuntimeError("Model switch was not approved; the fast-model failure was not retried.") from exc
+            self.fast_disabled_reason = str(exc)
             response = self.primary.chat(messages, temperature=temperature)
             raw = dict(getattr(response, "raw", {}) or {})
             raw["_kardecagent_routing"] = {
                 "tier": "primary",
                 "model": self.primary.model,
-                "reason": "fast model disabled after an earlier failure: " + self.fast_disabled_reason,
+                "reason": request.reason,
                 "fallback": True,
             }
+            raw["_kardecagent_escalation"] = {
+                "from_model": self.fast.model,
+                "to_model": self.primary.model,
+                "reason": request.reason,
+                "trigger": "provider_error",
+            }
             return replace(response, raw=raw)
-        response = self.router.chat(self.primary, self.fast, messages, temperature=temperature)
-        route = getattr(response, "raw", {}).get("_kardecagent_routing", {})
-        if route.get("fallback"):
-            self.fast_disabled_reason = str(route.get("reason") or "fast model unavailable")
-        return response
+        raw = dict(getattr(response, "raw", {}) or {})
+        raw["_kardecagent_routing"] = {
+            "tier": "fast",
+            "model": self.fast.model,
+            "reason": decision.reason,
+            "fallback": False,
+        }
+        return replace(response, raw=raw)
