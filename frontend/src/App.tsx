@@ -740,6 +740,10 @@ function App() {
 
   useEffect(() => {
     setToolEditorDiagnostics([]);
+    setCodeActions([]);
+    setCodeActionsBusy(false);
+    codeActionSource.current = null;
+    codeActionRequest.current = null;
     setEditorCompletions([]);
     setActiveCompletionIndex(0);
     setSemanticNotice(null);
