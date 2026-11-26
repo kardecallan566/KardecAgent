@@ -209,9 +209,9 @@ class AgentExecutor:
     @staticmethod
     def _contains_git_mutation_command(command: str) -> bool:
         pattern = (
-            r"\bgit\s+(?:-C\s+[^\s]+\s+)?"
+            r"\bgit(?:['\",\s]+)(?:-C\s+[^\s]+\s+)?"
             r"(?:add|commit|push|pull|fetch|checkout|switch|branch|merge|reset|rebase|cherry-pick|revert|tag|remote|worktree|update-ref|stash|clean|config|submodule|clone|restore|apply)\b"
-            r"|\bgh\s+pr\s+(?:create|merge|close|edit|ready|review)\b"
+            r"|\bgh(?:['\",\s]+)pr(?:['\",\s]+)(?:create|merge|close|edit|ready|review)\b"
         )
         return re.search(pattern, command) is not None
 
