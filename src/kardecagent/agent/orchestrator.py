@@ -349,6 +349,7 @@ class Orchestrator:
                                 else subtask.plan_steps[-1]
                             ),
                             status=current_state.status.value,
+                            board=board.as_dict(),
                         )
                         if progress_callback is not None:
                             progress_callback(board)
