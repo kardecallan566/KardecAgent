@@ -24,6 +24,31 @@ type TerminalDiagnostics = { running: boolean; pid: number | null; last_exit_cod
 type GitFileChange = { path: string; status: string; staged: boolean; unstaged: boolean; untracked: boolean };
 type GitStatus = { is_repo: boolean; branch: string; ahead: number; behind: number; files: GitFileChange[]; truncated: boolean };
 type GitDiff = { staged: string; working: string };
+type RuntimeEventItem = { id: string; type: string; message: string; timestamp?: string; data?: Record<string, unknown> };
+
+function runtimeEventDetails(data?: Record<string, unknown>): string[] {
+  if (!data) return [];
+  const visibleKeys = ["tool", "path", "changed_files", "changed_paths", "command", "kind", "step", "description", "evidence", "error", "returncode", "approved", "branch", "subtask_id", "resume_step", "from_status", "to_status", "summary", "reason", "iterations", "plan_steps", "scope", "result"];
+  const details: string[] = [];
+  for (const key of visibleKeys) {
+    const value = data[key];
+    if (value === undefined || value === null || value === "") continue;
+    if (key === "result") {
+      try {
+        const parsed = typeof value === "string" ? JSON.parse(value) : value;
+        if (parsed && typeof parsed === "object") {
+          const result = parsed as Record<string, unknown>;
+          const safe = ["command", "returncode", "path", "changed_files", "changed_paths", "scope_verified", "method", "replacements"];
+          for (const field of safe) if (result[field] !== undefined) details.push(field + ": " + JSON.stringify(result[field]));
+        } else details.push("resultado: " + String(value).slice(0, 240));
+      } catch { details.push("resultado: " + String(value).slice(0, 240)); }
+      continue;
+    }
+    const rendered = Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
+    details.push(key + ": " + rendered.slice(0, 360));
+  }
+  return details.slice(0, 12);
+}
 const DEFAULT_SETTINGS: StudioSettings = {
   ollamaUrl: "http://127.0.0.1:11434", model: "qwen2.5-coder:3b", fastModel: "", modelRoutingEnabled: false, timeout: 180, pythonPath: "", autoStartCore: true,
   editorFontSize: 13, editorFontFamily: "Shantell Sans", lineHeight: 1.6, tabSize: 2, wordWrap: false, showLineNumbers: true,
@@ -258,9 +283,9 @@ function App() {
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
-  const [runtimeEvents, setRuntimeEvents] = useState<Array<{ id: string; type: string; message: string }>>([]);
+  const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEventItem[]>([]);
   const [eventSearch, setEventSearch] = useState("");
-  const filteredEvents = runtimeEvents.filter(event => `${event.type} ${event.message}`.toLowerCase().includes(eventSearch.trim().toLowerCase()));
+  const filteredEvents = runtimeEvents.filter(event => (event.type + " " + event.message + " " + runtimeEventDetails(event.data).join(" ")).toLowerCase().includes(eventSearch.trim().toLowerCase()));
   const liveEditorDiagnostics = openedPath ? getLiveEditorDiagnostics(fileContent, openedPath.split(".").pop() || "", openedPath) : [];
   const editorDiagnostics = [...liveEditorDiagnostics, ...toolEditorDiagnostics];
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string; recoverable?: boolean }>>([]);
@@ -569,7 +594,10 @@ function App() {
           setActiveRuntimeSubtask(null);
           setActiveRuntimeStep(null);
         }
-        setRuntimeEvents(items => [...items, { id: message.event_id, type: coreType, message: message.payload.message }].slice(-100));
+        setRuntimeEvents(items => [...items, {
+          id: message.event_id, type: coreType, message: message.payload.message,
+          timestamp: message.timestamp || new Date().toISOString(), data: eventData
+        }].slice(-250));
       } else if (message.type === "task.deleted") {
         setRuntimeTasks(items => items.filter(task => task.id !== message.task_id));
         setRuntimeEvents(items => [...items, { id: message.event_id || crypto.randomUUID(), type: message.type, message: "Tarefa removida do histórico." }].slice(-100));
@@ -1762,7 +1790,12 @@ function App() {
               </section>
               <section className="process-events">
                 <div className="process-section-title"><strong>Eventos recentes</strong><span>{filteredEvents.length} correspondentes</span></div><input className="event-search" aria-label="Filtrar eventos" placeholder="Filtrar por tipo ou mensagem..." value={eventSearch} onChange={event => setEventSearch(event.target.value)} />
-                {runtimeEvents.length ? filteredEvents.slice().reverse().slice(0, 12).map(event => <div className="process-event" key={event.id}><span className="event-marker info"/><time>Studio</time><strong>{event.type}</strong><span>{event.message}</span></div>) : <p className="manager-no-events">Nenhum evento recebido. Inicie uma tarefa pela área Agent.</p>}
+                {runtimeEvents.length ? filteredEvents.slice().reverse().slice(0, 40).map(event => <div className="process-event process-event-detailed" key={event.id}>
+                  <span className="event-marker info"/>
+                  <time>{event.timestamp ? new Date(event.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</time>
+                  <strong>{event.type}</strong><span>{event.message}</span>
+                  {runtimeEventDetails(event.data).length > 0 && <details className="process-event-details"><summary>Ver detalhes da ação</summary><ul>{runtimeEventDetails(event.data).map((detail, index) => <li key={index}>{detail}</li>)}</ul></details>}
+                </div>) : <p className="manager-no-events">Nenhum evento recebido. Inicie uma tarefa pela área Agent.</p>}
               </section>
             </div>
           ) : (
