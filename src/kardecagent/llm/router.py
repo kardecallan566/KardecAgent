@@ -83,15 +83,24 @@ class EscalatingLLMClient:
             if self.alternatives_provider is not None:
                 try:
                     discovered = self.alternatives_provider()
-                    known = {
+                    active_clients = self.clients[: self.active_index + 1]
+                    active_names = {
                         str(getattr(client, "model", "unknown"))
-                        for client in self.clients
+                        for client in active_clients
                     }
+                    reusable = {
+                        str(getattr(client, "model", "unknown")): client
+                        for client in self.clients[self.active_index + 1 :]
+                    }
+                    refreshed = []
                     for candidate in discovered:
                         candidate_name = str(getattr(candidate, "model", "unknown"))
-                        if candidate_name not in known:
-                            self.clients.append(candidate)
-                            known.add(candidate_name)
+                        if candidate_name in active_names:
+                            continue
+                        refreshed.append(reusable.get(candidate_name, candidate))
+                    # Prune models removed from Ollama and apply the latest
+                    # inventory ordering without changing the already active model.
+                    self.clients = [*active_clients, *refreshed]
                 except Exception:
                     logger.exception("Could not refresh Ollama model inventory before escalation")
             if self.active_index + 1 >= len(self.clients):
