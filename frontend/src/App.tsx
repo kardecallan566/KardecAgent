@@ -299,14 +299,14 @@ function App() {
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeEventItem[]>([]);
   const [eventSearch, setEventSearch] = useState("");
   const filteredEvents = runtimeEvents.filter(event => (event.type + " " + event.message + " " + runtimeEventDetails(event.data).join(" ")).toLowerCase().includes(eventSearch.trim().toLowerCase()));
-  const runtimeCompletedSteps = runtimePlanSteps.filter(step => step.status === "completed").length;
-  const runtimeProgressPercent = runtimePlanSteps.length ? Math.round(runtimeCompletedSteps / runtimePlanSteps.length * 100) : 0;
-  const runtimeNextSteps = runtimePlanSteps.filter(step => step.status === "pending").slice(0, 3);
   const liveEditorDiagnostics = openedPath ? getLiveEditorDiagnostics(fileContent, openedPath.split(".").pop() || "", openedPath) : [];
   const editorDiagnostics = [...liveEditorDiagnostics, ...toolEditorDiagnostics];
   const [runtimeTasks, setRuntimeTasks] = useState<Array<{ id: string; executionId: string; title: string; status: string; recoverable?: boolean }>>([]);
   const [runtimeSubtasks, setRuntimeSubtasks] = useState<RuntimeSubtask[]>([]);
   const [runtimePlanSteps, setRuntimePlanSteps] = useState<RuntimePlanStep[]>([]);
+  const runtimeCompletedSteps = runtimePlanSteps.filter(step => step.status === "completed").length;
+  const runtimeProgressPercent = runtimePlanSteps.length ? Math.round(runtimeCompletedSteps / runtimePlanSteps.length * 100) : 0;
+  const runtimeNextSteps = runtimePlanSteps.filter(step => step.status === "pending").slice(0, 3);
   const [activeRuntimeSubtask, setActiveRuntimeSubtask] = useState<string | null>(null);
   const [activeRuntimeStep, setActiveRuntimeStep] = useState<number | null>(null);
   const [runtimeLimits, setRuntimeLimits] = useState<RuntimeLimits | null>(null);
