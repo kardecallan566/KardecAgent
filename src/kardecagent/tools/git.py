@@ -145,7 +145,7 @@ def git_branch_list(root: Path) -> GitResult:
 
 
 def git_remote_list(root: Path) -> GitResult:
-    return _git(root, ["remote", "-v"])
+    return _git(root, ["remote"])
 
 
 def git_fetch(root: Path, remote: str = "origin", *, prune: bool = False) -> GitResult:
@@ -198,7 +198,7 @@ def git_commit(root: Path, message: str, paths: list[str]) -> GitResult:
     normalized = [str(path).strip() for path in paths if str(path).strip()]
     if not normalized:
         raise ValueError("Select at least one path to stage; implicit git add -A is not allowed.")
-    if any(Path(path).is_absolute() or ".." in Path(path).parts for path in normalized):
+    if any(Path(path).is_absolute() or ".." in Path(path).parts or Path(path) == Path(".") for path in normalized):
         raise ValueError("Commit paths must stay inside the workspace.")
     staged_before = _git(root, ["diff", "--cached", "--name-only"])
     if staged_before.returncode != 0:
