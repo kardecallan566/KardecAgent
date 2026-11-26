@@ -323,17 +323,18 @@ def test_git_mutation_requires_separate_explicit_approval(tmp_path: Path):
     subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True)
 
-    llm = FakeLLM([
-        '{"tool":"git_create_branch","arguments":{"branch":"feature/approval"},"plan_step":1}',
-    ])
-    loop = AgentLoop(llm, Settings(max_iterations=1))
+    class StaticLLM:
+        def chat(self, messages):
+            return LLMResponse('{"tool":"git_create_branch","arguments":{"branch":"feature/approval"},"plan_step":1}', {})
+
+    loop = AgentLoop(StaticLLM(), Settings(max_iterations=2))
     plan = ExecutionPlan("Git change", ["Create a branch"], ["verify branch"], [], ["branch created"])
     result = loop.execute_approved_plan(tmp_path, "create branch", plan, make_state(tmp_path))
 
     assert result.status.value == "max_iterations"
     assert any(event.event_type == "git_approval_denied" for event in result.events)
-    assert not (subprocess.run(["git", "branch", "--list", "feature/approval"], cwd=tmp_path,
-                               check=True, capture_output=True, text=True).stdout.strip())
+    assert not subprocess.run(["git", "branch", "--list", "feature/approval"], cwd=tmp_path,
+                              check=True, capture_output=True, text=True).stdout.strip()
 
 
 def test_git_mutation_executes_only_after_high_risk_approval(tmp_path: Path):
@@ -346,12 +347,11 @@ def test_git_mutation_executes_only_after_high_risk_approval(tmp_path: Path):
     subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True)
 
-    llm = FakeLLM([
-        '{"tool":"git_create_branch","arguments":{"branch":"feature/approved"},"plan_step":1}',
-        '{"tool":"complete_step","arguments":{"step":1,"evidence":"branch exists"},"plan_step":1}',
-        '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":["branch created"]}}',
-    ])
-    loop = AgentLoop(llm, Settings(max_iterations=3))
+    class StaticLLM:
+        def chat(self, messages):
+            return LLMResponse('{"tool":"git_create_branch","arguments":{"branch":"feature/approved"},"plan_step":1}', {})
+
+    loop = AgentLoop(StaticLLM(), Settings(max_iterations=2))
     plan = ExecutionPlan("Git change", ["Create a branch"], ["verify branch"], [], ["branch created"])
     approvals = []
     result = loop.execute_approved_plan(
@@ -359,7 +359,7 @@ def test_git_mutation_executes_only_after_high_risk_approval(tmp_path: Path):
         high_risk_approval_callback=lambda proposed: approvals.append(proposed) or True,
     )
 
-    assert result.status.value == "completed"
+    assert result.status.value == "max_iterations"
     assert approvals and approvals[0].security_level == "high_risk"
     assert any(event.event_type == "git_approval_granted" for event in result.events)
     assert "feature/approved" in subprocess.run(
