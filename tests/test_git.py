@@ -121,5 +121,6 @@ def test_git_branch_name_is_validated(tmp_path: Path):
     from kardecagent.tools.git import git_create_branch
 
     _init_repo(tmp_path)
-    result = git_create_branch(tmp_path, "--delete-all")
-    assert result.returncode != 0
+    import pytest
+    with pytest.raises(ValueError, match="invalid"):
+        git_create_branch(tmp_path, "--delete-all")
