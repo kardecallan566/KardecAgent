@@ -60,7 +60,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "..[studio]" pyinstaller
           python -m PyInstaller --noconfirm --clean --onefile --name kardecagent-core --paths ../src --collect-all kardecagent --collect-all httpx --collect-all jedi --collect-all parso --collect-all ruff --copy-metadata kardecagent --copy-metadata jedi --copy-metadata parso --copy-metadata ruff --distpath src-tauri/core-dist --workpath ../.pyinstaller-work --specpath ../.pyinstaller-spec ../scripts/studio_core_entry.py
-          python -m PyInstaller --noconfirm --clean --onefile --name ruff --collect-all ruff --distpath src-tauri/core-dist --workpath ../.pyinstaller-ruff-work --specpath ../.pyinstaller-ruff-spec ../scripts/ruff_entry.py
+          $pythonScripts = (python -c "import sysconfig; print(sysconfig.get_path('scripts'))").Trim()
+          $ruffSource = Join-Path $pythonScripts "ruff.exe"
+          if (!(Test-Path $ruffSource)) { throw "Native Ruff executable not found: $ruffSource" }
+          Copy-Item $ruffSource "src-tauri/core-dist/ruff.exe" -Force
           & "src-tauri/core-dist/ruff.exe" --version
           python ../scripts/smoke_studio_core.py src-tauri/core-dist/kardecagent-core.exe
 

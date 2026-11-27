@@ -13,6 +13,8 @@ from .llm.catalog import LOCAL_MODEL_CATALOG
 from .project import detect_project
 from .agent.persistence import TaskStore, PersistenceError
 
+logger = logging.getLogger(__name__)
+
 
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -112,6 +114,130 @@ def _build_llm(settings: Settings):
             )
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
+    if settings.llm_provider == "ollama":
+        # Ollama is the source of truth: never require users to maintain a
+        # second, manually curated escalation list.
+        primary = build_client(settings.llm_model)
+        try:
+            inventory = primary.list_models()
+        except Exception as exc:
+            # Core/Studio startup must not depend on Ollama being online.
+            # Model discovery is retried when an escalation inventory is needed.
+            logger.warning(
+                "Ollama model discovery unavailable at %s; starting with configured model %r: %s",
+                settings.ollama_base_url,
+                settings.llm_model,
+                exc,
+            )
+            inventory = []
+        installed = [
+            item for item in inventory
+            if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"].strip()
+        ]
+
+        by_name = {item["name"]: item for item in installed}
+        configured = settings.llm_model.strip()
+        if configured and configured in by_name:
+            primary_name = configured
+        elif installed:
+            def primary_key(item):
+                name = item["name"].casefold()
+                coding_hint = any(
+                    marker in name
+                    for marker in ("coder", "code", "deepseek", "qwen", "starcoder", "codegemma")
+                )
+                size = item.get("size")
+                size_key = float(size) if isinstance(size, (int, float)) else float("inf")
+                return (0 if coding_hint else 1, size_key, name)
+
+            primary_name = min(installed, key=primary_key)["name"]
+            logger.info(
+                "Configured Ollama model %r is unavailable; auto-selected installed model %r",
+                configured or None,
+                primary_name,
+            )
+        else:
+            # Keep the configured model as a deferred target. The first actual
+            # inference reports the provider error, while Studio can complete
+            # its JSONL handshake and remain usable for diagnostics/settings.
+            primary_name = configured or settings.llm_model
+        primary.model = primary_name
+        primary_size = by_name.get(primary_name, {}).get("size")
+
+        base = primary
+        fast_name = settings.llm_fast_model.strip() if settings.llm_routing_enabled else ""
+        if fast_name not in by_name:
+            fast_name = ""
+        if settings.llm_routing_enabled and not fast_name:
+            smaller = [
+                item for item in installed
+                if item["name"] != primary_name
+                and isinstance(item.get("size"), (int, float))
+                and isinstance(primary_size, (int, float))
+                and item["size"] < primary_size
+            ]
+            if smaller:
+                fast_name = min(smaller, key=lambda item: (item["size"], item["name"]))["name"]
+        if settings.llm_routing_enabled and fast_name and fast_name != primary_name:
+            base = AdaptiveLLMClient(primary, build_client(fast_name))
+
+        alternatives = []
+        for item in sorted(
+            installed,
+            key=lambda candidate: (
+                candidate.get("size") if isinstance(candidate.get("size"), (int, float)) else float("inf"),
+                candidate["name"],
+            ),
+        ):
+            name = item["name"]
+            if name in {primary_name, fast_name}:
+                continue
+            size = item.get("size")
+            # Escalation must not silently downgrade. When Ollama does not
+            # report sizes, retain deterministic discovery order by name.
+            if isinstance(primary_size, (int, float)) and isinstance(size, (int, float)) and size <= primary_size:
+                continue
+            alternatives.append(build_client(name))
+
+        def refresh_alternatives():
+            try:
+                latest = primary.list_models()
+            except Exception as exc:
+                logger.warning("Could not refresh Ollama escalation inventory: %s", exc)
+                return []
+            discovered = [
+                item for item in latest
+                if isinstance(item, dict)
+                and isinstance(item.get("name"), str)
+                and item["name"].strip()
+            ]
+            refreshed = []
+            for item in sorted(
+                discovered,
+                key=lambda candidate: (
+                    candidate.get("size") if isinstance(candidate.get("size"), (int, float)) else float("inf"),
+                    candidate["name"],
+                ),
+            ):
+                name = item["name"]
+                if name in {primary_name, fast_name}:
+                    continue
+                size = item.get("size")
+                if (
+                    isinstance(primary_size, (int, float))
+                    and isinstance(size, (int, float))
+                    and size <= primary_size
+                ):
+                    continue
+                refreshed.append(build_client(name))
+            return refreshed
+
+        return (
+            EscalatingLLMClient(base, alternatives, alternatives_provider=refresh_alternatives)
+            if alternatives or settings.llm_provider == "ollama"
+            else base
+        )
+
     primary = build_client(settings.llm_model)
     base = primary
     if settings.llm_routing_enabled:
@@ -127,10 +253,7 @@ def _build_llm(settings: Settings):
         for model in settings.llm_escalation_models
         if model and model not in {settings.llm_model, settings.llm_fast_model}
     ]
-    if not alternatives:
-        return base
-    return EscalatingLLMClient(base, alternatives)
-
+    return EscalatingLLMClient(base, alternatives) if alternatives else base
 
 def _doctor(settings: Settings, root) -> int:
     profile = detect_project(root)
@@ -145,34 +268,22 @@ def _doctor(settings: Settings, root) -> int:
 
     try:
         if settings.llm_provider == "ollama":
-            client = OllamaClient(
+            inventory_client = OllamaClient(
                 settings.ollama_base_url,
                 settings.llm_model,
                 settings.llm_timeout_seconds,
             )
-            models = client.list_models()
-            names = {item.get("name") for item in models if isinstance(item, dict)}
-            if settings.llm_model not in names:
-                print(f"[FAIL] Ollama model not installed: {settings.llm_model}")
-                print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
-                return 1
-            if settings.llm_routing_enabled:
-                if not settings.llm_fast_model:
-                    print("[FAIL] Model routing enabled but no fast model is configured.")
-                    return 1
-                if settings.llm_fast_model not in names:
-                    print(f"[FAIL] Fast Ollama model not installed: {settings.llm_fast_model}")
-                    print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
-                    return 1
-                print(f"[OK] Adaptive routing: {settings.llm_fast_model} for simple requests; {settings.llm_model} for engineering work")
-            missing_escalation = [model for model in settings.llm_escalation_models if model not in names]
-            if missing_escalation:
-                print("[FAIL] Escalation models not installed: " + ", ".join(missing_escalation))
-                print("Installed models: " + ", ".join(sorted(str(name) for name in names if name)))
-                return 1
-            if settings.llm_escalation_models:
-                print("[OK] Consent-gated escalation models: " + ", ".join(settings.llm_escalation_models))
-            response = client.health_check()
+            models = inventory_client.list_models()
+            names = sorted({
+                str(item.get("name"))
+                for item in models
+                if isinstance(item, dict) and item.get("name")
+            })
+            client = _build_llm(settings)
+            print("[OK] Ollama installed models: " + (", ".join(names) if names else "(none)"))
+            print(f"[OK] Active primary model: {client.model}")
+            inventory_client.model = client.model
+            response = inventory_client.health_check()
         else:
             client = _build_llm(settings)
             response = client.chat(
@@ -193,45 +304,36 @@ def _doctor(settings: Settings, root) -> int:
         return 1
 
 
-
 def _ollama_health(settings: Settings) -> int:
-    """Emit exactly one JSON object for the Tauri health-check bridge."""
+    """Emit exactly one JSON object for the desktop Studio health-check bridge."""
     try:
         if settings.llm_provider != "ollama":
             raise RuntimeError("The Studio health check currently requires the Ollama provider.")
-        client = OllamaClient(
+        inventory_client = OllamaClient(
             settings.ollama_base_url,
             settings.llm_model,
             settings.llm_timeout_seconds,
         )
-        version = client.server_version()
-        models = client.list_models()
+        version = inventory_client.server_version()
+        models = inventory_client.list_models()
         names = sorted({
             str(item.get("name"))
             for item in models
             if isinstance(item, dict) and item.get("name")
         })
-        if settings.llm_model not in names:
-            raise RuntimeError(
-                f"Configured model '{settings.llm_model}' is not installed. "
-                "Installed models: " + (", ".join(names) if names else "(none)")
-            )
-        if settings.llm_routing_enabled:
-            if not settings.llm_fast_model:
-                raise RuntimeError("Model routing is enabled but KARDECAGENT_FAST_MODEL is empty.")
-            if settings.llm_fast_model not in names:
-                raise RuntimeError(
-                    f"Fast model '{settings.llm_fast_model}' is not installed. "
-                    "Installed models: " + (", ".join(names) if names else "(none)")
-                )
-        response = client.health_check()
+        client = _build_llm(settings)
+        inventory_client.model = client.model
+        response = inventory_client.health_check()
+        base_client = client.clients[0] if getattr(client, "clients", None) else client
+        fast_client = getattr(base_client, "fast", None)
+        selected_fast_model = getattr(fast_client, "model", None)
         if response.content.strip() != "KARDECAGENT_OK":
             raise RuntimeError("Ollama responded, but the health-check content was unexpected.")
         print(json.dumps({
             "version": version,
             "models": names,
-            "model": settings.llm_model,
-            "fast_model": settings.llm_fast_model or None,
+            "model": client.model,
+            "fast_model": selected_fast_model,
             "routing_enabled": settings.llm_routing_enabled,
             "response": response.content.strip(),
         }, ensure_ascii=True))
@@ -239,7 +341,6 @@ def _ollama_health(settings: Settings) -> int:
     except Exception as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=True))
         return 1
-
 
 def _benchmark(settings: Settings, models_arg: str | None, timeout: float, level: str = "agentic") -> int:
     overall: list[tuple[str, int, int, float, float]] = []

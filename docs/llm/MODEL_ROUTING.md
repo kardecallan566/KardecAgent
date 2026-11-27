@@ -90,24 +90,26 @@ This first milestone does not yet use benchmark scores, hardware headroom, model
 
 
 
-## Consent-gated escalation and parallel execution
+## Consent-gated escalation with automatic Ollama discovery
 
-The agent now supports an explicit escalation list and a bounded parallel-subtask scheduler:
+Ollama is the source of truth for the local model pool. Users do not need to maintain a list of escalation models:
 
-- `KARDECAGENT_ESCALATION_MODELS` is a comma-separated, ordered list of installed models to try after the configured primary model.
-- A model switch is never automatic. The Studio/CLI approval request identifies the current model, proposed model, trigger and reason. Rejecting the request leaves the active model unchanged and the task stops safely when it cannot proceed.
-- Escalation can be requested after repeated no-progress actions, repeated invalid tool protocol, repeated verification failures, or a provider failure. The approved plan, prior tool results and verification evidence remain in the conversation.
-- The selected model is journaled with `model_switch_approved` / `model_switch_rejected` and `model_escalated` events.
-- `KARDECAGENT_MAX_PARALLEL_SUBTASKS` controls concurrency (1–4, default 2). Only ready subtasks with disjoint project-relative scopes and distinct approved plan steps can run together. Dependencies, overlapping paths, and broad/empty scopes force sequential execution.
-- Subtasks persist independent execution cursors, so interrupted parallel workers can resume without overwriting each other's progress. Subtasks submit their own completion evidence, while project-wide tests/security/build verification is deferred until all subtasks are integrated; this avoids validating a deliberately incomplete intermediate workspace.
-- Parallel subtasks share the same configured model pool. In-flight model requests finish on the model they started with; an approved escalation affects subsequent requests. Tool execution and independent subtask work can overlap.
+- At client initialization, KardecAgent queries Ollama `/api/tags` and builds its candidate pool from models actually installed on the configured Ollama server.
+- If the configured primary model is installed, it remains the primary. If it is missing, KardecAgent chooses an installed coding-oriented model where possible, preferring the smallest available candidate as a conservative starting point.
+- Installed alternatives larger than the active primary are ordered by on-disk size and are eligible for escalation. This is a resource-size heuristic, not a claim that parameter count proves quality; benchmark evidence should refine ranking later.
+- If adaptive fast routing is enabled but no valid fast model is configured, the smallest installed model below the primary is selected automatically.
+- A model switch is never automatic. The Studio/CLI approval request identifies the current model, proposed model, trigger and reason. Rejecting the request leaves the active model unchanged.
+- Escalation can be requested after provider failure or agent recovery triggers. The approved plan, prior tool results and verification evidence remain in the conversation.
+- The model inventory is refreshed whenever a new LLM client is built. A model added or removed in Ollama is therefore reflected on the next task/client initialization.
+- Non-Ollama providers retain their existing explicit provider/model configuration; Ollama discovery is not applied to them.
+- `KARDECAGENT_MAX_PARALLEL_SUBTASKS` controls concurrency (1–4, default 2). Only ready subtasks with disjoint project-relative scopes and distinct approved plan steps can run together. Dependencies and overlapping paths force sequential execution.
 
-Example:
+Example configuration (no model list required):
 
 ```dotenv
-KARDECAGENT_LLM_MODEL=qwen2.5-coder:3b
-KARDECAGENT_ESCALATION_MODELS=qwen2.5-coder:14b,deepseek-coder:16b
+KARDECAGENT_LLM_PROVIDER=ollama
+KARDECAGENT_OLLAMA_BASE_URL=http://127.0.0.1:11434
 KARDECAGENT_MAX_PARALLEL_SUBTASKS=2
 ```
 
-Use comma-separated model tags in the environment variable. Configure only models installed in the selected provider.
+The existing `KARDECAGENT_LLM_MODEL` remains an optional preferred primary. If it is not installed, automatic discovery selects an installed model instead. For adaptive fast routing, `KARDECAGENT_MODEL_ROUTING_ENABLED=true` enables automatic selection of a smaller installed model when available.

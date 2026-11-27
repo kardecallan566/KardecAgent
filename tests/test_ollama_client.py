@@ -10,10 +10,16 @@ def test_settings_default_to_ollama():
     assert settings.llm_model == "qwen2.5-coder:3b"
 
 
-def test_build_llm_uses_ollama():
+def test_build_llm_uses_ollama(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [{"name": "qwen2.5-coder:3b", "size": 2_000_000_000}],
+    )
     client = _build_llm(Settings())
-    assert isinstance(client, OllamaClient)
-    assert client.base_url == "http://127.0.0.1:11434"
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.clients[0].base_url == "http://127.0.0.1:11434"
     assert client.model == "qwen2.5-coder:3b"
 
 
@@ -101,3 +107,118 @@ def test_ollama_client_server_version(monkeypatch):
 
     monkeypatch.setattr("kardecagent.llm.ollama.httpx.get", lambda *args, **kwargs: FakeResponse())
     assert OllamaClient().server_version() == "0.12.0"
+
+
+
+def test_build_llm_discovers_installed_models_and_creates_escalation_pool(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "qwen-coder:3b", "size": 3_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+            {"name": "llama:8b", "size": 5_000_000_000},
+        ],
+    )
+    settings = Settings(llm_model="qwen-coder:3b")
+
+    client = _build_llm(settings)
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen-coder:3b"
+    assert [item.model for item in client.clients[1:]] == ["llama:8b", "qwen-coder:14b"]
+
+
+def test_build_llm_automatically_selects_installed_model_when_configured_model_is_missing(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "general:2b", "size": 2_000_000_000},
+            {"name": "qwen-coder:4b", "size": 3_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+        ],
+    )
+
+    client = _build_llm(Settings(llm_model="not-installed:latest"))
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen-coder:4b"
+    assert [item.model for item in client.clients[1:]] == ["qwen-coder:14b"]
+
+
+def test_build_llm_uses_smallest_installed_model_as_fast_route_when_enabled(monkeypatch):
+    from kardecagent.llm.router import AdaptiveLLMClient, EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "qwen-coder:3b", "size": 2_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+        ],
+    )
+
+    client = _build_llm(Settings(
+        llm_model="qwen-coder:14b",
+        llm_routing_enabled=True,
+        llm_fast_model="",
+    ))
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert isinstance(client.clients[0], AdaptiveLLMClient)
+    assert client.clients[0].primary.model == "qwen-coder:14b"
+    assert client.clients[0].fast.model == "qwen-coder:3b"
+
+
+def test_build_llm_keeps_configured_model_when_ollama_has_no_installed_models(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [],
+    )
+
+    client = _build_llm(Settings())
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen2.5-coder:3b"
+    assert len(client.clients) == 1
+
+
+def test_build_llm_starts_when_ollama_inventory_is_unreachable(monkeypatch, caplog):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    def unavailable(self):
+        raise RuntimeError("Ollama connection refused")
+
+    monkeypatch.setattr("kardecagent.llm.ollama.OllamaClient.list_models", unavailable)
+
+    client = _build_llm(Settings())
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen2.5-coder:3b"
+    assert "starting with configured model" in caplog.text
+
+
+
+def test_unenabled_fast_model_remains_available_for_escalation(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    monkeypatch.setattr(
+        "kardecagent.llm.ollama.OllamaClient.list_models",
+        lambda self: [
+            {"name": "qwen-coder:3b", "size": 2_000_000_000},
+            {"name": "qwen-coder:14b", "size": 9_000_000_000},
+        ],
+    )
+
+    client = _build_llm(Settings(
+        llm_model="qwen-coder:3b",
+        llm_fast_model="qwen-coder:14b",
+        llm_routing_enabled=False,
+    ))
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert [item.model for item in client.clients[1:]] == ["qwen-coder:14b"]
