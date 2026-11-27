@@ -307,7 +307,7 @@ def test_end_to_end_concurrent_user_edit_is_never_overwritten(tmp_path: Path):
 
     class ConcurrentDeterministicLLM(DeterministicLLM):
         def chat(self, messages: list[dict]) -> LLMResponse:
-            if self.calls == 2:
+            if self.calls == 1:
                 target.write_text("VALUE = 'user edit'\\n", encoding="utf-8")
             return super().chat(messages)
 
