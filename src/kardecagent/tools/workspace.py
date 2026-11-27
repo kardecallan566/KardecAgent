@@ -190,3 +190,80 @@ def rollback_file_change(root: Path, change: dict) -> None:
         raise RuntimeError(f"unsafe rollback target exists: {temporary}")
     temporary.write_bytes(data)
     os.replace(temporary, target)
+
+
+
+def verify_recorded_changes(root: Path, changes: list[dict]) -> dict:
+    """Independently compare audited after-state fingerprints with current disk state."""
+    root = root.resolve()
+    results = []
+    for change in changes:
+        raw = str(change.get("path", ""))
+        target = _safe_remediation_path(root, raw)
+        if target.is_symlink():
+            actual_exists, actual_digest = True, None
+            status = "unsafe_symlink"
+        elif target.exists() and not target.is_file():
+            actual_exists, actual_digest = True, None
+            status = "unsafe_special_file"
+        elif target.is_file():
+            data = target.read_bytes()
+            actual_exists = True
+            actual_digest = hashlib.sha256(data).hexdigest()
+            status = "verified" if (
+                change.get("exists_after", True)
+                and actual_digest == change.get("sha256_after")
+            ) else "mismatch"
+        else:
+            actual_exists, actual_digest = False, None
+            status = "verified" if not change.get("exists_after", True) else "missing"
+        results.append({
+            "path": raw,
+            "status": status,
+            "expected_exists": bool(change.get("exists_after", True)),
+            "actual_exists": actual_exists,
+            "expected_sha256": change.get("sha256_after"),
+            "actual_sha256": actual_digest,
+        })
+    return {
+        "verified": all(item["status"] == "verified" for item in results),
+        "files": results,
+        "checked": len(results),
+    }
+
+
+def validate_rollback_file_change(root: Path, change: dict) -> None:
+    """Preflight one rollback without mutating the workspace."""
+    raw = str(change["path"])
+    target = _safe_remediation_path(root.resolve(), raw)
+    if target.is_symlink():
+        raise RuntimeError(f"refusing rollback through symlink: {raw}")
+    if target.exists() and not target.is_file():
+        raise RuntimeError(f"refusing rollback of non-regular path: {raw}")
+    current_digest = (
+        hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+    )
+    if current_digest != change.get("sha256_after"):
+        raise RuntimeError(
+            f"rollback conflict for {raw}: current SHA-256 does not match audited after-state"
+        )
+    if change.get("exists_before") and not isinstance(change.get("before_data_b64"), str):
+        raise RuntimeError(f"missing audited before-state for {raw}")
+    if isinstance(change.get("before_data_b64"), str):
+        base64.b64decode(change["before_data_b64"].encode("ascii"), validate=True)
+
+
+def rollback_file_changes(root: Path, changes: list[dict]) -> list[str]:
+    """Preflight an entire audited transaction before restoring any of its files."""
+    seen = set()
+    for change in changes:
+        raw = str(change["path"])
+        if raw in seen:
+            raise RuntimeError(f"duplicate path in rollback transaction: {raw}")
+        seen.add(raw)
+        validate_rollback_file_change(root, change)
+    restored = []
+    for change in reversed(changes):
+        rollback_file_change(root, change)
+        restored.append(str(change["path"]))
+    return restored
