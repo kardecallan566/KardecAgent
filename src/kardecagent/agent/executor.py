@@ -436,6 +436,11 @@ class AgentExecutor:
                         "changed_paths": changed,
                     }, ensure_ascii=False)
             return json.dumps(result.__dict__, ensure_ascii=False)
+        if action.tool == "run_browser_qa":
+            report = ProjectQAEngine(root).run_browser_smoke(
+                args["base_url"], routes=args.get("routes")
+            )
+            return json.dumps(report, ensure_ascii=False)
         if action.tool == "run_checks":
             return json.dumps(self._run_check(root, args["kind"]), ensure_ascii=False)
         if action.tool == "git_status":
