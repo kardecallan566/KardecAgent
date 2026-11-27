@@ -22,6 +22,7 @@ from ..tools import (
     git_branch_list, git_remote_list, git_fetch, git_pull, git_push, git_create_branch,
     git_checkout, git_commit, git_merge, gh_create_pr, gh_pr_status, gh_merge_pr,
 )
+from .qa import ProjectQAEngine
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
 from .security import assess_security, security_requirements_for
 from .security_review import (
@@ -150,6 +151,12 @@ class AgentExecutor:
             "checks": summary["checks"],
             "git": None,
         }
+        profile = detect_project(root)
+        if profile.kind in {"web", "static-html"}:
+            project_qa = ProjectQAEngine(root).run_static()
+            result["project_qa"] = project_qa
+            if project_qa.get("available") and not project_qa.get("passed", False):
+                result["verified"] = False
         if git_is_repo(root):
             status, diff = git_status(root), git_diff(root)
             result["git"] = {
