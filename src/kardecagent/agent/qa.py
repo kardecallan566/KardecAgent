@@ -263,11 +263,24 @@ class ProjectQAEngine:
                 "issues": [],
             }
 
+        if routes is not None and not isinstance(routes, list):
+            raise ValueError("browser QA routes must be a list of local route paths")
         discovered = routes if routes is not None else [
             item["path"] for item in self.discover_routes()["routes"]
         ]
         if not discovered:
             discovered = ["/"]
+        for route in discovered:
+            if (
+                not isinstance(route, str)
+                or not route.startswith("/")
+                or route.startswith("//")
+                or urlparse(route).scheme
+                or urlparse(route).netloc
+                or "\\\\" in route
+                or ".." in route.split("/")
+            ):
+                raise ValueError("browser QA routes must be local absolute paths without traversal")
 
         issues: list[dict] = []
         checks: list[dict] = []
