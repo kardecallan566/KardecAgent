@@ -75,9 +75,13 @@ def test_skill_save_rejects_cyclic_dependency_before_writing(tmp_path):
         "skills.save", id="first", name="First", tags=[], dependencies=[],
         instructions="First guidance.",
     ))
+    _skill_command(tmp_path, payload(
+        "skills.save", id="second", name="Second", tags=[], dependencies=["first"],
+        instructions="Second guidance.",
+    ))
     with pytest.raises(ValueError, match="cyclic"):
         _skill_command(tmp_path, payload(
-            "skills.save", id="first", name="First", tags=[], dependencies=["first"],
+            "skills.save", id="first", name="First", tags=[], dependencies=["second"],
             instructions="Changed guidance.",
         ))
     assert _skill_command(tmp_path, payload("skills.body", id="first"))["instructions"] == "First guidance."
@@ -92,3 +96,14 @@ def test_skill_delete_removes_approval_record(tmp_path):
     result = _skill_command(tmp_path, payload("skills.delete", id="temporary"))
     assert result["approved_ids"] == []
     assert result["skills"] == []
+
+def test_skill_catalog_refuses_symlinked_metadata_root(tmp_path):
+    outside = tmp_path.parent / (tmp_path.name + "-outside")
+    outside.mkdir()
+    (outside / "skills").mkdir()
+    try:
+        (tmp_path / ".kardecagent").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory symlinks are unavailable on this platform.")
+    with pytest.raises(ValueError, match="link simbólico"):
+        _skill_command(tmp_path, payload("skills.list"))

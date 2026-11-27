@@ -284,8 +284,10 @@ def _skill_approvals_path(root: Path) -> Path:
 
 
 def _approved_skill_ids(root: Path) -> set[str]:
+    metadata_root = root / ".kardecagent"
+    skills_root = metadata_root / "skills"
     path = _skill_approvals_path(root)
-    if path.is_symlink() or not path.exists():
+    if metadata_root.is_symlink() or skills_root.is_symlink() or path.is_symlink() or not path.exists():
         return set()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -299,6 +301,8 @@ def _skill_command(root: Path, message: dict) -> dict:
     command = message.get("type")
     payload = message.get("payload")
     payload = payload if isinstance(payload, dict) else {}
+    if (root / ".kardecagent").is_symlink():
+        raise SkillError("A pasta .kardecagent não pode ser um link simbólico.")
     catalog = SkillCatalog(root)
     if command == "skills.list":
         return {"skills": catalog.list_available(), "approved_ids": sorted(_approved_skill_ids(root))}
