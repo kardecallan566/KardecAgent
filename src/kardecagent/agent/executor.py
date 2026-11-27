@@ -1048,7 +1048,7 @@ class AgentExecutor:
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "Investigation budget exhausted. Implement using available evidence or report the specific missing information to the user."}]
                     continue
-            if self._is_repeated_side_effect(state, action):
+            if not verification_repair_mode and self._is_repeated_side_effect(state, action):
                 state.record(
                     "repeated_side_effect_blocked",
                     "An identical side-effecting action was blocked because no successful workspace mutation occurred since its previous execution.",
