@@ -5,13 +5,13 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { RuntimeLimits, RuntimePlanStep, RuntimeSubtask } from "./types/runtime";
 import { getEditorCompletions, getLiveEditorDiagnostics, parseToolDiagnostics, type EditorCompletion, type EditorDiagnostic } from "./editor/intelligence";
 import {
-  Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot,
+  Activity, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleDot, WandSparkles,
   Clock3, FileCode2, Files, Folder, FolderOpen, GitBranch,
   ListTodo, Plus, Search, ShieldCheck, Workflow, Save,
   Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square, IndentIncrease
 } from "lucide-react";
 
-type NavItem = "explorer" | "projects" | "agent" | "tasks" | "approvals" | "activity";
+type NavItem = "explorer" | "projects" | "agent" | "tasks" | "approvals" | "activity" | "skills";
 type StudioSettings = {
   ollamaUrl: string; model: string; fastModel: string; modelRoutingEnabled: boolean; timeout: number; pythonPath: string; autoStartCore: boolean;
   editorFontSize: number; editorFontFamily: string; lineHeight: number; tabSize: number; wordWrap: boolean; showLineNumbers: boolean;
@@ -307,6 +307,13 @@ function App() {
   const chatHistoryRef = useRef<HTMLDivElement | null>(null);
   const [collapsedChatDates, setCollapsedChatDates] = useState<Record<string, boolean>>({});
   const pendingInstructionCommandId = useRef<string | null>(null);
+  const [skillItems, setSkillItems] = useState<Array<{ id: string; name: string; description: string; version: string; tags: string[]; dependencies: string[]; requires_approval: boolean }>>([]);
+  const [skillApprovedIds, setSkillApprovedIds] = useState<string[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
+  const [skillFormOpen, setSkillFormOpen] = useState(false);
+  const [skillEditingId, setSkillEditingId] = useState<string | null>(null);
+  const [skillForm, setSkillForm] = useState({ id: "", name: "", description: "", tags: "", dependencies: "", instructions: "" });
   const [runtimeStatus, setRuntimeStatus] = useState<"offline" | "connecting" | "online">("offline");
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeActivity, setRuntimeActivity] = useState("");
@@ -556,6 +563,22 @@ function App() {
           setBottomPanel("Problemas");
           setSemanticNotice(references.length + " referência(s) encontrada(s).");
         }
+        return;
+      }
+      if (message.type === "skills.response") {
+        const result = message.payload as { ok?: boolean; skills?: typeof skillItems; approved_ids?: string[]; skill_id?: string; instructions?: string; message?: string } | undefined;
+        setSkillsLoading(false);
+        if (!result?.ok) {
+          setSkillsError(result?.message || "Não foi possível atualizar o catálogo de Skills.");
+          return;
+        }
+        if (result.skill_id && typeof result.instructions === "string") {
+          setSkillForm(value => ({ ...value, instructions: result.instructions || "" }));
+          return;
+        }
+        if (result.skills) setSkillItems(result.skills);
+        if (result.approved_ids) setSkillApprovedIds(result.approved_ids);
+        setSkillsError(null);
         return;
       }
       if (message.type === "runtime.heartbeat") {
@@ -903,6 +926,50 @@ function App() {
       setTerminalOutput(items => [...items, "[Falha ao encerrar terminal: " + String(error) + "]"].slice(-1000));
     }
     setTerminalReady(false);
+  }
+
+  function sendSkillCommand(type: "skills.list" | "skills.body" | "skills.save" | "skills.delete" | "skills.activation.set", payload: Record<string, unknown> = {}) {
+    if (!projectRoot || runtimeStatus !== "online") {
+      setSkillsError("Abra um projeto e conecte o Core para gerenciar Skills.");
+      return;
+    }
+    const commandId = "skills-" + crypto.randomUUID();
+    setSkillsLoading(true);
+    setSkillsError(null);
+    void invoke("send_runtime_command", {
+      message: { type, schema_version: 1, command_id: commandId, payload: { ...payload, project_root: projectRoot } },
+    }).catch(error => {
+      setSkillsLoading(false);
+      setSkillsError("Falha ao enviar comando de Skills: " + String(error));
+    });
+  }
+
+  function openNewSkillForm() {
+    setSkillEditingId(null);
+    setSkillForm({ id: "", name: "", description: "", tags: "", dependencies: "", instructions: "" });
+    setSkillFormOpen(true);
+  }
+
+  function openEditSkillForm(skill: typeof skillItems[number]) {
+    setSkillEditingId(skill.id);
+    setSkillForm({ id: skill.id, name: skill.name, description: skill.description, tags: skill.tags.join(", "), dependencies: skill.dependencies.join(", "), instructions: "" });
+    setSkillFormOpen(true);
+    sendSkillCommand("skills.body", { id: skill.id });
+  }
+
+  function saveSkillForm() {
+    const id = skillEditingId || skillForm.id.trim();
+    if (!id || !skillForm.name.trim() || !skillForm.instructions.trim()) {
+      setSkillsError("Preencha o identificador, nome e instruções da Skill.");
+      return;
+    }
+    sendSkillCommand("skills.save", {
+      id, name: skillForm.name, description: skillForm.description,
+      tags: skillForm.tags.split(",").map(value => value.trim()).filter(Boolean),
+      dependencies: skillForm.dependencies.split(",").map(value => value.trim()).filter(Boolean),
+      instructions: skillForm.instructions,
+    });
+    setSkillFormOpen(false);
   }
 
   function requestPythonSemantic(action: SemanticAction, source: string, cursor: number) {
@@ -1720,6 +1787,7 @@ function App() {
           <button className={activeNav === "agent" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("agent")} title="Agent"><Bot /></button>
           <button className={activeNav === "tasks" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("tasks")} title="Tarefas"><Workflow /></button>
           <button className={activeNav === "approvals" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("approvals")} title="Aprovações"><ShieldCheck /></button>
+          <button className={activeNav === "skills" ? "rail-button selected" : "rail-button"} onClick={() => { setActiveNav("skills"); sendSkillCommand("skills.list"); }} title="Skills"><WandSparkles /></button>
           <div className="rail-spacer" />
           <button className={activeNav === "activity" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("activity")} title="Atividade"><Activity /></button>
           <button className="rail-button" title="Configurações" onClick={() => setSettingsOpen(true)}><Settings /></button>
@@ -1752,6 +1820,8 @@ function App() {
             </div>
           ) : activeNav === "tasks" ? (
             <div className="task-sidebar">{runtimeTasks.length ? runtimeTasks.slice().reverse().map(task => { const removable = !["Em execução", "Validando", "Retomando", "Recebida", "Aguardando aprovação", "Decisão enviada"].includes(task.status); return <div className="task-mini" key={task.executionId}><CircleDot className={task.status === "Em execução" || task.status === "Validando" || task.status === "Retomando" ? "active" : task.status === "Concluída" || task.status === "Verificada" ? "done" : task.status === "Falhou" || task.status === "Recuperável" ? "failed" : "queued"}/><div className="task-mini-content"><strong>{task.title}</strong><small>{task.id.slice(0, 8)} · {task.status}</small>{task.recoverable && <button className="task-resume-button" disabled={runtimeBusy || runtimeStatus !== "online"} onClick={() => resumeTask(task)}><GitBranch size={12}/> Retomar tarefa</button>}</div>{removable && <button className="task-remove-button" title="Remover do histórico (não apaga arquivos)" aria-label={"Remover tarefa " + task.title + " do histórico"} onClick={() => void removeTask(task)}><X size={13}/></button>}</div>; }) : <div className="empty-state"><ListTodo/><strong>Nenhuma tarefa recebida</strong><small>Envie uma instrução ao gestor na área Agent.</small></div>}</div>
+          ) : activeNav === "skills" ? (
+            <div className="skill-sidebar"><button className="project-sidebar-action" onClick={openNewSkillForm}><Plus size={14}/> Nova Skill</button><div className="project-sidebar-heading">Catálogo · {skillItems.length}</div>{skillItems.map(skill => <button key={skill.id} className="skill-sidebar-item" onClick={() => openEditSkillForm(skill)}><WandSparkles size={14}/><span><strong>{skill.name}</strong><small>{skill.id}</small></span><i className={skillApprovedIds.includes(skill.id) ? "enabled" : ""}/></button>)}</div>
           ) : activeNav === "approvals" ? (<>{pendingApproval ? <div className="approval-sidebar-card"><ShieldCheck/><strong>Aprovação pendente</strong><small>{pendingApproval.kind === "high_risk" ? "Confirmação adicional de alto risco" : pendingApproval.kind === "model_switch" ? "Troca de modelo aguardando sua decisão" : "Plano aguardando sua decisão"}</small><span>Risco: {pendingApproval.risk}</span></div> : null}{approvalHistory.length ? <div className="approval-history"><strong>Histórico de aprovações</strong>{approvalHistory.slice().reverse().map(item => <article key={item.approvalId}><span>{item.kind === "high_risk" ? "Alto risco" : item.kind === "model_switch" ? "Troca de modelo" : "Plano"}</span><small>{item.status} · risco {item.risk}</small><p>{item.summary}</p></article>)}</div> : !pendingApproval ? <div className="empty-state"><ShieldCheck/><strong>Nenhuma aprovação registrada</strong><small>Solicitações do gestor aparecerão aqui.</small></div> : null}</>) :
           <div className="empty-state"><Bot/><strong>Agent Workspace</strong><small>Conecte o core para iniciar tarefas.</small></div>}
         </aside>}
@@ -1768,6 +1838,40 @@ function App() {
                   <div className="project-card-actions"><button onClick={() => void activateProject(project.path)}>{projectRoot === project.path ? "Atual" : "Abrir"}</button><button className="project-remove" title="Remover da lista de recentes" onClick={() => removeRecentProject(project.path)}>Remover</button></div>
                 </article>) : <div className="runtime-graph-empty"><FolderOpen size={22}/><strong>Nenhum projeto recente</strong><p>Abra uma pasta existente ou crie um projeto para que ele apareça nesta lista.</p></div>}
               </section>
+            </div>
+          ) : activeNav === "skills" ? (
+            <div className="skills-manager">
+              <div className="process-toolbar"><div><span className="eyebrow">BIBLIOTECA DO PROJETO</span><h2>Gerenciador de Skills</h2><p>Crie, revise e autorize habilidades que orientam o agente. Skills não executam código nem concedem permissões.</p></div><div className="skills-toolbar-actions"><button onClick={() => sendSkillCommand("skills.list")} disabled={skillsLoading || runtimeStatus !== "online"}><RefreshCw size={14}/> Atualizar</button><button onClick={openNewSkillForm} disabled={!projectRoot}><Plus size={14}/> Nova Skill</button></div></div>
+              {!projectRoot && <div className="manager-runtime-error">Abra um projeto para acessar o catálogo de Skills.</div>}
+              {runtimeStatus !== "online" && projectRoot && <div className="manager-runtime-error">O Core precisa estar conectado para gerenciar as Skills.</div>}
+              {skillsError && <div className="manager-runtime-error" role="alert">{skillsError}</div>}
+              {skillsLoading && <div className="skills-loading"><RefreshCw size={14}/> Processando catálogo...</div>}
+              <div className="skills-manager-grid">
+                {skillItems.map(skill => <article className="skill-card" key={skill.id}>
+                  <div className="skill-card-heading"><div className="skill-card-icon"><WandSparkles size={17}/></div><span className={skillApprovedIds.includes(skill.id) ? "skill-state active" : "skill-state"}>{skillApprovedIds.includes(skill.id) ? "AUTORIZADA" : "AGUARDA AUTORIZAÇÃO"}</span></div>
+                  <h3>{skill.name}</h3><p>{skill.description || "Sem descrição."}</p>
+                  <div className="skill-card-meta"><span>v{skill.version}</span><span>{skill.tags.length} tags</span><span>{skill.dependencies.length} dependências</span></div>
+                  <div className="skill-tags">{skill.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
+                  <div className="skill-card-actions">
+                    <button onClick={() => openEditSkillForm(skill)}>Editar</button>
+                    <button onClick={() => { const enabled = !skillApprovedIds.includes(skill.id); if (window.confirm((enabled ? "Autorizar" : "Revogar autorização de") + " " + skill.name + (enabled ? " e suas dependências para uso em tarefas futuras?" : " e suas dependências?"))) sendSkillCommand("skills.activation.set", { id: skill.id, enabled }); }}>{skillApprovedIds.includes(skill.id) ? "Revogar" : "Autorizar"}</button>
+                    <button className="danger" onClick={() => { if (window.confirm("Excluir permanentemente a Skill " + skill.name + "?")) sendSkillCommand("skills.delete", { id: skill.id }); }}>Excluir</button>
+                  </div>
+                </article>)}
+                {!skillItems.length && !skillsLoading && <div className="skills-empty"><WandSparkles size={26}/><strong>Nenhuma Skill cadastrada</strong><p>Crie a primeira habilidade para ensinar ao agente um fluxo especializado.</p><button onClick={openNewSkillForm} disabled={!projectRoot}>Criar primeira Skill</button></div>}
+              </div>
+              {skillFormOpen && <section className="skill-editor">
+                <div className="process-section-title"><strong>{skillEditingId ? "Editar Skill" : "Criar Skill"}</strong><button onClick={() => setSkillFormOpen(false)}><X size={14}/> Fechar</button></div>
+                <div className="skill-form-grid">
+                  <label>Identificador<input value={skillForm.id} disabled={!!skillEditingId} placeholder="python-testing" onChange={event => setSkillForm(value => ({ ...value, id: event.target.value }))}/></label>
+                  <label>Nome<input value={skillForm.name} placeholder="Testes Python" onChange={event => setSkillForm(value => ({ ...value, name: event.target.value }))}/></label>
+                  <label className="wide">Descrição<input value={skillForm.description} placeholder="Quando esta Skill deve ser utilizada" onChange={event => setSkillForm(value => ({ ...value, description: event.target.value }))}/></label>
+                  <label>Tags<input value={skillForm.tags} placeholder="python, testes, pytest" onChange={event => setSkillForm(value => ({ ...value, tags: event.target.value }))}/></label>
+                  <label>Dependências<input value={skillForm.dependencies} placeholder="base-python, qa" onChange={event => setSkillForm(value => ({ ...value, dependencies: event.target.value }))}/></label>
+                  <label className="wide">Instruções (SKILL.md)<textarea rows={10} value={skillForm.instructions} placeholder="Descreva o fluxo, boas práticas, critérios de qualidade e limitações..." onChange={event => setSkillForm(value => ({ ...value, instructions: event.target.value }))}/></label>
+                </div>
+                <div className="skill-editor-actions"><small>Ativação exige autorização explícita. Conteúdo é tratado como referência não confiável.</small><button onClick={saveSkillForm} disabled={skillsLoading}>Salvar Skill</button></div>
+              </section>}
             </div>
           ) : activeNav === "agent" ? (
             <div className="manager-inbox">
