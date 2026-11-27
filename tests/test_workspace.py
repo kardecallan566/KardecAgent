@@ -142,3 +142,29 @@ def test_multi_file_rollback_preflights_all_conflicts_before_mutating(tmp_path: 
 
     assert first.read_bytes() == b"after-first"
     assert second.read_bytes() == b"external-change"
+
+
+
+def test_multi_file_rollback_restores_all_files_after_preflight(tmp_path: Path):
+    import base64
+    import hashlib
+
+    from kardecagent.tools.workspace import rollback_file_changes
+
+    changes = []
+    for name in ("one.txt", "two.txt"):
+        before = f"before-{name}".encode()
+        after = f"after-{name}".encode()
+        (tmp_path / name).write_bytes(after)
+        changes.append({
+            "path": name,
+            "exists_before": True,
+            "before_data_b64": base64.b64encode(before).decode("ascii"),
+            "sha256_after": hashlib.sha256(after).hexdigest(),
+        })
+
+    restored = rollback_file_changes(tmp_path, changes)
+
+    assert set(restored) == {"one.txt", "two.txt"}
+    assert (tmp_path / "one.txt").read_bytes() == b"before-one.txt"
+    assert (tmp_path / "two.txt").read_bytes() == b"before-two.txt"
