@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -279,7 +280,32 @@ def _atomic_text(path: Path, value: str) -> None:
         raise
 
 
-def _skill_command(root: Path, message: dict, approved_skill_ids: set[str]) -> dict:
+def _skill_fingerprint(catalog: SkillCatalog, skill_id: str) -> str:
+    manifests = {item.id for item in catalog.discover()}
+    if skill_id not in manifests:
+        raise SkillError(f"unknown skill: {skill_id}")
+    directory = catalog.root / skill_id
+    manifest_path = catalog._safe_file(directory, catalog.MANIFEST, catalog.MAX_MANIFEST_BYTES)
+    instructions_path = catalog._safe_file(directory, catalog.INSTRUCTIONS, catalog.MAX_INSTRUCTIONS_BYTES)
+    digest = hashlib.sha256()
+    digest.update(manifest_path.read_bytes())
+    digest.update(b"\\0")
+    digest.update(instructions_path.read_bytes())
+    return digest.hexdigest()
+
+
+def _valid_skill_approvals(catalog: SkillCatalog, approvals: dict[str, str]) -> list[str]:
+    valid = []
+    for skill_id, expected in list(approvals.items()):
+        try:
+            if _skill_fingerprint(catalog, skill_id) == expected:
+                valid.append(skill_id)
+        except (OSError, SkillError):
+            continue
+    return sorted(valid)
+
+
+def _skill_command(root: Path, message: dict, approved_skill_fingerprints: dict[str, str]) -> dict:
     command = message.get("type")
     payload = message.get("payload")
     payload = payload if isinstance(payload, dict) else {}
@@ -287,7 +313,7 @@ def _skill_command(root: Path, message: dict, approved_skill_ids: set[str]) -> d
         raise SkillError("A pasta .kardecagent não pode ser um link simbólico.")
     catalog = SkillCatalog(root)
     if command == "skills.list":
-        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids)}
+        return {"skills": catalog.list_available(), "approved_ids": _valid_skill_approvals(catalog, approved_skill_fingerprints)}
     if command == "skills.body":
         skill_id = payload.get("id")
         if not isinstance(skill_id, str):
@@ -328,7 +354,9 @@ def _skill_command(root: Path, message: dict, approved_skill_ids: set[str]) -> d
             raise SkillError("Arquivos de uma Skill não podem ser links simbólicos.")
         _atomic_text(directory / SkillCatalog.INSTRUCTIONS, instructions)
         _atomic_json(directory / SkillCatalog.MANIFEST, manifest)
-        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids), "saved_id": parsed.id}
+        # Editing any approved skill invalidates its previous consent.
+        approved_skill_fingerprints.pop(parsed.id, None)
+        return {"skills": catalog.list_available(), "approved_ids": _valid_skill_approvals(catalog, approved_skill_fingerprints), "saved_id": parsed.id}
     if command == "skills.delete":
         skill_id = payload.get("id")
         manifests = {item.id: item for item in catalog.discover()}
@@ -341,8 +369,8 @@ def _skill_command(root: Path, message: dict, approved_skill_ids: set[str]) -> d
         if dependents:
             raise SkillError("Não é possível excluir: outras Skills dependem dela (" + ", ".join(dependents) + ").")
         shutil.rmtree(directory)
-        approved_skill_ids.discard(skill_id)
-        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids), "deleted_id": skill_id}
+        approved_skill_fingerprints.pop(skill_id, None)
+        return {"skills": catalog.list_available(), "approved_ids": _valid_skill_approvals(catalog, approved_skill_fingerprints), "deleted_id": skill_id}
     if command == "skills.activation.set":
         skill_id = payload.get("id")
         enabled = payload.get("enabled")
@@ -350,8 +378,13 @@ def _skill_command(root: Path, message: dict, approved_skill_ids: set[str]) -> d
             raise SkillError("id e enabled são obrigatórios.")
         loaded = catalog.load(skill_id, approved=True)
         closure = {item.manifest.id for item in loaded}
-        approved_skill_ids.update(closure) if enabled else approved_skill_ids.difference_update(closure)
-        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids), "updated_id": skill_id}
+        if enabled:
+            for item in loaded:
+                approved_skill_fingerprints[item.manifest.id] = _skill_fingerprint(catalog, item.manifest.id)
+        else:
+            for dependency_id in closure:
+                approved_skill_fingerprints.pop(dependency_id, None)
+        return {"skills": catalog.list_available(), "approved_ids": _valid_skill_approvals(catalog, approved_skill_fingerprints), "updated_id": skill_id}
     raise SkillError("Comando de Skills desconhecido.")
 
 
@@ -360,7 +393,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
     root = project_root.resolve()
     seen_command_ids: dict[str, None] = {}
     # Activation consent is held only in memory: project files/skills cannot self-authorize.
-    approved_skill_ids: set[str] = set()
+    approved_skill_fingerprints: dict[str, str] = {}
     parallel_limit = max(1, min(4, int(getattr(agent.settings, "max_parallel_subtasks", 1))))
     _write({
         "type": "runtime.ready",
@@ -488,7 +521,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
                 del seen_command_ids[next(iter(seen_command_ids))]
             try:
-                result = _skill_command(root, message, approved_skill_ids)
+                result = _skill_command(root, message, approved_skill_fingerprints)
                 _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": True, **result}})
             except Exception as exc:
                 _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": False, "message": str(exc)[:1000]}})
@@ -1045,7 +1078,10 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 model_switch_approval_callback=lambda request: _approval(
                     identifier, execution_id, request, kind="model_switch"
                 ),
-                skill_approval_callback=lambda skill_ids: set(skill_ids).issubset(approved_skill_ids),
+                skill_approval_callback=lambda skill_ids: all(
+                    approved_skill_fingerprints.get(skill_id) == _skill_fingerprint(SkillCatalog(root), skill_id)
+                    for skill_id in skill_ids
+                ),
             )
             result_summary = (
                 state.events[-1].message if state.events
