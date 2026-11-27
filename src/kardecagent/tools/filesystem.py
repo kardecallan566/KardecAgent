@@ -6,6 +6,9 @@ import tempfile
 from pathlib import Path
 
 
+_UNSET = object()
+
+
 class ProjectFilesystem:
     """Filesystem access constrained to one project root.
 
@@ -47,7 +50,7 @@ class ProjectFilesystem:
             raise FileNotFoundError(relative_path)
         return path.read_bytes().decode("utf-8")
 
-    def _atomic_write(self, path: Path, content: str) -> None:
+    def _atomic_write(self, path: Path, content: str, expected_sha256=_UNSET) -> None:
         if path.exists() and not path.is_file():
             raise IsADirectoryError(str(path))
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,6 +70,14 @@ class ProjectFilesystem:
                 os.fsync(stream.fileno())
             if original_mode is not None:
                 os.chmod(temporary, original_mode)
+            if expected_sha256 is not _UNSET:
+                current_digest = (
+                    self._digest(path.read_bytes()) if path.is_file() else None
+                )
+                if current_digest != expected_sha256:
+                    raise RuntimeError(
+                        f"file changed concurrently before write: {path.name}"
+                    )
             os.replace(temporary, path)
             # Verify the bytes on disk, not merely the in-memory value.
             actual = path.read_bytes()
@@ -79,11 +90,13 @@ class ProjectFilesystem:
                 pass
             raise
 
-    def write_file(self, relative_path: str, content: str) -> None:
+    def write_file(
+        self, relative_path: str, content: str, *, expected_sha256=_UNSET
+    ) -> None:
         if not isinstance(content, str):
             raise TypeError("content must be a string")
         path = self.safe_path(relative_path)
-        self._atomic_write(path, content)
+        self._atomic_write(path, content, expected_sha256=expected_sha256)
 
     def create_directory(self, relative_path: str) -> bool:
         path = self.safe_path(relative_path)
@@ -101,9 +114,11 @@ class ProjectFilesystem:
         path = self.safe_path(relative_path)
         if path.exists() and not path.is_file():
             raise IsADirectoryError(relative_path)
-        before = path.read_bytes().decode("utf-8") if path.exists() else ""
+        before_bytes = path.read_bytes() if path.exists() else None
+        before = before_bytes.decode("utf-8") if before_bytes is not None else ""
         expected = before + content
-        self._atomic_write(path, expected)
+        expected_digest = self._digest(before_bytes) if before_bytes is not None else None
+        self._atomic_write(path, expected, expected_sha256=expected_digest)
         actual = self.read_file(relative_path)
         if actual != expected:
             raise IOError(f"append verification failed for {relative_path}")
@@ -120,7 +135,9 @@ class ProjectFilesystem:
         path = self.safe_path(relative_path)
         if not path.is_file():
             raise FileNotFoundError(relative_path)
-        original = path.read_bytes().decode("utf-8")
+        original_bytes = path.read_bytes()
+        original = original_bytes.decode("utf-8")
+        original_digest = self._digest(original_bytes)
         count = original.count(find)
         if count == 0:
             return 0
@@ -129,7 +146,7 @@ class ProjectFilesystem:
             if replace_all
             else original.replace(find, replacement, 1)
         )
-        self._atomic_write(path, expected)
+        self._atomic_write(path, expected, expected_sha256=original_digest)
         actual = self.read_file(relative_path)
         if actual != expected:
             raise IOError(f"replacement verification failed for {relative_path}")
