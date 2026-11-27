@@ -61,7 +61,7 @@ def fake_github(monkeypatch, manifest: dict, instructions: str = "Review code ca
 
 
 def test_preview_fetches_and_validates_public_skill_without_installing(tmp_path, monkeypatch):
-    files = fake_github(monkeypatch, {
+    fake_github(monkeypatch, {
         "id": "python-testing", "name": "Python testing",
         "description": "Focused Python test guidance.", "tags": ["python", "testing"],
         "dependencies": [],
