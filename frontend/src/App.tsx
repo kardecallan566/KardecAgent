@@ -342,6 +342,19 @@ function App() {
 
 
   useEffect(() => {
+    if (activeNav !== "skills" || runtimeStatus !== "online" || !projectRoot) return;
+    const commandId = "skills-list-" + crypto.randomUUID();
+    setSkillsLoading(true);
+    setSkillsError(null);
+    void invoke("send_runtime_command", {
+      message: { type: "skills.list", schema_version: 1, command_id: commandId, payload: { project_root: projectRoot } },
+    }).catch(error => {
+      setSkillsLoading(false);
+      setSkillsError("Falha ao consultar o catálogo de Skills: " + String(error));
+    });
+  }, [activeNav, runtimeStatus, projectRoot]);
+
+  useEffect(() => {
     if (!importedGoogleFontNames().includes("Shantell Sans")) {
       setGoogleFontUrl("https://fonts.google.com/specimen/Shantell+Sans");
       void importGoogleFont(false);
@@ -1787,7 +1800,7 @@ function App() {
           <button className={activeNav === "agent" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("agent")} title="Agent"><Bot /></button>
           <button className={activeNav === "tasks" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("tasks")} title="Tarefas"><Workflow /></button>
           <button className={activeNav === "approvals" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("approvals")} title="Aprovações"><ShieldCheck /></button>
-          <button className={activeNav === "skills" ? "rail-button selected" : "rail-button"} onClick={() => { setActiveNav("skills"); sendSkillCommand("skills.list"); }} title="Skills"><WandSparkles /></button>
+          <button className={activeNav === "skills" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("skills")} title="Skills"><WandSparkles /></button>
           <div className="rail-spacer" />
           <button className={activeNav === "activity" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("activity")} title="Atividade"><Activity /></button>
           <button className="rail-button" title="Configurações" onClick={() => setSettingsOpen(true)}><Settings /></button>

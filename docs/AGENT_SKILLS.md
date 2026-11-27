@@ -33,3 +33,21 @@ hooks, grant tool permissions, install dependencies, or authorize model changes.
 Loaded text is always marked as untrusted reference material and cannot override
 the agent's system, developer, or user instructions. Discovery reads metadata;
 instruction bodies are read only when a skill is explicitly loaded.
+
+## Studio manager and approval lifecycle
+
+The Studio's Skills view sends bounded JSONL commands to the already workspace-bound Core:
+`skills.list`, `skills.body`, `skills.save`, `skills.delete`, and
+`skills.activation.set`. Metadata is listed without reading the instruction body;
+the body is fetched only when the user opens a skill for editing.
+
+Creating or editing validates the strict manifest, dependency closure, graph
+acyclicity, package paths, symlinks, and the 64 KiB instruction limit. Files are
+replaced atomically. A skill with dependents cannot be deleted.
+
+Activation is an explicit user action. Consent is held only in the Core process
+memory and applies to the selected skill plus its dependency chain. Restarting
+the Core clears all activation consent and requires the user to authorize skills
+again. This intentionally prevents a project skill from modifying workspace
+files to grant itself persistent approval. Without consent, the agent continues
+the task without those skills.
