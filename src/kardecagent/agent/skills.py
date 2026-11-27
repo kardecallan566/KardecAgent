@@ -1,8 +1,8 @@
 """Safe, on-demand loading of project-local agent skills.
 
 A skill is an instruction bundle, never executable code or a permission grant.
-External skills are disabled by default and every loaded body is marked as
-untrusted reference material when rendered for a model.
+Every skill requires explicit user approval before loading, and loaded bodies
+are marked as untrusted reference material when rendered for a model.
 """
 from __future__ import annotations
 
@@ -166,11 +166,11 @@ class SkillCatalog:
 
     def load(self, skill_id: str, *, approved: bool = False) -> list[Skill]:
         """Load a skill only after the caller confirms explicit user approval."""
-        if approved is not True:
-            raise SkillError("explicit user approval is required before activating a skill")
         manifests = {item.id: item for item in self.discover()}
         if skill_id not in manifests:
             raise SkillError(f"unknown skill: {skill_id}")
+        if approved is not True:
+            raise SkillError("explicit user approval is required before activating a skill")
         ordered: list[Skill] = []
         loaded: set[str] = set()
 
