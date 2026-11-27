@@ -160,7 +160,11 @@ class SkillLearningEngine:
             terms = [term for term, _count in item["terms"].most_common(5)]
             if not terms:
                 continue
-            base_id = "proposed-" + "-".join(terms[:3])
+            id_terms = [re.sub(r"[^a-z0-9_-]", "-", term.casefold()).strip("-_") for term in terms[:3]]
+            id_terms = [term for term in id_terms if term]
+            if not id_terms:
+                continue
+            base_id = "proposed-" + "-".join(id_terms)
             skill_id = base_id[:64]
             suffix = 2
             while skill_id in existing:

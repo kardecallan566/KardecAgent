@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -212,6 +213,16 @@ class AgentLoop:
                         "Approved skills were loaded as untrusted reference instructions.",
                         skill_ids=list(skill_preparation.loaded_ids),
                     )
+            else:
+                unmatched_terms = sorted(SkillOrchestrator._tokens(task))
+                if unmatched_terms:
+                    fingerprint = hashlib.sha256(" ".join(unmatched_terms).encode("utf-8")).hexdigest()
+                    state.record(
+                        "skills_unmatched",
+                        "No relevant skill matched this task.",
+                        task_fingerprint=fingerprint,
+                        task_terms=unmatched_terms[:8],
+                    )
         except SkillError as exc:
             state.record(
                 "skills_unavailable",
@@ -231,6 +242,16 @@ class AgentLoop:
         store = TaskStore(root)
         state.record("task_persisted", "Approved task state is being durably persisted for resume.", path=str(store.path_for(task)), journal_path=str(store.journal_path_for(task)))
         store.save(state, plan=plan, approved=True)
+
+        def record_skill_outcome(target_state: TaskState, success: bool, board=None) -> None:
+            if skill_preparation is None or not skill_preparation.loaded_ids:
+                return
+            target_state.record(
+                "skill_outcome",
+                "Skill use was evaluated against the task verification result.",
+                **SkillOrchestrator.outcome(skill_preparation, success=success),
+            )
+            store.save(target_state, plan=plan, board=board, approved=True)
 
         if git_is_repo(root):
             checkpoint = create_checkpoint(root, task)
@@ -269,6 +290,7 @@ class AgentLoop:
                 if not board.completed:
                     state.transition(TaskStatus.FAILED, reason="At least one required subtask did not complete.")
                     state.record("subtask_execution_failed", "At least one required subtask did not complete.")
+                    record_skill_outcome(state, success=False, board=board)
                     return state
                 state.transition(TaskStatus.VERIFYING, reason="Parent verification after subtask execution started.")
                 verification = self.executor.verify(
@@ -278,17 +300,13 @@ class AgentLoop:
                 if not verification["verified"]:
                     state.transition(TaskStatus.FAILED, reason="Parent verification failed after subtask integration.")
                     state.record("verification_failed", "Parent verification failed after subtask integration.")
+                    record_skill_outcome(state, success=False, board=board)
                     return state
                 state.transition(TaskStatus.VERIFIED, reason="Parent verification after subtask execution passed.")
                 state.transition(TaskStatus.COMPLETED, reason="Task completed through logical subtasks and verified.")
                 state.record("completed", "Task completed through logical subtasks and verified.",
                              subtask_board=board.as_dict(), verification=verification)
-                if skill_preparation is not None and skill_preparation.loaded_ids:
-                    state.record(
-                        "skill_outcome",
-                        "Skill use was evaluated against the verified task result.",
-                        **SkillOrchestrator.outcome(skill_preparation, success=True),
-                    )
+                record_skill_outcome(state, success=True, board=board)
                 return state
             except OrchestrationError as exc:
                 state.record("subtask_decomposition_failed", str(exc))
@@ -298,15 +316,10 @@ class AgentLoop:
                                           approval_callback=approval_callback,
                                           high_risk_approval_callback=high_risk_approval_callback,
                                           persistence_callback=lambda s, p: store.save(s, plan=p, approved=True))
-        if skill_preparation is not None and skill_preparation.loaded_ids:
-            result.record(
-                "skill_outcome",
-                "Skill use was evaluated against the task verification result.",
-                **SkillOrchestrator.outcome(
-                    skill_preparation,
-                    success=result.status in {TaskStatus.VERIFIED, TaskStatus.COMPLETED},
-                ),
-            )
+        record_skill_outcome(
+            result,
+            success=result.status in {TaskStatus.VERIFIED, TaskStatus.COMPLETED},
+        )
         return result
 
     def resume(self, project_root: Path, task: str, *, event_callback=None,
