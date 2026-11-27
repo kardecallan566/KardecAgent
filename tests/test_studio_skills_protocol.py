@@ -153,3 +153,50 @@ def test_skill_save_rejects_control_characters(tmp_path, approved):
             "skills.save", id="unsafe", name="Unsafe", tags=[], dependencies=[],
             instructions="safe\x01unsafe",
         ), approved)
+
+def test_marketplace_preview_command_returns_review_data_without_install(
+    tmp_path, approved, monkeypatch
+):
+    from kardecagent import studio_protocol
+
+    class Preview:
+        def as_dict(self):
+            return {"id": "external-guide", "name": "External guide", "fingerprint": "abc"}
+
+    monkeypatch.setattr(
+        studio_protocol, "preview_github_skill",
+        lambda root, source_url: Preview(),
+    )
+    result = studio_protocol._skill_command(
+        tmp_path,
+        payload("skills.import.preview", source_url="https://github.com/acme/repo/tree/main/external-guide"),
+        approved,
+    )
+    assert result["preview"]["id"] == "external-guide"
+    assert not (tmp_path / ".kardecagent" / "skills" / "external-guide").exists()
+
+
+def test_marketplace_install_command_invalidates_old_session_consent(
+    tmp_path, approved, monkeypatch
+):
+    from kardecagent import studio_protocol
+
+    _skill_command(tmp_path, payload(
+        "skills.save", id="external-guide", name="External guide", tags=[],
+        dependencies=[], instructions="Local version.",
+    ), approved)
+    _skill_command(tmp_path, payload("skills.activation.set", id="external-guide", enabled=True), approved)
+    monkeypatch.setattr(
+        studio_protocol, "install_github_skill",
+        lambda *args, **kwargs: {"installed_id": "external-guide", "fingerprint": "new"},
+    )
+    result = studio_protocol._skill_command(
+        tmp_path,
+        payload(
+            "skills.import.install", source_url="https://github.com/acme/repo/tree/main/external-guide",
+            fingerprint="new", approved=True, replace_existing=True,
+        ),
+        approved,
+    )
+    assert result["installed_id"] == "external-guide"
+    assert "external-guide" not in approved

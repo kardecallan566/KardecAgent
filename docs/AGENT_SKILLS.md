@@ -54,3 +54,21 @@ user to authorize skills again. This intentionally prevents project files or
 modified skill content from silently granting or inheriting approval. Without
 valid consent for the complete dependency chain, the agent continues the task
 without those skills.
+
+## External marketplace imports
+
+The Studio marketplace can preview and import an instruction-only Skill from a
+public GitHub folder URL in the form
+`https://github.com/OWNER/REPO/tree/BRANCH/SKILL_PATH`. It uses the GitHub
+Contents API over HTTPS, disables redirects, limits response sizes, validates
+the manifest and dependency graph, and previews the instruction text before
+installation. Private repositories and arbitrary hosts are not supported.
+
+Installation requires a separate explicit confirmation after preview. The
+installer fetches the package again and compares its SHA-256 fingerprint with
+the reviewed preview, so a changed remote package cannot be installed under an
+old approval. Replacing an existing Skill requires an additional confirmation.
+Only `manifest.json` and `SKILL.md` are imported; no scripts, binaries,
+dependencies, or hooks are downloaded or executed. Imported Skills remain
+untrusted instructions and must be separately authorized for the current Core
+session before task use.

@@ -90,7 +90,9 @@ def parse_github_skill_url(value: str) -> GitHubSkillSource:
     if (
         not _OWNER_RE.fullmatch(owner)
         or not _REPO_RE.fullmatch(repository)
+        or repository in {".", ".."}
         or not _BRANCH_RE.fullmatch(branch)
+        or branch in {".", ".."}
         or not skill_path
         or any(not _PATH_RE.fullmatch(part) or part in {".", ".."} for part in skill_path)
     ):
