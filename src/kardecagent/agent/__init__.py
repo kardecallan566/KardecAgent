@@ -4,6 +4,7 @@ from .orchestrator import Orchestrator, OrchestrationError, SubtaskExecutionResu
 from .recovery import RecoveryManager, RecoveryResult
 from .state import AgentEvent, TaskState, TaskStatus
 from .skills import Skill, SkillCatalog, SkillError, SkillManifest
+from .skill_orchestrator import SkillOrchestrator, SkillPreparation
 
 __all__ = [
     "AgentExecutor",
@@ -20,4 +21,6 @@ __all__ = [
     "SkillCatalog",
     "SkillError",
     "SkillManifest",
+    "SkillOrchestrator",
+    "SkillPreparation",
 ]

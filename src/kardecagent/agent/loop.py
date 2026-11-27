@@ -18,6 +18,8 @@ from .retry_policy import RetryPolicy
 from .tools_schema import ToolCallError
 from .project_brief import build_project_brief, project_brief_instructions
 from .project_memory import ProjectMemoryStore
+from .skills import SkillCatalog, SkillError
+from .skill_orchestrator import SkillOrchestrator
 from ..llm.cleaner import extract_json_payload
 from ..harness import load_registry
 from ..harness.registry import compose_system_prompt
@@ -64,7 +66,16 @@ class AgentLoop:
             "workspace_access": {"root": str(root), "tools": ["list_files", "read_file", "search_files", "write_file", "append_file", "replace_in_file", "create_directory", "apply_patch", "run_command", "git_status", "git_diff", "git_log", "git_branches", "git_remotes", "git_fetch", "git_pull", "git_push", "git_create_branch", "git_checkout", "git_commit", "git_merge", "git_create_pr", "git_pr_status", "git_merge_pr"], "path_rule": "All tool paths are relative to this workspace root; list_files accepts an optional relative directory path."},
             "conversation_history": conversation_history or [],
             "active_editor": active_editor_context or None,
+            "available_skills": self._available_skills(root),
         }
+
+    @staticmethod
+    def _available_skills(root: Path) -> list[dict]:
+        try:
+            return SkillCatalog(root).list_available()
+        except SkillError:
+            # An invalid optional package must not block ordinary project tasks.
+            return []
 
     def _create_plan(self, root: Path, task: str, state: TaskState, conversation_history: list[dict] | None = None, active_editor_context: dict | None = None) -> ExecutionPlan | None:
         context = self._build_context(root, task, conversation_history, active_editor_context)
@@ -128,6 +139,7 @@ class AgentLoop:
         conversation_history: list[dict] | None = None,
         active_editor_context: dict | None = None,
         model_switch_approval_callback=None,
+        skill_approval_callback=None,
     ) -> TaskState:
         root = project_root.resolve()
         setter = getattr(self.llm, "set_approval_callback", None)
@@ -171,6 +183,42 @@ class AgentLoop:
                 return state
             state.record("high_risk_approval", "High-risk execution approved.", approved=True)
 
+        skill_preparation = None
+        try:
+            skill_preparation = SkillOrchestrator(SkillCatalog(root)).prepare(
+                task, approval_callback=skill_approval_callback
+            )
+            if skill_preparation.candidate_ids:
+                state.record(
+                    "skills_selected",
+                    "Relevant skills were selected from the project catalog.",
+                    selection=skill_preparation.as_dict(),
+                )
+                if skill_preparation.approval_status == "approval_required":
+                    state.record(
+                        "skill_approval_required",
+                        "Skill activation is waiting for explicit user approval.",
+                        skill_ids=list(skill_preparation.candidate_ids),
+                    )
+                elif skill_preparation.approval_status == "rejected":
+                    state.record(
+                        "skill_approval_rejected",
+                        "User declined the selected skills; execution continues without them.",
+                        skill_ids=list(skill_preparation.candidate_ids),
+                    )
+                elif skill_preparation.approval_status == "approved":
+                    state.record(
+                        "skills_loaded",
+                        "Approved skills were loaded as untrusted reference instructions.",
+                        skill_ids=list(skill_preparation.loaded_ids),
+                    )
+        except SkillError as exc:
+            state.record(
+                "skills_unavailable",
+                "Skill catalog could not be used; continuing without skills.",
+                error=str(exc),
+            )
+
         memory_path = ProjectMemoryStore(root).record_approved_plan(
             task, brief.as_dict(), plan
         )
@@ -197,6 +245,8 @@ class AgentLoop:
             state.record("checkpoint_skipped", "Project is not a Git repository.")
 
         context = self._build_context(root, task, conversation_history, active_editor_context)
+        if skill_preparation is not None and skill_preparation.prompt_sections:
+            context["skill_prompt_sections"] = list(skill_preparation.prompt_sections)
         from .orchestrator import Orchestrator, OrchestrationError
         orchestrator = Orchestrator(self.llm, self.settings)
         if orchestrator.should_decompose(plan, root):
@@ -229,15 +279,31 @@ class AgentLoop:
                 state.transition(TaskStatus.COMPLETED, reason="Task completed through logical subtasks and verified.")
                 state.record("completed", "Task completed through logical subtasks and verified.",
                              subtask_board=board.as_dict(), verification=verification)
+                if skill_preparation is not None and skill_preparation.loaded_ids:
+                    state.record(
+                        "skill_outcome",
+                        "Skill use was evaluated against the verified task result.",
+                        **SkillOrchestrator.outcome(skill_preparation, success=True),
+                    )
                 return state
             except OrchestrationError as exc:
                 state.record("subtask_decomposition_failed", str(exc))
                 state.record("subtask_fallback", "Falling back to the single approved-plan executor.")
 
-        return self.execute_approved_plan(root, task, plan, state, context=context,
+        result = self.execute_approved_plan(root, task, plan, state, context=context,
                                           approval_callback=approval_callback,
                                           high_risk_approval_callback=high_risk_approval_callback,
                                           persistence_callback=lambda s, p: store.save(s, plan=p, approved=True))
+        if skill_preparation is not None and skill_preparation.loaded_ids:
+            result.record(
+                "skill_outcome",
+                "Skill use was evaluated against the task verification result.",
+                **SkillOrchestrator.outcome(
+                    skill_preparation,
+                    success=result.status in {TaskStatus.VERIFIED, TaskStatus.COMPLETED},
+                ),
+            )
+        return result
 
     def resume(self, project_root: Path, task: str, *, event_callback=None,
                model_switch_approval_callback=None) -> TaskState:
