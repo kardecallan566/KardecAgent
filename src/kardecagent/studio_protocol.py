@@ -289,7 +289,7 @@ def _skill_fingerprint(catalog: SkillCatalog, skill_id: str) -> str:
     instructions_path = catalog._safe_file(directory, catalog.INSTRUCTIONS, catalog.MAX_INSTRUCTIONS_BYTES)
     digest = hashlib.sha256()
     digest.update(manifest_path.read_bytes())
-    digest.update(b"\\0")
+    digest.update(b"\0")
     digest.update(instructions_path.read_bytes())
     return digest.hexdigest()
 
