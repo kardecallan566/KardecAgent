@@ -45,7 +45,7 @@ class ProjectFilesystem:
         path = self.safe_path(relative_path)
         if not path.is_file():
             raise FileNotFoundError(relative_path)
-        return path.read_text(encoding="utf-8")
+        return path.read_bytes().decode("utf-8")
 
     def _atomic_write(self, path: Path, content: str) -> None:
         if path.exists() and not path.is_file():
@@ -101,7 +101,7 @@ class ProjectFilesystem:
         path = self.safe_path(relative_path)
         if path.exists() and not path.is_file():
             raise IsADirectoryError(relative_path)
-        before = path.read_text(encoding="utf-8") if path.exists() else ""
+        before = path.read_bytes().decode("utf-8") if path.exists() else ""
         expected = before + content
         self._atomic_write(path, expected)
         actual = self.read_file(relative_path)
@@ -120,7 +120,7 @@ class ProjectFilesystem:
         path = self.safe_path(relative_path)
         if not path.is_file():
             raise FileNotFoundError(relative_path)
-        original = path.read_text(encoding="utf-8")
+        original = path.read_bytes().decode("utf-8")
         count = original.count(find)
         if count == 0:
             return 0
