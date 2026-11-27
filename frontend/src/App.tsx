@@ -1848,13 +1848,13 @@ function App() {
               {skillsLoading && <div className="skills-loading"><RefreshCw size={14}/> Processando catálogo...</div>}
               <div className="skills-manager-grid">
                 {skillItems.map(skill => <article className="skill-card" key={skill.id}>
-                  <div className="skill-card-heading"><div className="skill-card-icon"><WandSparkles size={17}/></div><span className={skillApprovedIds.includes(skill.id) ? "skill-state active" : "skill-state"}>{skillApprovedIds.includes(skill.id) ? "AUTORIZADA" : "AGUARDA AUTORIZAÇÃO"}</span></div>
+                  <div className="skill-card-heading"><div className="skill-card-icon"><WandSparkles size={17}/></div><span className={skillApprovedIds.includes(skill.id) ? "skill-state active" : "skill-state"}>{skillApprovedIds.includes(skill.id) ? "AUTORIZADA NESTA SESSÃO" : "NÃO AUTORIZADA"}</span></div>
                   <h3>{skill.name}</h3><p>{skill.description || "Sem descrição."}</p>
                   <div className="skill-card-meta"><span>v{skill.version}</span><span>{skill.tags.length} tags</span><span>{skill.dependencies.length} dependências</span></div>
                   <div className="skill-tags">{skill.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
                   <div className="skill-card-actions">
                     <button onClick={() => openEditSkillForm(skill)}>Editar</button>
-                    <button onClick={() => { const enabled = !skillApprovedIds.includes(skill.id); if (window.confirm((enabled ? "Autorizar" : "Revogar autorização de") + " " + skill.name + (enabled ? " e suas dependências para uso em tarefas futuras?" : " e suas dependências?"))) sendSkillCommand("skills.activation.set", { id: skill.id, enabled }); }}>{skillApprovedIds.includes(skill.id) ? "Revogar" : "Autorizar"}</button>
+                    <button onClick={() => { const enabled = !skillApprovedIds.includes(skill.id); if (window.confirm((enabled ? "Autorizar" : "Revogar autorização de") + " " + skill.name + (enabled ? " e suas dependências para uso nas tarefas desta sessão?" : " e suas dependências?"))) sendSkillCommand("skills.activation.set", { id: skill.id, enabled }); }}>{skillApprovedIds.includes(skill.id) ? "Revogar" : "Autorizar"}</button>
                     <button className="danger" onClick={() => { if (window.confirm("Excluir permanentemente a Skill " + skill.name + "?")) sendSkillCommand("skills.delete", { id: skill.id }); }}>Excluir</button>
                   </div>
                 </article>)}
@@ -1870,7 +1870,7 @@ function App() {
                   <label>Dependências<input value={skillForm.dependencies} placeholder="base-python, qa" onChange={event => setSkillForm(value => ({ ...value, dependencies: event.target.value }))}/></label>
                   <label className="wide">Instruções (SKILL.md)<textarea rows={10} value={skillForm.instructions} placeholder="Descreva o fluxo, boas práticas, critérios de qualidade e limitações..." onChange={event => setSkillForm(value => ({ ...value, instructions: event.target.value }))}/></label>
                 </div>
-                <div className="skill-editor-actions"><small>Ativação exige autorização explícita. Conteúdo é tratado como referência não confiável.</small><button onClick={saveSkillForm} disabled={skillsLoading}>Salvar Skill</button></div>
+                <div className="skill-editor-actions"><small>A autorização vale apenas nesta sessão do Core. O conteúdo é referência não confiável.</small><button onClick={saveSkillForm} disabled={skillsLoading}>Salvar Skill</button></div>
               </section>}
             </div>
           ) : activeNav === "agent" ? (

@@ -279,25 +279,7 @@ def _atomic_text(path: Path, value: str) -> None:
         raise
 
 
-def _skill_approvals_path(root: Path) -> Path:
-    return root / ".kardecagent" / "skills" / "approvals.json"
-
-
-def _approved_skill_ids(root: Path) -> set[str]:
-    metadata_root = root / ".kardecagent"
-    skills_root = metadata_root / "skills"
-    path = _skill_approvals_path(root)
-    if metadata_root.is_symlink() or skills_root.is_symlink() or path.is_symlink() or not path.exists():
-        return set()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return set()
-    values = payload.get("approved_ids", []) if isinstance(payload, dict) else []
-    return {item for item in values if isinstance(item, str)}
-
-
-def _skill_command(root: Path, message: dict) -> dict:
+def _skill_command(root: Path, message: dict, approved_skill_ids: set[str]) -> dict:
     command = message.get("type")
     payload = message.get("payload")
     payload = payload if isinstance(payload, dict) else {}
@@ -305,7 +287,7 @@ def _skill_command(root: Path, message: dict) -> dict:
         raise SkillError("A pasta .kardecagent não pode ser um link simbólico.")
     catalog = SkillCatalog(root)
     if command == "skills.list":
-        return {"skills": catalog.list_available(), "approved_ids": sorted(_approved_skill_ids(root))}
+        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids)}
     if command == "skills.body":
         skill_id = payload.get("id")
         if not isinstance(skill_id, str):
@@ -346,7 +328,7 @@ def _skill_command(root: Path, message: dict) -> dict:
             raise SkillError("Arquivos de uma Skill não podem ser links simbólicos.")
         _atomic_text(directory / SkillCatalog.INSTRUCTIONS, instructions)
         _atomic_json(directory / SkillCatalog.MANIFEST, manifest)
-        return {"skills": catalog.list_available(), "approved_ids": sorted(_approved_skill_ids(root)), "saved_id": parsed.id}
+        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids), "saved_id": parsed.id}
     if command == "skills.delete":
         skill_id = payload.get("id")
         manifests = {item.id: item for item in catalog.discover()}
@@ -359,9 +341,8 @@ def _skill_command(root: Path, message: dict) -> dict:
         if dependents:
             raise SkillError("Não é possível excluir: outras Skills dependem dela (" + ", ".join(dependents) + ").")
         shutil.rmtree(directory)
-        approved = _approved_skill_ids(root) - {skill_id}
-        _atomic_json(_skill_approvals_path(root), {"version": 1, "approved_ids": sorted(approved)})
-        return {"skills": catalog.list_available(), "approved_ids": sorted(approved), "deleted_id": skill_id}
+        approved_skill_ids.discard(skill_id)
+        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids), "deleted_id": skill_id}
     if command == "skills.activation.set":
         skill_id = payload.get("id")
         enabled = payload.get("enabled")
@@ -369,10 +350,8 @@ def _skill_command(root: Path, message: dict) -> dict:
             raise SkillError("id e enabled são obrigatórios.")
         loaded = catalog.load(skill_id, approved=True)
         closure = {item.manifest.id for item in loaded}
-        approved = _approved_skill_ids(root)
-        approved.update(closure) if enabled else approved.difference_update(closure)
-        _atomic_json(_skill_approvals_path(root), {"version": 1, "approved_ids": sorted(approved)})
-        return {"skills": catalog.list_available(), "approved_ids": sorted(approved), "updated_id": skill_id}
+        approved_skill_ids.update(closure) if enabled else approved_skill_ids.difference_update(closure)
+        return {"skills": catalog.list_available(), "approved_ids": sorted(approved_skill_ids), "updated_id": skill_id}
     raise SkillError("Comando de Skills desconhecido.")
 
 
@@ -380,6 +359,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
     """Serve a bounded JSONL command/event stream for the desktop Studio."""
     root = project_root.resolve()
     seen_command_ids: dict[str, None] = {}
+    # Activation consent is held only in memory: project files/skills cannot self-authorize.
+    approved_skill_ids: set[str] = set()
     parallel_limit = max(1, min(4, int(getattr(agent.settings, "max_parallel_subtasks", 1))))
     _write({
         "type": "runtime.ready",
@@ -507,7 +488,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
                 del seen_command_ids[next(iter(seen_command_ids))]
             try:
-                result = _skill_command(root, message)
+                result = _skill_command(root, message, approved_skill_ids)
                 _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": True, **result}})
             except Exception as exc:
                 _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": False, "message": str(exc)[:1000]}})
@@ -1064,7 +1045,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 model_switch_approval_callback=lambda request: _approval(
                     identifier, execution_id, request, kind="model_switch"
                 ),
-                skill_approval_callback=lambda skill_ids: set(skill_ids).issubset(_approved_skill_ids(root)),
+                skill_approval_callback=lambda skill_ids: set(skill_ids).issubset(approved_skill_ids),
             )
             result_summary = (
                 state.events[-1].message if state.events
