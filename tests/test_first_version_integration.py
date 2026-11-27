@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from kardecagent.agent.loop import AgentLoop
+from kardecagent.agent.plan import ExecutionPlan
+from kardecagent.agent.state import TaskState
 from kardecagent.config import Settings
 from kardecagent.llm.client import LLMResponse
 
@@ -315,9 +317,7 @@ def test_end_to_end_concurrent_user_edit_is_never_overwritten(tmp_path: Path):
             _tool("write_file", {"path": "shared.py", "content": "VALUE = 'agent edit'\\n"}),
         ]
     )
-    plan = __import__(
-        "kardecagent.agent.plan", fromlist=["ExecutionPlan"]
-    ).ExecutionPlan(
+    plan = ExecutionPlan(
         "Update shared module",
         ["Read and update shared.py"],
         ["Confirm the file contents"],
@@ -329,9 +329,7 @@ def test_end_to_end_concurrent_user_edit_is_never_overwritten(tmp_path: Path):
         tmp_path,
         "update shared.py",
         plan,
-        __import__(
-            "kardecagent.agent.state", fromlist=["TaskState"]
-        ).TaskState("concurrent edit", str(tmp_path)),
+        TaskState("concurrent edit", str(tmp_path)),
         context={"subtask": {"id": "concurrent-user-edit-e2e"}},
     )
 
