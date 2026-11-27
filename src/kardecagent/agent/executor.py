@@ -230,6 +230,33 @@ class AgentExecutor:
         return verify_recorded_changes(root, changes)
 
     @staticmethod
+    def _expected_write_fingerprint(
+        root: Path, state: TaskState | None, relative_path: str
+    ) -> str | None:
+        """Use the latest successful read as a write precondition when available."""
+        fs = ProjectFilesystem(root)
+        target = fs.safe_path(relative_path)
+        current = fs.file_fingerprint(relative_path)["sha256"] if target.is_file() else None
+        if state is None:
+            return current
+        for event in reversed(state.events):
+            if event.event_type != "tool_result":
+                continue
+            data = event.data or {}
+            if data.get("path") != relative_path:
+                continue
+            if data.get("tool") == "read_file":
+                content = data.get("result")
+                if isinstance(content, str):
+                    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+                return current
+            if data.get("tool") in {
+                "write_file", "append_file", "replace_in_file", "apply_patch"
+            }:
+                return current
+        return current
+
+    @staticmethod
     def _contains_git_mutation_command(command: str) -> bool:
         pattern = (
             r"\bgit(?:['\",\s]+)(?:-C\s+[^\s]+\s+)?"
@@ -306,8 +333,8 @@ class AgentExecutor:
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
             target = fs.safe_path(args["path"])
-            expected_sha256 = (
-                fs.file_fingerprint(args["path"])["sha256"] if target.is_file() else None
+            expected_sha256 = self._expected_write_fingerprint(
+                root, state, args["path"]
             )
             fs.write_file(args["path"], args["content"], expected_sha256=expected_sha256)
             if fs.read_file(args["path"]) != args["content"]:
@@ -1091,6 +1118,7 @@ class AgentExecutor:
                     parsed_result.get("changed") is False or parsed_result.get("created") is False
                 )
                 state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result,
+                             path=action.arguments.get("path"),
                              action_signature=self._action_signature(action), no_op=no_op)
                 if no_op:
                     if register_no_progress("tool completed without changing or advancing the workspace",
