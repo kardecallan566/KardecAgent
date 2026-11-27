@@ -169,7 +169,7 @@ def _read_message() -> dict:
         raise StudioProtocolError("Command must be a valid JSON object.") from exc
     if not isinstance(message, dict):
         raise StudioProtocolError("Command must be a JSON object.")
-    limit = MAX_SEMANTIC_MESSAGE_BYTES if message.get("type") in {"editor.semantic", "editor.rename.preview", "editor.code_actions"} else MAX_MESSAGE_BYTES
+    limit = MAX_SEMANTIC_MESSAGE_BYTES if message.get("type") in {"editor.semantic", "editor.rename.preview", "editor.code_actions"} else (256 * 1024 if message.get("type") == "skills.save" else MAX_MESSAGE_BYTES)
     if encoded_size > limit:
         raise StudioProtocolError("Command exceeds the 64 KiB protocol limit.")
     return message
@@ -338,6 +338,8 @@ def _skill_command(root: Path, message: dict) -> dict:
         if directory.is_symlink():
             raise SkillError("O pacote da Skill não pode ser um link simbólico.")
         directory.mkdir(parents=True, exist_ok=True)
+        if (directory / SkillCatalog.INSTRUCTIONS).is_symlink() or (directory / SkillCatalog.MANIFEST).is_symlink():
+            raise SkillError("Arquivos de uma Skill não podem ser links simbólicos.")
         _atomic_text(directory / SkillCatalog.INSTRUCTIONS, instructions)
         _atomic_json(directory / SkillCatalog.MANIFEST, manifest)
         return {"skills": catalog.list_available(), "approved_ids": sorted(_approved_skill_ids(root)), "saved_id": parsed.id}

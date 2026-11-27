@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from kardecagent.studio_protocol import _approved_skill_ids, _skill_command
