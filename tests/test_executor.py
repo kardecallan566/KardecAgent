@@ -630,3 +630,39 @@ def test_complete_step_rejects_artifact_that_changed_after_write(tmp_path: Path)
 
     assert report["verified"] is False
     assert report["files"][0]["status"] == "mismatch"
+
+
+
+def test_complete_step_requires_disk_verification_and_repairs_mismatch(tmp_path: Path):
+    import json
+
+    target = tmp_path / "artifact.txt"
+
+    class TamperingLLM:
+        def __init__(self):
+            self.responses = iter([
+                '{"tool":"write_file","arguments":{"path":"artifact.txt","content":"expected"},"plan_step":1}',
+                '{"tool":"complete_step","arguments":{"step":1,"evidence":"created"},"plan_step":1}',
+                '{"tool":"write_file","arguments":{"path":"artifact.txt","content":"expected"},"plan_step":1}',
+                '{"tool":"complete_step","arguments":{"step":1,"evidence":"re-read after repair"},"plan_step":1}',
+                '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":[{"criterion":"artifact exists","evidence":"disk fingerprint verified"}]}}',
+            ])
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 2:
+                target.write_text("external edit", encoding="utf-8")
+            return LLMResponse(next(self.responses), {})
+
+    loop = AgentLoop(TamperingLLM(), Settings(max_iterations=8))
+    plan = ExecutionPlan("Create artifact", ["Create artifact"], ["Check artifact"], [], ["artifact exists"])
+
+    result = loop.execute_approved_plan(tmp_path, "create artifact", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.COMPLETED
+    assert target.read_text(encoding="utf-8") == "expected"
+    assert sum(event.event_type == "plan_step_completed" for event in result.events) == 1
+    assert any(event.event_type == "artifact_verification_failed" for event in result.events)
+    assert any(event.event_type == "artifact_verification" and event.data["verification"]["verified"]
+               for event in result.events)
