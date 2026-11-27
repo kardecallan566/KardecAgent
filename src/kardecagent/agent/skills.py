@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 _SKILL_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-_ALLOWED_FIELDS = {"id", "name", "description", "version", "tags", "dependencies", "trust", "enabled"}
+_ALLOWED_FIELDS = {"id", "name", "description", "version", "tags", "dependencies"}
 
 
 class SkillError(ValueError):
@@ -28,8 +28,6 @@ class SkillManifest:
     version: str = "1.0.0"
     tags: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
-    trust: str = "local"
-    enabled: bool = True
 
     @classmethod
     def from_dict(cls, value: Any, *, directory_name: str) -> "SkillManifest":
@@ -64,16 +62,8 @@ class SkillManifest:
             raise SkillError("skill dependencies must be an array of valid skill ids")
         if len(set(dependencies)) != len(dependencies) or skill_id in dependencies:
             raise SkillError("skill dependencies must be unique and cannot include itself")
-        trust = value.get("trust", "local")
-        if not isinstance(trust, str) or trust not in {"local", "external"}:
-            raise SkillError("skill trust must be local or external")
-        enabled = value.get("enabled", trust == "local")
-        if not isinstance(enabled, bool):
-            raise SkillError("skill enabled must be a boolean")
-        if trust == "external" and enabled:
-            raise SkillError("external skills must be reviewed and approved before activation")
         return cls(skill_id, name.strip(), description.strip(), version,
-                   tuple(tags), tuple(dependencies), trust, enabled)
+                   tuple(tags), tuple(dependencies))
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,12 +161,13 @@ class SkillCatalog:
         return [{
             "id": item.id, "name": item.name, "description": item.description,
             "version": item.version, "tags": list(item.tags),
-            "dependencies": list(item.dependencies), "trust": item.trust,
-            "enabled": item.enabled,
+            "dependencies": list(item.dependencies), "requires_approval": True,
         } for item in self.discover()]
 
-    def load(self, skill_id: str) -> list[Skill]:
-        """Load an enabled skill and its dependencies, in dependency-first order."""
+    def load(self, skill_id: str, *, approved: bool = False) -> list[Skill]:
+        """Load a skill only after the caller confirms explicit user approval."""
+        if approved is not True:
+            raise SkillError("explicit user approval is required before activating a skill")
         manifests = {item.id: item for item in self.discover()}
         if skill_id not in manifests:
             raise SkillError(f"unknown skill: {skill_id}")
@@ -185,8 +176,6 @@ class SkillCatalog:
 
         def visit(current: str) -> None:
             manifest = manifests[current]
-            if not manifest.enabled:
-                raise SkillError(f"skill is disabled and requires approval before activation: {current}")
             if current in loaded:
                 return
             for dependency in manifest.dependencies:
@@ -205,14 +194,14 @@ class SkillCatalog:
         visit(skill_id)
         return ordered
 
-    def load_prompt_sections(self, skill_ids: list[str]) -> list[str]:
-        """Render explicitly selected skills; no discovery result is auto-executed."""
+    def load_prompt_sections(self, skill_ids: list[str], *, approved: bool = False) -> list[str]:
+        """Render explicitly selected skills after the caller confirms user approval."""
         if not isinstance(skill_ids, list) or not all(isinstance(x, str) for x in skill_ids):
             raise SkillError("skill_ids must be a list of strings")
         sections: list[str] = []
         loaded: set[str] = set()
         for skill_id in skill_ids:
-            for skill in self.load(skill_id):
+            for skill in self.load(skill_id, approved=approved):
                 if skill.manifest.id not in loaded:
                     sections.append(skill.prompt_section())
                     loaded.add(skill.manifest.id)

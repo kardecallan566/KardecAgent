@@ -5,16 +5,16 @@ import pytest
 from kardecagent.agent.skills import SkillCatalog, SkillError
 
 
-def add_skill(root, skill_id, *, dependencies=None, trust="local", enabled=None, body="# Skill\nUse focused tests.\n"):
+def add_skill(root, skill_id, *, dependencies=None, extra_fields=None, body="# Skill\nUse focused tests.\n"):
     folder = root / ".kardecagent" / "skills" / skill_id
     folder.mkdir(parents=True, exist_ok=True)
     manifest = {
         "id": skill_id, "name": skill_id.replace("-", " ").title(),
         "description": "Test skill", "version": "1.0.0",
-        "tags": ["testing"], "dependencies": dependencies or [], "trust": trust,
+        "tags": ["testing"], "dependencies": dependencies or [],
     }
-    if enabled is not None:
-        manifest["enabled"] = enabled
+    if extra_fields:
+        manifest.update(extra_fields)
     (folder / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (folder / "SKILL.md").write_text(body, encoding="utf-8")
     return folder
@@ -24,36 +24,37 @@ def test_discover_lists_metadata_without_loading_instruction_bodies(tmp_path):
     add_skill(tmp_path, "python-tests")
     result = SkillCatalog(tmp_path).list_available()
     assert result[0]["id"] == "python-tests"
-    assert result[0]["enabled"] is True
+    assert result[0]["requires_approval"] is True
 
 
 def test_load_is_explicit_and_renders_untrusted_boundary(tmp_path):
     add_skill(tmp_path, "python-tests")
     catalog = SkillCatalog(tmp_path)
     assert catalog.load_prompt_sections([]) == []
-    section = catalog.load_prompt_sections(["python-tests"])[0]
+    with pytest.raises(SkillError, match="explicit user approval"):
+        catalog.load_prompt_sections(["python-tests"])
+    section = catalog.load_prompt_sections(["python-tests"], approved=True)[0]
     assert "untrusted reference material" in section
     assert "<skill-reference>" in section
 
 
-def test_external_skill_is_disabled_by_default(tmp_path):
-    add_skill(tmp_path, "external-guide", trust="external")
-    catalog = SkillCatalog(tmp_path)
-    assert catalog.list_available()[0]["enabled"] is False
-    with pytest.raises(SkillError, match="disabled"):
-        catalog.load("external-guide")
+def test_every_skill_requires_explicit_approval(tmp_path):
+    add_skill(tmp_path, "external-guide")
+    with pytest.raises(SkillError, match="explicit user approval"):
+        SkillCatalog(tmp_path).load("external-guide")
+    assert SkillCatalog(tmp_path).load("external-guide", approved=True)
 
 
-def test_external_skill_cannot_self_enable(tmp_path):
-    add_skill(tmp_path, "external-guide", trust="external", enabled=True)
-    with pytest.raises(SkillError, match="reviewed and approved"):
+def test_skill_manifest_cannot_self_assert_trust_or_activation(tmp_path):
+    add_skill(tmp_path, "external-guide", extra_fields={"trust": "local", "enabled": True})
+    with pytest.raises(SkillError, match="unknown skill manifest"):
         SkillCatalog(tmp_path).discover()
 
 
 def test_dependency_load_order_is_dependency_first(tmp_path):
     add_skill(tmp_path, "base")
     add_skill(tmp_path, "advanced", dependencies=["base"])
-    loaded = SkillCatalog(tmp_path).load("advanced")
+    loaded = SkillCatalog(tmp_path).load("advanced", approved=True)
     assert [skill.manifest.id for skill in loaded] == ["base", "advanced"]
 
 
@@ -112,7 +113,7 @@ def test_missing_skill_is_rejected(tmp_path):
 def test_empty_instructions_are_rejected_when_loaded(tmp_path):
     add_skill(tmp_path, "empty", body="  ")
     with pytest.raises(SkillError, match="empty"):
-        SkillCatalog(tmp_path).load("empty")
+        SkillCatalog(tmp_path).load("empty", approved=True)
 
 
 def test_catalog_limit_is_enforced(tmp_path):
