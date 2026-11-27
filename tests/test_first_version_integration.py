@@ -220,9 +220,9 @@ def test_end_to_end_creates_multiple_files_and_verifies_each_artifact(tmp_path: 
     llm = DeterministicLLM(
         [
             _plan("Create the service module", "Create the settings module"),
-            _tool("write_file", {"path": "src/service.py", "content": "def total(values):\\n    return sum(values)\\n"}, 1),
+            _tool("write_file", {"path": "src/service.py", "content": "def total(values):\n    return sum(values)\n"}, 1),
             _complete(1),
-            _tool("write_file", {"path": "src/settings.py", "content": "DEFAULT_LIMIT = 25\\n"}, 2),
+            _tool("write_file", {"path": "src/settings.py", "content": "DEFAULT_LIMIT = 25\n"}, 2),
             _complete(2),
             _finish(),
         ]
@@ -236,9 +236,9 @@ def test_end_to_end_creates_multiple_files_and_verifies_each_artifact(tmp_path: 
 
     assert state.status.value == "completed"
     assert (tmp_path / "src/service.py").read_text(encoding="utf-8") == (
-        "def total(values):\\n    return sum(values)\\n"
+        "def total(values):\n    return sum(values)\n"
     )
-    assert (tmp_path / "src/settings.py").read_text(encoding="utf-8") == "DEFAULT_LIMIT = 25\\n"
+    assert (tmp_path / "src/settings.py").read_text(encoding="utf-8") == "DEFAULT_LIMIT = 25\n"
     changed = {
         item["path"]
         for event in state.events
@@ -253,18 +253,18 @@ def test_end_to_end_creates_multiple_files_and_verifies_each_artifact(tmp_path: 
 def test_end_to_end_edits_existing_function_without_touching_unrelated_code(tmp_path: Path):
     _python_fixture(tmp_path)
     source = (
-        "def total(values):\\n"
-        "    return len(values)\\n"
-        "\\n"
-        "def display_name(name):\\n"
-        "    return name.strip()\\n"
+        "def total(values):\n"
+        "    return len(values)\n"
+        "\n"
+        "def display_name(name):\n"
+        "    return name.strip()\n"
     )
     target = tmp_path / "src" / "service.py"
     target.parent.mkdir()
     target.write_text(source, encoding="utf-8")
     expected = source.replace(
-        "def total(values):\\n    return len(values)",
-        "def total(values):\\n    return sum(values)",
+        "def total(values):\n    return len(values)",
+        "def total(values):\n    return sum(values)",
         1,
     )
     llm = DeterministicLLM(
@@ -275,8 +275,8 @@ def test_end_to_end_edits_existing_function_without_touching_unrelated_code(tmp_
                 "replace_in_file",
                 {
                     "path": "src/service.py",
-                    "find": "def total(values):\\n    return len(values)",
-                    "replace": "def total(values):\\n    return sum(values)",
+                    "find": "def total(values):\n    return len(values)",
+                    "replace": "def total(values):\n    return sum(values)",
                 },
             ),
             _complete(),
@@ -292,7 +292,7 @@ def test_end_to_end_edits_existing_function_without_touching_unrelated_code(tmp_
 
     assert state.status.value == "completed"
     assert target.read_text(encoding="utf-8") == expected
-    assert "def display_name(name):\\n    return name.strip()" in target.read_text(encoding="utf-8")
+    assert "def display_name(name):\n    return name.strip()" in target.read_text(encoding="utf-8")
     assert any(
         event.event_type == "integrity_change"
         and any(change["path"] == "src/service.py" for change in event.data.get("changes", []))
@@ -303,18 +303,18 @@ def test_end_to_end_edits_existing_function_without_touching_unrelated_code(tmp_
 def test_end_to_end_concurrent_user_edit_is_never_overwritten(tmp_path: Path):
     _python_fixture(tmp_path)
     target = tmp_path / "shared.py"
-    target.write_text("VALUE = 'original'\\n", encoding="utf-8")
+    target.write_text("VALUE = 'original'\n", encoding="utf-8")
 
     class ConcurrentDeterministicLLM(DeterministicLLM):
         def chat(self, messages: list[dict]) -> LLMResponse:
             if self.calls == 1:
-                target.write_text("VALUE = 'user edit'\\n", encoding="utf-8")
+                target.write_text("VALUE = 'user edit'\n", encoding="utf-8")
             return super().chat(messages)
 
     llm = ConcurrentDeterministicLLM(
         [
             _tool("read_file", {"path": "shared.py"}),
-            _tool("write_file", {"path": "shared.py", "content": "VALUE = 'agent edit'\\n"}),
+            _tool("write_file", {"path": "shared.py", "content": "VALUE = 'agent edit'\n"}),
         ]
     )
     plan = ExecutionPlan(
@@ -333,7 +333,7 @@ def test_end_to_end_concurrent_user_edit_is_never_overwritten(tmp_path: Path):
         context={"subtask": {"id": "concurrent-user-edit-e2e"}},
     )
 
-    assert target.read_text(encoding="utf-8") == "VALUE = 'user edit'\\n"
+    assert target.read_text(encoding="utf-8") == "VALUE = 'user edit'\n"
     assert state.status.value == "max_iterations"
     assert any(
         event.event_type == "tool_error" and "changed concurrently" in event.message
