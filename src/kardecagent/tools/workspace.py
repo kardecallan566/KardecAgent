@@ -199,7 +199,19 @@ def verify_recorded_changes(root: Path, changes: list[dict]) -> dict:
     results = []
     for change in changes:
         raw = str(change.get("path", ""))
-        target = _safe_remediation_path(root, raw)
+        try:
+            target = _safe_remediation_path(root, raw)
+        except (ValueError, RuntimeError) as exc:
+            results.append({
+                "path": raw,
+                "status": "unsafe_path",
+                "expected_exists": bool(change.get("exists_after", True)),
+                "actual_exists": None,
+                "expected_sha256": change.get("sha256_after"),
+                "actual_sha256": None,
+                "error": str(exc),
+            })
+            continue
         if target.is_symlink():
             actual_exists, actual_digest = True, None
             status = "unsafe_symlink"
