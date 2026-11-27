@@ -5,7 +5,7 @@ from kardecagent.studio_protocol import _skill_command
 
 @pytest.fixture
 def approved():
-    return set()
+    return {}
 
 
 def payload(command, **values):
@@ -43,10 +43,10 @@ def test_skill_activation_is_explicit_and_session_scoped(tmp_path, approved):
     ), approved)
     result = _skill_command(tmp_path, payload("skills.activation.set", id="python-tests", enabled=True), approved)
     assert result["approved_ids"] == ["base", "python-tests"]
-    assert approved == {"base", "python-tests"}
+    assert set(approved) == {"base", "python-tests"}
     result = _skill_command(tmp_path, payload("skills.activation.set", id="python-tests", enabled=False), approved)
     assert result["approved_ids"] == []
-    assert approved == set()
+    assert approved == {}
 
 
 def test_skill_save_rejects_missing_dependencies_without_partial_package(tmp_path, approved):
@@ -114,3 +114,35 @@ def test_skill_catalog_refuses_symlinked_metadata_root(tmp_path, approved):
         pytest.skip("Directory symlinks are unavailable on this platform.")
     with pytest.raises(ValueError, match="link simbólico"):
         _skill_command(tmp_path, payload("skills.list"), approved)
+
+def test_editing_skill_invalidates_its_previous_approval(tmp_path, approved):
+    _skill_command(tmp_path, payload(
+        "skills.save", id="python", name="Python", tags=["python"],
+        dependencies=[], instructions="Original guidance.",
+    ), approved)
+    _skill_command(tmp_path, payload("skills.activation.set", id="python", enabled=True), approved)
+    assert "python" in approved
+    result = _skill_command(tmp_path, payload(
+        "skills.save", id="python", name="Python", tags=["python"],
+        dependencies=[], instructions="Changed guidance.",
+    ), approved)
+    assert "python" not in result["approved_ids"]
+    assert "python" not in approved
+
+
+def test_editing_dependency_invalidates_dependent_skill_consent(tmp_path, approved):
+    _skill_command(tmp_path, payload(
+        "skills.save", id="base", name="Base", tags=[],
+        dependencies=[], instructions="Base v1.",
+    ), approved)
+    _skill_command(tmp_path, payload(
+        "skills.save", id="child", name="Child", tags=[],
+        dependencies=["base"], instructions="Child guidance.",
+    ), approved)
+    _skill_command(tmp_path, payload("skills.activation.set", id="child", enabled=True), approved)
+    assert set(_skill_command(tmp_path, payload("skills.list"), approved)["approved_ids"]) == {"base", "child"}
+    _skill_command(tmp_path, payload(
+        "skills.save", id="base", name="Base", tags=[],
+        dependencies=[], instructions="Base v2.",
+    ), approved)
+    assert _skill_command(tmp_path, payload("skills.list"), approved)["approved_ids"] == []

@@ -295,14 +295,38 @@ def _skill_fingerprint(catalog: SkillCatalog, skill_id: str) -> str:
 
 
 def _valid_skill_approvals(catalog: SkillCatalog, approvals: dict[str, str]) -> list[str]:
-    valid = []
-    for skill_id, expected in list(approvals.items()):
+    manifests = {item.id: item for item in catalog.discover()}
+    cache: dict[str, bool] = {}
+
+    def is_valid(skill_id: str, visiting: set[str] | None = None) -> bool:
+        if skill_id in cache:
+            return cache[skill_id]
+        visiting = set() if visiting is None else visiting
+        if skill_id in visiting or skill_id not in manifests or skill_id not in approvals:
+            return False
+        visiting.add(skill_id)
         try:
-            if _skill_fingerprint(catalog, skill_id) == expected:
-                valid.append(skill_id)
+            valid = _skill_fingerprint(catalog, skill_id) == approvals[skill_id]
+            if valid:
+                valid = all(is_valid(dependency, visiting) for dependency in manifests[skill_id].dependencies)
         except (OSError, SkillError):
-            continue
-    return sorted(valid)
+            valid = False
+        visiting.remove(skill_id)
+        cache[skill_id] = valid
+        return valid
+
+    return sorted(skill_id for skill_id in approvals if is_valid(skill_id))
+
+
+def _skill_approval_valid(root: Path, approvals: dict[str, str], skill_ids: list[str]) -> bool:
+    try:
+        catalog = SkillCatalog(root)
+        return all(
+            approvals.get(skill_id) == _skill_fingerprint(catalog, skill_id)
+            for skill_id in skill_ids
+        )
+    except (OSError, SkillError):
+        return False
 
 
 def _skill_command(root: Path, message: dict, approved_skill_fingerprints: dict[str, str]) -> dict:
@@ -1078,9 +1102,8 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 model_switch_approval_callback=lambda request: _approval(
                     identifier, execution_id, request, kind="model_switch"
                 ),
-                skill_approval_callback=lambda skill_ids: all(
-                    approved_skill_fingerprints.get(skill_id) == _skill_fingerprint(SkillCatalog(root), skill_id)
-                    for skill_id in skill_ids
+                skill_approval_callback=lambda skill_ids: _skill_approval_valid(
+                    root, approved_skill_fingerprints, list(skill_ids)
                 ),
             )
             result_summary = (
