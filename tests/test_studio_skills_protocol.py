@@ -146,3 +146,10 @@ def test_editing_dependency_invalidates_dependent_skill_consent(tmp_path, approv
         dependencies=[], instructions="Base v2.",
     ), approved)
     assert _skill_command(tmp_path, payload("skills.list"), approved)["approved_ids"] == []
+
+def test_skill_save_rejects_control_characters(tmp_path, approved):
+    with pytest.raises(ValueError, match="caracteres de controle"):
+        _skill_command(tmp_path, payload(
+            "skills.save", id="unsafe", name="Unsafe", tags=[], dependencies=[],
+            instructions="safe\\x01unsafe",
+        ), approved)

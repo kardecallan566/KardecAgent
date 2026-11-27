@@ -142,6 +142,19 @@ def _write(message: dict) -> None:
             for key in ("message", "summary", "result_summary"):
                 if isinstance(payload.get(key), str):
                     payload[key] = payload[key][:4000]
+            if isinstance(payload.get("skills"), list):
+                payload["skills"] = [
+                    {
+                        "id": item.get("id", ""),
+                        "name": item.get("name", "")[:120],
+                        "description": item.get("description", "")[:180],
+                        "version": item.get("version", "")[:40],
+                        "tags": item.get("tags", [])[:8],
+                        "dependencies": item.get("dependencies", [])[:8],
+                        "requires_approval": True,
+                    }
+                    for item in payload["skills"] if isinstance(item, dict)
+                ]
             bounded["payload"] = payload
         if isinstance(bounded.get("message"), str):
             bounded["message"] = bounded["message"][:4000]
@@ -360,6 +373,8 @@ def _skill_command(root: Path, message: dict, approved_skill_fingerprints: dict[
         instructions = payload.get("instructions")
         if not isinstance(instructions, str) or not instructions.strip() or len(instructions.encode("utf-8")) > SkillCatalog.MAX_INSTRUCTIONS_BYTES:
             raise SkillError("SKILL.md deve conter texto de até 64 KiB.")
+        if any(ord(character) < 32 and character not in "\\n\\r\\t" for character in instructions):
+            raise SkillError("SKILL.md contém caracteres de controle não permitidos.")
         existing = {item.id: item for item in catalog.discover()} if catalog.root.exists() else {}
         candidate = dict(existing)
         candidate[parsed.id] = parsed
