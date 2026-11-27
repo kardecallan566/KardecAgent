@@ -443,8 +443,7 @@ class AgentExecutor:
             raise ValueError("invalid integrity event index")
         event = events[event_index]
         changes = event.data.get("changes", [])
-        for change in reversed(changes):
-            rollback_file_changes(root, changes)
+        rollback_file_changes(root, changes)
         state.record("integrity_rollback", "Audited operation rolled back safely.", event_index=event_index, changes=changes)
         return state
 
@@ -843,6 +842,29 @@ class AgentExecutor:
                     state.record("plan_scope_violation", "Step completion rejected.",
                                  requested_step=step, active_step=active_step_number())
                     continue
+                artifact_report = self._verify_artifacts(root, state, plan_step=step)
+                state.record(
+                    "artifact_verification",
+                    "Changed files were independently checked against their recorded on-disk fingerprints.",
+                    plan_step=step,
+                    verification=artifact_report,
+                )
+                if not artifact_report["verified"]:
+                    state.record(
+                        "artifact_verification_failed",
+                        "Step completion rejected because one or more changed files no longer match the audited result.",
+                        plan_step=step,
+                        verification=artifact_report,
+                    )
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "error": "artifact_verification_failed",
+                            "verification": artifact_report,
+                            "instruction": "Do not complete this step. Re-read the affected files, diagnose why the current disk state differs from the audited after-state, preserve unrelated user changes, repair only the intended files, then request completion again.",
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
                 tracker.complete(step)
                 no_progress_count = 0
                 state.record("plan_step_completed", f"Completed plan step {step}.",
@@ -899,6 +921,27 @@ class AgentExecutor:
                     ]
                     continue
                 evidence = evidence_result["items"]
+                artifact_report = self._verify_artifacts(root, state)
+                state.record(
+                    "artifact_verification",
+                    "All task artifacts were independently re-read and checked before final completion.",
+                    verification=artifact_report,
+                )
+                if not artifact_report["verified"]:
+                    state.record(
+                        "artifact_verification_failed",
+                        "Finish rejected because one or more changed files no longer match their latest audited state.",
+                        verification=artifact_report,
+                    )
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "error": "artifact_verification_failed",
+                            "verification": artifact_report,
+                            "instruction": "Do not finish. Re-inspect each affected artifact, diagnose external or later changes, preserve user modifications, and restore the intended result only when safe. Then retry final verification.",
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
                 if isinstance(context, dict) and isinstance(context.get("subtask"), dict):
                     state.transition(
                         TaskStatus.VERIFYING,
