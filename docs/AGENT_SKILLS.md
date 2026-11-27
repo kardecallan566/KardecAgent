@@ -72,3 +72,19 @@ Only `manifest.json` and `SKILL.md` are imported; no scripts, binaries,
 dependencies, or hooks are downloaded or executed. Imported Skills remain
 untrusted instructions and must be separately authorized for the current Core
 session before task use.
+
+## Evidence-based learning and proposals
+
+The learning report reads only the latest persisted task records (up to 100)
+and counts explicit `skill_outcome` events. It reports verified successes and
+tasks that ended without a verified result; it does not claim that a Skill
+caused a failure. Repeated unmatched task signatures can produce a draft for a
+new Skill, while repeated unverified outcomes can produce a review draft for
+an existing Skill.
+
+The engine uses minimum sample thresholds and never writes to a Skill. The
+Studio's **Analisar uso** action displays the measured metrics and proposals.
+**Abrir rascunho** only places a proposed manifest and instruction draft in the
+editor; the user must review and explicitly save it. Saving changed content
+invalidates its previous SHA-256 activation consent. No model is called and no
+automatic self-modification occurs in this first learning iteration.

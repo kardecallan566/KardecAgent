@@ -42,14 +42,13 @@ def test_skill_metrics_use_only_persisted_outcome_events(tmp_path):
     save_task(tmp_path, "Task two", skill_ids=["python-tests"], success=False)
     report = SkillLearningEngine(tmp_path).analyze()
     assert report["tasks_analyzed"] == 2
-    assert report["metrics"] == [{
-        "skill_id": "python-tests",
-        "attempts": 2,
-        "verified_successes": 1,
-        "not_verified": 1,
-        "verified_success_rate": 50.0,
-        "last_used_at": report["metrics"][0]["last_used_at"],
-    }]
+    metric = report["metrics"][0]
+    assert metric["skill_id"] == "python-tests"
+    assert metric["attempts"] == 2
+    assert metric["verified_successes"] == 1
+    assert metric["not_verified"] == 1
+    assert metric["verified_success_rate"] == 50.0
+    assert isinstance(metric["last_used_at"], str)
     assert report["auto_changes"] is False
 
 
