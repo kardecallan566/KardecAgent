@@ -308,6 +308,9 @@ function App() {
   const [collapsedChatDates, setCollapsedChatDates] = useState<Record<string, boolean>>({});
   const pendingInstructionCommandId = useRef<string | null>(null);
   const [skillItems, setSkillItems] = useState<Array<{ id: string; name: string; description: string; version: string; tags: string[]; dependencies: string[]; requires_approval: boolean }>>([]);
+  const [skillImportUrl, setSkillImportUrl] = useState("");
+  const [skillImportPreview, setSkillImportPreview] = useState<{ source_url: string; id: string; name: string; description: string; version: string; tags: string[]; dependencies: string[]; instructions_preview: string; fingerprint: string; already_installed: boolean } | null>(null);
+  const [skillsNotice, setSkillsNotice] = useState<string | null>(null);
   const [skillApprovedIds, setSkillApprovedIds] = useState<string[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsError, setSkillsError] = useState<string | null>(null);
@@ -346,6 +349,8 @@ function App() {
     const commandId = "skills-list-" + crypto.randomUUID();
     setSkillsLoading(true);
     setSkillsError(null);
+    setSkillsNotice(null);
+    if (type === "skills.import.preview") setSkillImportPreview(null);
     void invoke("send_runtime_command", {
       message: { type: "skills.list", schema_version: 1, command_id: commandId, payload: { project_root: projectRoot } },
     }).catch(error => {
@@ -579,7 +584,7 @@ function App() {
         return;
       }
       if (message.type === "skills.response") {
-        const result = message.payload as { ok?: boolean; skills?: typeof skillItems; approved_ids?: string[]; skill_id?: string; saved_id?: string; instructions?: string; message?: string } | undefined;
+        const result = message.payload as { ok?: boolean; skills?: typeof skillItems; approved_ids?: string[]; skill_id?: string; saved_id?: string; installed_id?: string; instructions?: string; preview?: NonNullable<typeof skillImportPreview>; message?: string } | undefined;
         setSkillsLoading(false);
         if (!result?.ok) {
           setSkillsError(result?.message || "Não foi possível atualizar o catálogo de Skills.");
@@ -588,6 +593,14 @@ function App() {
         if (result.skill_id && typeof result.instructions === "string") {
           setSkillForm(value => ({ ...value, instructions: result.instructions || "" }));
           return;
+        }
+        if (result.preview) {
+          setSkillImportPreview(result.preview);
+          return;
+        }
+        if (result.installed_id) {
+          setSkillImportPreview(null);
+          setSkillsNotice("Skill " + result.installed_id + " importada. Autorize-a na lista para permitir seu uso.");
         }
         if (result.skills) setSkillItems(result.skills);
         if (result.approved_ids) setSkillApprovedIds(result.approved_ids);
@@ -942,7 +955,7 @@ function App() {
     setTerminalReady(false);
   }
 
-  function sendSkillCommand(type: "skills.list" | "skills.body" | "skills.save" | "skills.delete" | "skills.activation.set", payload: Record<string, unknown> = {}) {
+  function sendSkillCommand(type: "skills.list" | "skills.body" | "skills.save" | "skills.delete" | "skills.activation.set" | "skills.import.preview" | "skills.import.install", payload: Record<string, unknown> = {}) {
     if (!projectRoot || runtimeStatus !== "online") {
       setSkillsError("Abra um projeto e conecte o Core para gerenciar Skills.");
       return;
@@ -1855,6 +1868,30 @@ function App() {
           ) : activeNav === "skills" ? (
             <div className="skills-manager">
               <div className="process-toolbar"><div><span className="eyebrow">BIBLIOTECA DO PROJETO</span><h2>Gerenciador de Skills</h2><p>Crie, revise e autorize habilidades que orientam o agente. Skills não executam código nem concedem permissões.</p></div><div className="skills-toolbar-actions"><button onClick={() => sendSkillCommand("skills.list")} disabled={skillsLoading || runtimeStatus !== "online"}><RefreshCw size={14}/> Atualizar</button><button onClick={openNewSkillForm} disabled={!projectRoot}><Plus size={14}/> Nova Skill</button></div></div>
+              <section className="skill-marketplace">
+                <div className="skill-marketplace-heading"><div><span className="eyebrow">CATÁLOGO EXTERNO</span><h3>Marketplace de Skills</h3><p>Visualize uma Skill pública do GitHub antes de importar. Nenhum código do repositório é executado.</p></div><WandSparkles size={22}/></div>
+                <div className="skill-marketplace-search"><input aria-label="URL pública da Skill no GitHub" value={skillImportUrl} onChange={event => setSkillImportUrl(event.target.value)} placeholder="https://github.com/owner/repo/tree/main/skills/python-testing"/><button onClick={() => sendSkillCommand("skills.import.preview", { source_url: skillImportUrl.trim() })} disabled={skillsLoading || !skillImportUrl.trim() || runtimeStatus !== "online"}><Search size={14}/> Visualizar</button></div>
+                {skillImportPreview && <article className="skill-import-preview">
+                  <div className="skill-card-heading"><div><span className="eyebrow">PRÉ-VISUALIZAÇÃO</span><h4>{skillImportPreview.name}</h4></div><span className={skillImportPreview.already_installed ? "skill-state" : "skill-state active"}>{skillImportPreview.already_installed ? "JÁ INSTALADA" : "PRONTA PARA IMPORTAR"}</span></div>
+                  <p>{skillImportPreview.description || "Sem descrição."}</p>
+                  <div className="skill-card-meta"><span>/{skillImportPreview.id}</span><span>v{skillImportPreview.version}</span><span>{skillImportPreview.dependencies.length} dependência(s)</span></div>
+                  <div className="skill-tags">{skillImportPreview.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
+                  {skillImportPreview.dependencies.length > 0 && <small className="skill-import-dependencies">Dependências locais: {skillImportPreview.dependencies.join(", ")}</small>}
+                  <pre>{skillImportPreview.instructions_preview}</pre>
+                  <small className="skill-import-source">{skillImportPreview.source_url}</small>
+                  <button className="skill-import-install" disabled={skillsLoading || runtimeStatus !== "online"} onClick={() => {
+                    const action = skillImportPreview.already_installed ? "Substituir" : "Instalar";
+                    if (window.confirm(action + " a Skill " + skillImportPreview.name + " no projeto? A instalação não a autoriza para uso pelo agente.")) {
+                      sendSkillCommand("skills.import.install", {
+                        source_url: skillImportPreview.source_url,
+                        fingerprint: skillImportPreview.fingerprint,
+                        approved: true,
+                        replace_existing: skillImportPreview.already_installed,
+                      });
+                    }
+                  }}>{skillImportPreview.already_installed ? "Confirmar substituição" : "Aprovar e instalar"}</button>
+                </article>}
+              </section>
               {!projectRoot && <div className="manager-runtime-error">Abra um projeto para acessar o catálogo de Skills.</div>}
               {runtimeStatus !== "online" && projectRoot && <div className="manager-runtime-error">O Core precisa estar conectado para gerenciar as Skills.</div>}
               {skillsError && <div className="manager-runtime-error" role="alert">{skillsError}</div>}
