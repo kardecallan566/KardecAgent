@@ -673,3 +673,35 @@ def test_complete_step_requires_disk_verification_and_repairs_mismatch(tmp_path:
     assert any(event.event_type == "artifact_verification_failed" for event in result.events)
     assert any(event.event_type == "artifact_verification" and event.data["verification"]["verified"]
                for event in result.events)
+
+
+
+def test_write_file_does_not_overwrite_changes_since_agent_read(tmp_path: Path):
+    target = tmp_path / "shared.txt"
+    target.write_text("initial", encoding="utf-8")
+
+    class ConcurrentLLM:
+        def __init__(self):
+            self.responses = iter([
+                '{"tool":"read_file","arguments":{"path":"shared.txt"}}',
+                '{"tool":"write_file","arguments":{"path":"shared.txt","content":"agent version"},"plan_step":1}',
+            ])
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 2:
+                target.write_text("user's newer version", encoding="utf-8")
+            return LLMResponse(next(self.responses), {})
+
+    loop = AgentLoop(ConcurrentLLM(), Settings(max_iterations=2))
+    plan = ExecutionPlan("Update shared file", ["Update shared file"], ["Read back"], [], ["file updated"])
+
+    result = loop.execute_approved_plan(tmp_path, "update shared file", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.MAX_ITERATIONS
+    assert target.read_text(encoding="utf-8") == "user's newer version"
+    assert any(
+        event.event_type == "tool_error" and "changed concurrently" in event.message
+        for event in result.events
+    )
