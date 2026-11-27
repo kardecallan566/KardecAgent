@@ -151,5 +151,5 @@ def test_skill_save_rejects_control_characters(tmp_path, approved):
     with pytest.raises(ValueError, match="caracteres de controle"):
         _skill_command(tmp_path, payload(
             "skills.save", id="unsafe", name="Unsafe", tags=[], dependencies=[],
-            instructions="safe\\x01unsafe",
+            instructions="safe\x01unsafe",
         ), approved)

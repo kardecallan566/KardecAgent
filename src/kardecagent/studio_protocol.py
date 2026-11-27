@@ -373,7 +373,7 @@ def _skill_command(root: Path, message: dict, approved_skill_fingerprints: dict[
         instructions = payload.get("instructions")
         if not isinstance(instructions, str) or not instructions.strip() or len(instructions.encode("utf-8")) > SkillCatalog.MAX_INSTRUCTIONS_BYTES:
             raise SkillError("SKILL.md deve conter texto de até 64 KiB.")
-        if any(ord(character) < 32 and character not in "\\n\\r\\t" for character in instructions):
+        if any(ord(character) < 32 and character not in "\n\r\t" for character in instructions):
             raise SkillError("SKILL.md contém caracteres de controle não permitidos.")
         existing = {item.id: item for item in catalog.discover()} if catalog.root.exists() else {}
         candidate = dict(existing)
