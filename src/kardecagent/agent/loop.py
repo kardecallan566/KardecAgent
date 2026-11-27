@@ -259,7 +259,11 @@ class AgentLoop:
                              board=board.as_dict())
                 board = orchestrator.execute_approved_plan(root, task, plan, board,
                     progress_callback=lambda current: store.save(state, plan=plan, board=current, approved=True),
-                    parent_state=state)
+                    parent_state=state,
+                    skill_prompt_sections=list(
+                        skill_preparation.prompt_sections
+                        if skill_preparation is not None else ()
+                    ))
                 state.record("subtask_execution_finished", "Logical subtask execution finished.",
                              board=board.as_dict())
                 if not board.completed:
