@@ -78,3 +78,93 @@ def test_symlink_is_not_auto_remediated(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="symlink"):
         snapshot.restore({"link.txt"})
+
+
+
+def test_recorded_artifacts_are_verified_against_current_disk_bytes(tmp_path: Path):
+    import hashlib
+
+    from kardecagent.tools.workspace import verify_recorded_changes
+
+    target = tmp_path / "artifact.txt"
+    target.write_bytes(b"verified")
+    change = {
+        "path": "artifact.txt",
+        "exists_after": True,
+        "sha256_after": hashlib.sha256(b"verified").hexdigest(),
+    }
+    assert verify_recorded_changes(tmp_path, [change])["verified"] is True
+
+    target.write_bytes(b"changed externally")
+    report = verify_recorded_changes(tmp_path, [change])
+    assert report["verified"] is False
+    assert report["files"][0]["status"] == "mismatch"
+
+
+def test_recorded_artifact_verification_checks_expected_deletion(tmp_path: Path):
+    from kardecagent.tools.workspace import verify_recorded_changes
+
+    report = verify_recorded_changes(tmp_path, [{
+        "path": "removed.txt",
+        "exists_after": False,
+        "sha256_after": None,
+    }])
+    assert report["verified"] is True
+
+
+def test_multi_file_rollback_preflights_all_conflicts_before_mutating(tmp_path: Path):
+    import base64
+    import hashlib
+
+    from kardecagent.tools.workspace import rollback_file_changes
+
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_bytes(b"after-first")
+    second.write_bytes(b"external-change")
+    changes = [
+        {
+            "path": "first.txt",
+            "exists_before": True,
+            "before_data_b64": base64.b64encode(b"before-first").decode("ascii"),
+            "sha256_after": hashlib.sha256(b"after-first").hexdigest(),
+        },
+        {
+            "path": "second.txt",
+            "exists_before": True,
+            "before_data_b64": base64.b64encode(b"before-second").decode("ascii"),
+            "sha256_after": hashlib.sha256(b"expected-second").hexdigest(),
+        },
+    ]
+
+    with pytest.raises(RuntimeError, match="rollback conflict"):
+        rollback_file_changes(tmp_path, changes)
+
+    assert first.read_bytes() == b"after-first"
+    assert second.read_bytes() == b"external-change"
+
+
+
+def test_multi_file_rollback_restores_all_files_after_preflight(tmp_path: Path):
+    import base64
+    import hashlib
+
+    from kardecagent.tools.workspace import rollback_file_changes
+
+    changes = []
+    for name in ("one.txt", "two.txt"):
+        before = f"before-{name}".encode()
+        after = f"after-{name}".encode()
+        (tmp_path / name).write_bytes(after)
+        changes.append({
+            "path": name,
+            "exists_before": True,
+            "before_data_b64": base64.b64encode(before).decode("ascii"),
+            "sha256_after": hashlib.sha256(after).hexdigest(),
+        })
+
+    restored = rollback_file_changes(tmp_path, changes)
+
+    assert set(restored) == {"one.txt", "two.txt"}
+    assert (tmp_path / "one.txt").read_bytes() == b"before-one.txt"
+    assert (tmp_path / "two.txt").read_bytes() == b"before-two.txt"

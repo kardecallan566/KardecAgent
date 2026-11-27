@@ -18,7 +18,7 @@ from ..tools import (
     ProjectFilesystem, apply_unified_patch, git_diff, git_has_uncommitted_changes,
     git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
     fetch_web_page,
-    WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change,
+    WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_changes, verify_recorded_changes,
     git_branch_list, git_remote_list, git_fetch, git_pull, git_push, git_create_branch,
     git_checkout, git_commit, git_merge, gh_create_pr, gh_pr_status, gh_merge_pr,
 )
@@ -211,6 +211,52 @@ class AgentExecutor:
                          changes=records, subtask_id=subtask_id)
 
     @staticmethod
+    def _latest_artifact_changes(state: TaskState, plan_step: int | None = None) -> list[dict]:
+        latest = {}
+        for event in state.events:
+            if event.event_type != "integrity_change":
+                continue
+            for change in event.data.get("changes", []):
+                if plan_step is not None and change.get("plan_step") != plan_step:
+                    continue
+                latest[change["path"]] = change
+        return [latest[path] for path in sorted(latest)]
+
+    def _verify_artifacts(
+        self, root: Path, state: TaskState, plan_step: int | None = None
+    ) -> dict:
+        """Re-read every changed artifact from disk and compare its audited SHA-256."""
+        changes = self._latest_artifact_changes(state, plan_step)
+        return verify_recorded_changes(root, changes)
+
+    @staticmethod
+    def _expected_write_fingerprint(
+        root: Path, state: TaskState | None, relative_path: str
+    ) -> str | None:
+        """Use the latest successful read as a write precondition when available."""
+        fs = ProjectFilesystem(root)
+        target = fs.safe_path(relative_path)
+        current = fs.file_fingerprint(relative_path)["sha256"] if target.is_file() else None
+        if state is None:
+            return current
+        for event in reversed(state.events):
+            if event.event_type != "tool_result":
+                continue
+            data = event.data or {}
+            if data.get("path") != relative_path:
+                continue
+            if data.get("tool") == "read_file":
+                content = data.get("result")
+                if isinstance(content, str):
+                    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+                return current
+            if data.get("tool") in {
+                "write_file", "append_file", "replace_in_file", "apply_patch"
+            }:
+                return current
+        return current
+
+    @staticmethod
     def _contains_git_mutation_command(command: str) -> bool:
         pattern = (
             r"\bgit(?:['\",\s]+)(?:-C\s+[^\s]+\s+)?"
@@ -286,7 +332,11 @@ class AgentExecutor:
             }, ensure_ascii=False)
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
-            fs.write_file(args["path"], args["content"])
+            target = fs.safe_path(args["path"])
+            expected_sha256 = self._expected_write_fingerprint(
+                root, state, args["path"]
+            )
+            fs.write_file(args["path"], args["content"], expected_sha256=expected_sha256)
             if fs.read_file(args["path"]) != args["content"]:
                 raise IOError(f"write verification failed for {args['path']}")
             integrity_after = self._workspace_snapshot(root, True)
@@ -294,7 +344,8 @@ class AgentExecutor:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
-            return json.dumps({"ok": True, "path": args["path"], "method": "full_file"})
+            return json.dumps({"ok": True, "path": args["path"], "method": "full_file",
+                                "fingerprint": fs.file_fingerprint(args["path"])}, ensure_ascii=False)
         if action.tool == "append_file":
             self._check_scope(root, [args["path"]], scope)
             fs.append_file(args["path"], args["content"])
@@ -303,7 +354,8 @@ class AgentExecutor:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
-            return json.dumps({"ok": True, "path": args["path"], "method": "append"}, ensure_ascii=False)
+            return json.dumps({"ok": True, "path": args["path"], "method": "append",
+                                "fingerprint": fs.file_fingerprint(args["path"])}, ensure_ascii=False)
         if action.tool == "replace_in_file":
             self._check_scope(root, [args["path"]], scope)
             count = fs.replace_in_file(args["path"], args["find"], args["replace"], args.get("replace_all", False))
@@ -314,7 +366,9 @@ class AgentExecutor:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
-            return json.dumps({"ok": True, "path": args["path"], "replacements": count if args.get("replace_all", False) else 1}, ensure_ascii=False)
+            return json.dumps({"ok": True, "path": args["path"],
+                                "replacements": count if args.get("replace_all", False) else 1,
+                                "fingerprint": fs.file_fingerprint(args["path"])}, ensure_ascii=False)
         if action.tool == "apply_patch":
             patch_paths = self._patch_paths(args["patch"])
             self._check_scope(root, patch_paths, scope)
@@ -416,8 +470,7 @@ class AgentExecutor:
             raise ValueError("invalid integrity event index")
         event = events[event_index]
         changes = event.data.get("changes", [])
-        for change in reversed(changes):
-            rollback_file_change(root, change)
+        rollback_file_changes(root, changes)
         state.record("integrity_rollback", "Audited operation rolled back safely.", event_index=event_index, changes=changes)
         return state
 
@@ -544,6 +597,7 @@ class AgentExecutor:
         no_progress_count = 0
         no_progress_limit = 3
         verification_failure_count = 0
+        verification_repair_mode = False
 
         def stop_stalled_execution(reason: str, *, tool: str | None = None,
                                    requested_step: int | None = None) -> TaskState:
@@ -738,7 +792,7 @@ class AgentExecutor:
                 continue
 
             if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS:
-                if tracker.completed or action.plan_step != tracker.current_step:
+                if (tracker.completed and not verification_repair_mode) or action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
                                  active_step=active_step_number(),
@@ -816,7 +870,32 @@ class AgentExecutor:
                     state.record("plan_scope_violation", "Step completion rejected.",
                                  requested_step=step, active_step=active_step_number())
                     continue
+                artifact_report = self._verify_artifacts(root, state, plan_step=step)
+                state.record(
+                    "artifact_verification",
+                    "Changed files were independently checked against their recorded on-disk fingerprints.",
+                    plan_step=step,
+                    verification=artifact_report,
+                )
+                if not artifact_report["verified"]:
+                    verification_repair_mode = True
+                    state.record(
+                        "artifact_verification_failed",
+                        "Step completion rejected because one or more changed files no longer match the audited result.",
+                        plan_step=step,
+                        verification=artifact_report,
+                    )
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "error": "artifact_verification_failed",
+                            "verification": artifact_report,
+                            "instruction": "Do not complete this step. Re-read the affected files, diagnose why the current disk state differs from the audited after-state, preserve unrelated user changes, repair only the intended files, then request completion again.",
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
                 tracker.complete(step)
+                verification_repair_mode = False
                 no_progress_count = 0
                 state.record("plan_step_completed", f"Completed plan step {step}.",
                              step=step, evidence=action.arguments["evidence"], progress=tracker.as_dict())
@@ -872,6 +951,28 @@ class AgentExecutor:
                     ]
                     continue
                 evidence = evidence_result["items"]
+                artifact_report = self._verify_artifacts(root, state)
+                state.record(
+                    "artifact_verification",
+                    "All task artifacts were independently re-read and checked before final completion.",
+                    verification=artifact_report,
+                )
+                if not artifact_report["verified"]:
+                    verification_repair_mode = True
+                    state.record(
+                        "artifact_verification_failed",
+                        "Finish rejected because one or more changed files no longer match their latest audited state.",
+                        verification=artifact_report,
+                    )
+                    messages += [
+                        {"role": "assistant", "content": response.content},
+                        {"role": "user", "content": json.dumps({
+                            "error": "artifact_verification_failed",
+                            "verification": artifact_report,
+                            "instruction": "Do not finish. Re-inspect each affected artifact, diagnose external or later changes, preserve user modifications, and restore the intended result only when safe. Then retry final verification.",
+                        }, ensure_ascii=False)},
+                    ]
+                    continue
                 if isinstance(context, dict) and isinstance(context.get("subtask"), dict):
                     state.transition(
                         TaskStatus.VERIFYING,
@@ -909,6 +1010,7 @@ class AgentExecutor:
                 verification = self.verify(root, security_required=security_required)
                 state.record("verification", "Completion verification executed.", verification=verification)
                 if not verification["verified"]:
+                    verification_repair_mode = True
                     state.record("verification_failed", "Completion verification failed.", verification=verification)
                     state.transition(TaskStatus.RUNNING, reason="Completion verification failed; continuing execution.")
                     messages += [{"role": "assistant", "content": response.content},
@@ -927,6 +1029,7 @@ class AgentExecutor:
                     review = self._security_review(root, task, plan)
                     state.record("security_review", "Independent security review completed.", review=review)
                     if review.get("status") != "pass":
+                        verification_repair_mode = True
                         state.record("verification_failed", "Security review reported findings.", review=review)
                         state.transition(TaskStatus.RUNNING, reason="Security review found issues; continuing execution.")
                         messages += [{"role": "assistant", "content": response.content},
@@ -941,6 +1044,7 @@ class AgentExecutor:
                         ):
                             verification_failure_count = 0
                         continue
+                verification_repair_mode = False
                 state.transition(TaskStatus.VERIFIED, reason="Completion verification passed.")
                 state.record("completed", "Task completed and verified.",
                              reason=action.arguments["reason"], criteria_evidence=evidence,
@@ -973,7 +1077,7 @@ class AgentExecutor:
                     messages += [{"role": "assistant", "content": response.content},
                                  {"role": "user", "content": "Investigation budget exhausted. Implement using available evidence or report the specific missing information to the user."}]
                     continue
-            if self._is_repeated_side_effect(state, action):
+            if not verification_repair_mode and self._is_repeated_side_effect(state, action):
                 state.record(
                     "repeated_side_effect_blocked",
                     "An identical side-effecting action was blocked because no successful workspace mutation occurred since its previous execution.",
@@ -1014,6 +1118,7 @@ class AgentExecutor:
                     parsed_result.get("changed") is False or parsed_result.get("created") is False
                 )
                 state.record("tool_result", f"{action.tool} executed.", tool=action.tool, result=result,
+                             path=action.arguments.get("path"),
                              action_signature=self._action_signature(action), no_op=no_op)
                 if no_op:
                     if register_no_progress("tool completed without changing or advancing the workspace",
