@@ -32,6 +32,7 @@ def save_task(root, name, *, skill_ids=None, success=None, unmatched=None):
         )
     plan = ExecutionPlan(
         summary="Test task", steps=["Inspect"], validation=["Verify"],
+        completion_criteria=["The task result is verified."],
     )
     TaskStore(root).save(state, plan=plan, approved=True)
 
