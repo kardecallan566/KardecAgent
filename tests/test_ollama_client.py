@@ -172,16 +172,34 @@ def test_build_llm_uses_smallest_installed_model_as_fast_route_when_enabled(monk
     assert client.clients[0].fast.model == "qwen-coder:3b"
 
 
-def test_build_llm_fails_clearly_when_ollama_has_no_installed_models(monkeypatch):
+def test_build_llm_keeps_configured_model_when_ollama_has_no_installed_models(monkeypatch):
+    from kardecagent.llm.router import EscalatingLLMClient
+
     monkeypatch.setattr(
         "kardecagent.llm.ollama.OllamaClient.list_models",
         lambda self: [],
     )
 
-    import pytest
+    client = _build_llm(Settings())
 
-    with pytest.raises(RuntimeError, match="No Ollama models are installed"):
-        _build_llm(Settings())
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen2.5-coder:3b"
+    assert len(client.clients) == 1
+
+
+def test_build_llm_starts_when_ollama_inventory_is_unreachable(monkeypatch, caplog):
+    from kardecagent.llm.router import EscalatingLLMClient
+
+    def unavailable(self):
+        raise RuntimeError("Ollama connection refused")
+
+    monkeypatch.setattr("kardecagent.llm.ollama.OllamaClient.list_models", unavailable)
+
+    client = _build_llm(Settings())
+
+    assert isinstance(client, EscalatingLLMClient)
+    assert client.model == "qwen2.5-coder:3b"
+    assert "starting with configured model" in caplog.text
 
 
 
