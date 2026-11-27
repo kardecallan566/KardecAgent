@@ -11,7 +11,7 @@ import {
   Zap, GitFork, Circle, AlertCircle, Settings, Wifi, RefreshCw, X, CheckCircle, Play, FilePlus2, FolderPlus, Terminal, Send, Square, IndentIncrease
 } from "lucide-react";
 
-type NavItem = "explorer" | "projects" | "agent" | "tasks" | "approvals";
+type NavItem = "explorer" | "projects" | "agent" | "tasks" | "approvals" | "activity";
 type StudioSettings = {
   ollamaUrl: string; model: string; fastModel: string; modelRoutingEnabled: boolean; timeout: number; pythonPath: string; autoStartCore: boolean;
   editorFontSize: number; editorFontFamily: string; lineHeight: number; tabSize: number; wordWrap: boolean; showLineNumbers: boolean;
@@ -1721,7 +1721,7 @@ function App() {
           <button className={activeNav === "tasks" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("tasks")} title="Tarefas"><Workflow /></button>
           <button className={activeNav === "approvals" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("approvals")} title="Aprovações"><ShieldCheck /></button>
           <div className="rail-spacer" />
-          <button className="rail-button" title="Atividade"><Activity /></button>
+          <button className={activeNav === "activity" ? "rail-button selected" : "rail-button"} onClick={() => setActiveNav("activity")} title="Atividade"><Activity /></button>
           <button className="rail-button" title="Configurações" onClick={() => setSettingsOpen(true)}><Settings /></button>
         </nav>
 
@@ -1792,7 +1792,7 @@ function App() {
           ) : activeNav === "tasks" ? (
             <div className="process-dashboard">
               <div className="process-toolbar"><div><span className="eyebrow">ORQUESTRAÇÃO</span><h2>Fluxo de execução</h2><p>Mapa de dependências e estados recebido por eventos do core Python</p></div><button className="process-filter"><Circle size={9}/> Todas as etapas <ChevronDown size={13}/></button></div>
-              <div className="process-summary"><div><span>ESTADO DO CORE</span><strong>{runtimeStatus === "online" ? "Online" : runtimeStatus === "connecting" ? "Conectando" : "Offline"}</strong><small>{runtimeBusy ? "Uma tarefa está em execução" : "Aguardando instrução"}</small></div><div><span>TAREFAS RECEBIDAS</span><strong>{String(runtimeTasks.length).padStart(2, "0")}</strong><small>Histórico recente nesta sessão</small></div><div><span>EVENTOS</span><strong>{String(runtimeEvents.length).padStart(2, "0")}</strong><small>Buffer limitado a 100 eventos</small></div></div>
+              <div className="process-summary"><div><span>ESTADO DO CORE</span><strong>{runtimeStatus === "online" ? "Online" : runtimeStatus === "connecting" ? "Conectando" : "Offline"}</strong><small>{runtimeBusy ? "Uma tarefa está em execução" : "Aguardando instrução"}</small></div><div><span>TAREFAS RECEBIDAS</span><strong>{String(runtimeTasks.length).padStart(2, "0")}</strong><small>Histórico recente nesta sessão</small></div><div><span>EVENTOS</span><strong>{String(runtimeEvents.length).padStart(2, "0")}</strong><small>Buffer limitado a 250 eventos</small></div></div>\n              <div className="task-resource-grid"><article><span><Activity size={13}/> ATIVIDADE</span><strong>{runtimeBusy ? "Em andamento" : "Em espera"}</strong><small>{runtimeActivity || "Nenhuma operação ativa"}</small></article><article><span><Zap size={13}/> CHAMADAS LLM</span><strong>{runtimeEvents.filter(event => event.type === "model_request_started").length}</strong><small>Solicitações nesta sessão</small></article><article><span><Workflow size={13}/> FERRAMENTAS</span><strong>{runtimeEvents.filter(event => event.type === "tool_started").length}</strong><small>Operações iniciadas</small></article><article><span><Bot size={13}/> RECURSOS DO PROCESSO</span><strong>Não medido</strong><small>CPU, RAM e energia serão exibidos quando a coleta nativa estiver disponível</small></article></div>
               {runtimePlanSteps.length > 0 && <section className="runtime-progress-overview">
                 <div className="runtime-progress-heading"><strong>Progresso do plano aprovado</strong><span>{runtimeCompletedSteps}/{runtimePlanSteps.length} etapas · {runtimeProgressPercent}%</span></div>
                 <div className="runtime-progress-track"><i style={{ width: runtimeProgressPercent + "%" }}/></div>
