@@ -128,6 +128,9 @@ def test_executor_includes_static_project_qa_in_web_verification(tmp_path: Path,
     assert report["project_qa"]["available"]
     assert not report["project_qa"]["passed"]
     assert not report["verified"]
+    assert report["summary"]["verified"] is False
+    assert report["checks"][-1]["kind"] == "project_qa"
+    assert report["checks"][-1]["status"] == "failed"
 
 
 def test_executor_browser_qa_tool_refuses_remote_hosts(tmp_path: Path):
@@ -147,3 +150,14 @@ def test_executor_browser_qa_tool_refuses_remote_hosts(tmp_path: Path):
 
     with pytest.raises(ValueError, match="loopback"):
         loop.executor._execute_tool(tmp_path, action, None)
+
+
+def test_browser_qa_rejects_external_and_traversal_routes(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(ProjectQAEngine, "playwright_available", staticmethod(lambda: True))
+    engine = ProjectQAEngine(tmp_path)
+
+    with pytest.raises(ValueError, match="local absolute paths"):
+        engine.run_browser_smoke("http://localhost:3000", routes=["https://example.com"])
+
+    with pytest.raises(ValueError, match="local absolute paths"):
+        engine.run_browser_smoke("http://localhost:3000", routes=["/../../etc/passwd"])
