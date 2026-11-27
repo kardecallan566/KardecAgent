@@ -579,7 +579,7 @@ function App() {
         return;
       }
       if (message.type === "skills.response") {
-        const result = message.payload as { ok?: boolean; skills?: typeof skillItems; approved_ids?: string[]; skill_id?: string; instructions?: string; message?: string } | undefined;
+        const result = message.payload as { ok?: boolean; skills?: typeof skillItems; approved_ids?: string[]; skill_id?: string; saved_id?: string; instructions?: string; message?: string } | undefined;
         setSkillsLoading(false);
         if (!result?.ok) {
           setSkillsError(result?.message || "Não foi possível atualizar o catálogo de Skills.");
@@ -591,6 +591,7 @@ function App() {
         }
         if (result.skills) setSkillItems(result.skills);
         if (result.approved_ids) setSkillApprovedIds(result.approved_ids);
+        if (result.saved_id) setSkillFormOpen(false);
         setSkillsError(null);
         return;
       }
@@ -982,7 +983,6 @@ function App() {
       dependencies: skillForm.dependencies.split(",").map(value => value.trim()).filter(Boolean),
       instructions: skillForm.instructions,
     });
-    setSkillFormOpen(false);
   }
 
   function requestPythonSemantic(action: SemanticAction, source: string, cursor: number) {
