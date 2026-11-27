@@ -17,6 +17,7 @@ from .diagnostics import diagnose_failure
 from .retry_policy import RetryPolicy
 from .tools_schema import ToolCallError
 from .project_brief import build_project_brief, project_brief_instructions
+from .project_memory import ProjectMemoryStore
 from ..llm.cleaner import extract_json_payload
 from ..harness import load_registry
 from ..harness.registry import compose_system_prompt
@@ -49,9 +50,11 @@ class AgentLoop:
         profile = detect_project(root)
         files = project_snapshot(root, limit=500)
         brief = build_project_brief(task, profile, files)
+        project_memory = ProjectMemoryStore(root).load()
         return {
             "task": task,
             "project_brief": brief.as_dict(),
+            "project_memory": project_memory,
             "project": {
                 "kind": profile.kind, "language": profile.language,
                 "framework": profile.framework, "package_manager": profile.package_manager,
@@ -167,6 +170,15 @@ class AgentLoop:
                 state.record("high_risk_approval", "High-risk execution rejected.", approved=False)
                 return state
             state.record("high_risk_approval", "High-risk execution approved.", approved=True)
+
+        memory_path = ProjectMemoryStore(root).record_approved_plan(
+            task, brief.as_dict(), plan
+        )
+        state.record(
+            "project_memory_updated",
+            "Approved project requirements and acceptance criteria were persisted.",
+            path=str(memory_path),
+        )
 
         store = TaskStore(root)
         state.record("task_persisted", "Approved task state is being durably persisted for resume.", path=str(store.path_for(task)), journal_path=str(store.journal_path_for(task)))
