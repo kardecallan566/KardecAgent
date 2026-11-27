@@ -302,6 +302,7 @@ class Orchestrator:
         parent_state=None,
         resume_subtask_id: str | None = None,
         resume_step: int = 1,
+        skill_prompt_sections: list[str] | None = None,
     ) -> TaskBoard:
         """Execute subtasks without replanning or asking for approval again."""
         def execute(subtask: Subtask, requested_resume_step: int = 1) -> SubtaskExecutionResult:
