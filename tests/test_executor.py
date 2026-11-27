@@ -563,3 +563,70 @@ def test_subtask_defers_global_verification_until_parent_integration(tmp_path: P
     assert result.status is TaskStatus.COMPLETED
     assert any(event.event_type == "verification_deferred" for event in result.events)
     assert not any(event.event_type == "verification" for event in result.events)
+
+
+
+def test_finish_rejects_tampered_artifact_then_allows_verified_repair(tmp_path: Path):
+    page = (
+        "<!doctype html><html lang='pt-BR'><head>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Verified page</title></head><body>Expected</body></html>"
+    )
+    target = tmp_path / "index.html"
+
+    class TamperingLLM:
+        def __init__(self):
+            self.responses = iter([
+                '{"tool":"write_file","arguments":{"path":"index.html","content":' + __import__("json").dumps(page) + '},"plan_step":1}',
+                '{"tool":"complete_step","arguments":{"step":1,"evidence":"Page created."},"plan_step":1}',
+                '{"tool":"finish","arguments":{"reason":"done","criteria_evidence":[{"criterion":"Page contains expected content","evidence":"Read back index.html."}]}}',
+                '{"tool":"write_file","arguments":{"path":"index.html","content":' + __import__("json").dumps(page) + '},"plan_step":1}',
+                '{"tool":"finish","arguments":{"reason":"repaired and verified","criteria_evidence":[{"criterion":"Page contains expected content","evidence":"Read back index.html after repair."}]}}',
+            ])
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 3:
+                target.write_text("tampered outside the agent", encoding="utf-8")
+            return LLMResponse(next(self.responses), {})
+
+    loop = AgentLoop(TamperingLLM(), Settings(max_iterations=8))
+    plan = ExecutionPlan(
+        "Create a verified page",
+        ["Create index.html"],
+        ["Validate project"],
+        [],
+        ["Page contains expected content"],
+    )
+
+    result = loop.execute_approved_plan(tmp_path, "create page", plan, make_state(tmp_path))
+
+    assert result.status is TaskStatus.COMPLETED
+    assert target.read_text(encoding="utf-8") == page
+    assert any(event.event_type == "artifact_verification_failed" for event in result.events)
+    assert any(
+        event.event_type == "artifact_verification"
+        and event.data["verification"]["verified"]
+        for event in result.events
+    )
+
+
+def test_complete_step_rejects_artifact_that_changed_after_write(tmp_path: Path):
+    import json
+    from kardecagent.agent.tools_schema import parse_tool_call
+
+    loop = AgentLoop(FakeLLM([]), Settings())
+    state = make_state(tmp_path)
+    action = parse_tool_call(json.dumps({
+        "tool": "write_file",
+        "arguments": {"path": "result.txt", "content": "expected"},
+        "plan_step": 1,
+    }))
+    loop.executor._execute_tool(tmp_path, action, None, state)
+    (tmp_path / "result.txt").write_text("changed by another process", encoding="utf-8")
+
+    report = loop.executor._verify_artifacts(tmp_path, state, plan_step=1)
+
+    assert report["verified"] is False
+    assert report["files"][0]["status"] == "mismatch"
