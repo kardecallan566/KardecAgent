@@ -161,3 +161,22 @@ def test_browser_qa_rejects_external_and_traversal_routes(tmp_path: Path, monkey
 
     with pytest.raises(ValueError, match="local absolute paths"):
         engine.run_browser_smoke("http://localhost:3000", routes=["/../../etc/passwd"])
+
+
+def test_static_qa_checks_motion_preferences_in_external_stylesheets(tmp_path: Path):
+    (tmp_path / "index.html").write_text(
+        '<!doctype html><html lang="pt-BR"><head>'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<link rel="stylesheet" href="style.css"><title>Motion</title>'
+        '</head><body><main>Ready</main></body></html>',
+        encoding="utf-8",
+    )
+    (tmp_path / "style.css").write_text(
+        ".hero { animation: fade-in 1s ease; }",
+        encoding="utf-8",
+    )
+
+    report = ProjectQAEngine(tmp_path).run_static()
+
+    assert report["passed"]
+    assert any("prefers-reduced-motion" in warning for warning in report["warnings"])
