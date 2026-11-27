@@ -67,7 +67,7 @@ def test_append_and_replace_preserve_utf8_and_newlines(tmp_path: Path):
 def test_append_rejects_invalid_utf8_without_corrupting_existing_file(tmp_path: Path):
     fs = ProjectFilesystem(tmp_path)
     fs.write_file("stable.txt", "conteúdo válido")
-    with pytest.raises(UnicodeDecodeError):
+    with pytest.raises(UnicodeEncodeError):
         fs.append_file("stable.txt", "\udcff")
     assert fs.read_file("stable.txt") == "conteúdo válido"
 
