@@ -46,8 +46,11 @@ acyclicity, package paths, symlinks, and the 64 KiB instruction limit. Files are
 replaced atomically. A skill with dependents cannot be deleted.
 
 Activation is an explicit user action. Consent is held only in the Core process
-memory and applies to the selected skill plus its dependency chain. Restarting
-the Core clears all activation consent and requires the user to authorize skills
-again. This intentionally prevents a project skill from modifying workspace
-files to grant itself persistent approval. Without consent, the agent continues
-the task without those skills.
+memory and applies to the selected skill plus its dependency chain. The consent
+is bound to SHA-256 fingerprints of each approved manifest and instruction
+file. Editing a skill or one of its dependencies invalidates the affected
+consent. Restarting the Core clears all activation consent and requires the
+user to authorize skills again. This intentionally prevents project files or
+modified skill content from silently granting or inheriting approval. Without
+valid consent for the complete dependency chain, the agent continues the task
+without those skills.
