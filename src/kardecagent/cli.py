@@ -162,7 +162,7 @@ def _build_llm(settings: Settings):
             # its JSONL handshake and remain usable for diagnostics/settings.
             primary_name = configured or settings.llm_model
         primary.model = primary_name
-        primary_size = by_name[primary_name].get("size")
+        primary_size = by_name.get(primary_name, {}).get("size")
 
         base = primary
         fast_name = settings.llm_fast_model.strip() if settings.llm_routing_enabled else ""
