@@ -55,7 +55,7 @@ TOOL_SCHEMAS = {
 from ..llm.cleaner import extract_json_payload
 
 GIT_MUTATING_TOOLS = {"git_fetch", "git_pull", "git_push", "git_create_branch", "git_checkout", "git_commit", "git_merge", "git_create_pr", "git_merge_pr"}
-STEP_REQUIRED_TOOLS = {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS
+STEP_REQUIRED_TOOLS = {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "run_browser_qa", "open_file", "complete_step"} | GIT_MUTATING_TOOLS
 
 def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     schema = TOOL_SCHEMAS[tool]
