@@ -653,19 +653,13 @@ def test_complete_step_requires_disk_verification_and_repairs_mismatch(tmp_path:
                 target.write_text("external edit", encoding="utf-8")
             return LLMResponse(next(self.responses), {})
 
-    (tmp_path / "pyproject.toml").write_text(
-        "[project]\\nname='artifact-fixture'\\nversion='0.1.0'\\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_fixture.py").write_text(
-        "def test_fixture():\\n    assert True\\n",
-        encoding="utf-8",
-    )
     loop = AgentLoop(TamperingLLM(), Settings(max_iterations=8))
     plan = ExecutionPlan("Create artifact", ["Create artifact"], ["Check artifact"], [], ["artifact exists"])
 
-    result = loop.execute_approved_plan(tmp_path, "create artifact", plan, make_state(tmp_path))
+    result = loop.execute_approved_plan(
+        tmp_path, "create artifact", plan, make_state(tmp_path),
+        context={"subtask": {"id": "artifact-verification-test"}},
+    )
 
     assert result.status is TaskStatus.COMPLETED
     assert target.read_text(encoding="utf-8") == "expected"
@@ -697,7 +691,10 @@ def test_write_file_does_not_overwrite_changes_since_agent_read(tmp_path: Path):
     loop = AgentLoop(ConcurrentLLM(), Settings(max_iterations=2))
     plan = ExecutionPlan("Update shared file", ["Update shared file"], ["Read back"], [], ["file updated"])
 
-    result = loop.execute_approved_plan(tmp_path, "update shared file", plan, make_state(tmp_path))
+    result = loop.execute_approved_plan(
+        tmp_path, "update shared file", plan, make_state(tmp_path),
+        context={"subtask": {"id": "concurrent-write-test"}},
+    )
 
     assert result.status is TaskStatus.MAX_ITERATIONS
     assert target.read_text(encoding="utf-8") == "user's newer version"
