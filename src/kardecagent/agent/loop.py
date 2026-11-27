@@ -16,6 +16,7 @@ from .recovery import RecoveryManager
 from .diagnostics import diagnose_failure
 from .retry_policy import RetryPolicy
 from .tools_schema import ToolCallError
+from .project_brief import build_project_brief, project_brief_instructions
 from ..llm.cleaner import extract_json_payload
 from ..harness import load_registry
 from ..harness.registry import compose_system_prompt
@@ -46,14 +47,17 @@ class AgentLoop:
 
     def _build_context(self, root: Path, task: str, conversation_history: list[dict] | None = None, active_editor_context: dict | None = None) -> dict:
         profile = detect_project(root)
+        files = project_snapshot(root, limit=500)
+        brief = build_project_brief(task, profile, files)
         return {
             "task": task,
+            "project_brief": brief.as_dict(),
             "project": {
                 "kind": profile.kind, "language": profile.language,
                 "framework": profile.framework, "package_manager": profile.package_manager,
                 "commands": profile.commands,
             },
-            "project_files": project_snapshot(root, limit=500),
+            "project_files": files,
             "workspace_access": {"root": str(root), "tools": ["list_files", "read_file", "search_files", "write_file", "append_file", "replace_in_file", "create_directory", "apply_patch", "run_command", "git_status", "git_diff", "git_log", "git_branches", "git_remotes", "git_fetch", "git_pull", "git_push", "git_create_branch", "git_checkout", "git_commit", "git_merge", "git_create_pr", "git_pr_status", "git_merge_pr"], "path_rule": "All tool paths are relative to this workspace root; list_files accepts an optional relative directory path."},
             "conversation_history": conversation_history or [],
             "active_editor": active_editor_context or None,
@@ -64,7 +68,9 @@ class AgentLoop:
         base_messages = [
             {"role": "system", "content": compose_system_prompt(
                 SYSTEM_PROMPT, load_registry(root / ".kardecagent" / "harness.json"),
-                phase=plan_instructions() + " You are in the planning phase. Do not call implementation tools.",
+                phase=plan_instructions() + project_brief_instructions(
+                    build_project_brief(task, detect_project(root), context["project_files"])
+                ) + " You are in the planning phase. Do not call implementation tools.",
             )},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
@@ -130,6 +136,12 @@ class AgentLoop:
         state.record("project_detected", f"Detected project kind: {profile.kind}.",
                      kind=profile.kind, language=profile.language, framework=profile.framework,
                      package_manager=profile.package_manager, commands=profile.commands)
+        brief = build_project_brief(task, profile, project_snapshot(root, limit=500))
+        state.record(
+            "project_brief_created",
+            "Project delivery scope classified for planning and quality assurance.",
+            brief=brief.as_dict(),
+        )
 
         plan = self._create_plan(root, task, state, conversation_history, active_editor_context)
         if plan is None:
