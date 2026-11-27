@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import tempfile
 import sys
 import threading
 import uuid
@@ -9,6 +12,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from .agent.loop import AgentLoop
+from .agent.skills import SkillCatalog, SkillError, SkillManifest
 from .agent.plan import ExecutionPlan
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
@@ -244,6 +248,128 @@ def _approval(
         return decision == "approve"
 
 
+
+def _atomic_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".skills-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\\n") as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.write("\\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try: os.unlink(temporary)
+        except OSError: pass
+        raise
+
+
+def _atomic_text(path: Path, value: str) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=".skill-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try: os.unlink(temporary)
+        except OSError: pass
+        raise
+
+
+def _skill_approvals_path(root: Path) -> Path:
+    return root / ".kardecagent" / "skills" / "approvals.json"
+
+
+def _approved_skill_ids(root: Path) -> set[str]:
+    path = _skill_approvals_path(root)
+    if path.is_symlink() or not path.exists():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return set()
+    values = payload.get("approved_ids", []) if isinstance(payload, dict) else []
+    return {item for item in values if isinstance(item, str)}
+
+
+def _skill_command(root: Path, message: dict) -> dict:
+    command = message.get("type")
+    payload = message.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
+    catalog = SkillCatalog(root)
+    if command == "skills.list":
+        return {"skills": catalog.list_available(), "approved_ids": sorted(_approved_skill_ids(root))}
+    if command == "skills.body":
+        skill_id = payload.get("id")
+        if not isinstance(skill_id, str):
+            raise SkillError("Skill inválida.")
+        manifests = {item.id for item in catalog.discover()}
+        if skill_id not in manifests:
+            raise SkillError("Skill não encontrada.")
+        path = catalog._safe_file(catalog.root / skill_id, catalog.INSTRUCTIONS, catalog.MAX_INSTRUCTIONS_BYTES)
+        return {"skill_id": skill_id, "instructions": path.read_text(encoding="utf-8")}
+    if command == "skills.save":
+        skill_id = payload.get("id")
+        manifest = {
+            "id": skill_id, "name": payload.get("name"),
+            "description": payload.get("description", ""),
+            "version": payload.get("version", "1.0.0"),
+            "tags": payload.get("tags", []),
+            "dependencies": payload.get("dependencies", []),
+        }
+        parsed = SkillManifest.from_dict(manifest, directory_name=skill_id if isinstance(skill_id, str) else "")
+        instructions = payload.get("instructions")
+        if not isinstance(instructions, str) or not instructions.strip() or len(instructions.encode("utf-8")) > SkillCatalog.MAX_INSTRUCTIONS_BYTES:
+            raise SkillError("SKILL.md deve conter texto de até 64 KiB.")
+        existing = {item.id: item for item in catalog.discover()} if catalog.root.exists() else {}
+        candidate = dict(existing)
+        candidate[parsed.id] = parsed
+        missing = set(parsed.dependencies) - set(candidate)
+        if missing:
+            raise SkillError("Dependências não encontradas: " + ", ".join(sorted(missing)))
+        SkillCatalog._validate_dependency_graph(candidate)
+        if catalog.root.is_symlink():
+            raise SkillError("A raiz do catálogo não pode ser um link simbólico.")
+        catalog.root.mkdir(parents=True, exist_ok=True)
+        directory = catalog.root / parsed.id
+        if directory.is_symlink():
+            raise SkillError("O pacote da Skill não pode ser um link simbólico.")
+        directory.mkdir(parents=True, exist_ok=True)
+        _atomic_text(directory / SkillCatalog.INSTRUCTIONS, instructions)
+        _atomic_json(directory / SkillCatalog.MANIFEST, manifest)
+        return {"skills": catalog.list_available(), "approved_ids": sorted(_approved_skill_ids(root)), "saved_id": parsed.id}
+    if command == "skills.delete":
+        skill_id = payload.get("id")
+        manifests = {item.id: item for item in catalog.discover()}
+        if not isinstance(skill_id, str) or skill_id not in manifests:
+            raise SkillError("Skill não encontrada.")
+        directory = catalog.root / skill_id
+        if directory.is_symlink() or not directory.resolve().is_relative_to(catalog.root.resolve()):
+            raise SkillError("Caminho do pacote inválido.")
+        dependents = [item.id for item in manifests.values() if skill_id in item.dependencies]
+        if dependents:
+            raise SkillError("Não é possível excluir: outras Skills dependem dela (" + ", ".join(dependents) + ").")
+        shutil.rmtree(directory)
+        approved = _approved_skill_ids(root) - {skill_id}
+        _atomic_json(_skill_approvals_path(root), {"version": 1, "approved_ids": sorted(approved)})
+        return {"skills": catalog.list_available(), "approved_ids": sorted(approved), "deleted_id": skill_id}
+    if command == "skills.activation.set":
+        skill_id = payload.get("id")
+        enabled = payload.get("enabled")
+        if not isinstance(skill_id, str) or not isinstance(enabled, bool):
+            raise SkillError("id e enabled são obrigatórios.")
+        loaded = catalog.load(skill_id, approved=True)
+        closure = {item.manifest.id for item in loaded}
+        approved = _approved_skill_ids(root)
+        approved.update(closure) if enabled else approved.difference_update(closure)
+        _atomic_json(_skill_approvals_path(root), {"version": 1, "approved_ids": sorted(approved)})
+        return {"skills": catalog.list_available(), "approved_ids": sorted(approved), "updated_id": skill_id}
+    raise SkillError("Comando de Skills desconhecido.")
+
+
 def run_stdio(project_root: Path, agent: AgentLoop) -> int:
     """Serve a bounded JSONL command/event stream for the desktop Studio."""
     root = project_root.resolve()
@@ -364,6 +490,21 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             return 0
         except StudioProtocolError as exc:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
+            continue
+
+        if message.get("schema_version") == 1 and message.get("type") in {"skills.list", "skills.body", "skills.save", "skills.delete", "skills.activation.set"}:
+            command_identifier = message.get("command_id")
+            if not isinstance(command_identifier, str) or not command_identifier.strip() or command_identifier in seen_command_ids:
+                _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": False, "message": "command_id inválido ou repetido."}})
+                continue
+            seen_command_ids[command_identifier] = None
+            if len(seen_command_ids) > MAX_SEEN_COMMAND_IDS:
+                del seen_command_ids[next(iter(seen_command_ids))]
+            try:
+                result = _skill_command(root, message)
+                _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": True, **result}})
+            except Exception as exc:
+                _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": False, "message": str(exc)[:1000]}})
             continue
 
         if message.get("schema_version") == 1 and message.get("type") == "chat.message":
@@ -917,6 +1058,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
                 model_switch_approval_callback=lambda request: _approval(
                     identifier, execution_id, request, kind="model_switch"
                 ),
+                skill_approval_callback=lambda skill_ids: set(skill_ids).issubset(_approved_skill_ids(root)),
             )
             result_summary = (
                 state.events[-1].message if state.events

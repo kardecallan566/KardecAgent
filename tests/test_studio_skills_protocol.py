@@ -71,3 +71,26 @@ def test_skill_delete_refuses_to_remove_dependency(tmp_path):
 def test_skill_activation_rejects_unknown_skill(tmp_path):
     with pytest.raises(ValueError, match="unknown skill"):
         _skill_command(tmp_path, payload("skills.activation.set", id="unknown", enabled=True))
+
+def test_skill_save_rejects_cyclic_dependency_before_writing(tmp_path):
+    _skill_command(tmp_path, payload(
+        "skills.save", id="first", name="First", tags=[], dependencies=[],
+        instructions="First guidance.",
+    ))
+    with pytest.raises(ValueError, match="cyclic"):
+        _skill_command(tmp_path, payload(
+            "skills.save", id="first", name="First", tags=[], dependencies=["first"],
+            instructions="Changed guidance.",
+        ))
+    assert _skill_command(tmp_path, payload("skills.body", id="first"))["instructions"] == "First guidance."
+
+
+def test_skill_delete_removes_approval_record(tmp_path):
+    _skill_command(tmp_path, payload(
+        "skills.save", id="temporary", name="Temporary", tags=[], dependencies=[],
+        instructions="Temporary guidance.",
+    ))
+    _skill_command(tmp_path, payload("skills.activation.set", id="temporary", enabled=True))
+    result = _skill_command(tmp_path, payload("skills.delete", id="temporary"))
+    assert result["approved_ids"] == []
+    assert result["skills"] == []
