@@ -12,6 +12,26 @@ import {
 } from "lucide-react";
 
 type NavItem = "explorer" | "projects" | "agent" | "tasks" | "approvals" | "activity" | "skills";
+type SkillLearningProposal = {
+  proposal_id: string;
+  kind: "improve_skill" | "create_skill";
+  skill_id: string;
+  title: string;
+  reason: string;
+  attempts: number;
+  not_verified: number;
+  evidence_task_ids: string[];
+  draft_manifest: { id: string; name: string; description: string; version: string; tags: string[]; dependencies: string[] };
+  draft_instructions: string | null;
+};
+type SkillLearningReport = {
+  tasks_analyzed: number;
+  analysis_limit: number;
+  metrics: Array<{ skill_id: string; attempts: number; verified_successes: number; not_verified: number; verified_success_rate: number | null; last_used_at: string | null }>;
+  proposals: SkillLearningProposal[];
+  proposals_are_drafts: boolean;
+  auto_changes: boolean;
+};
 type StudioSettings = {
   ollamaUrl: string; model: string; fastModel: string; modelRoutingEnabled: boolean; timeout: number; pythonPath: string; autoStartCore: boolean;
   editorFontSize: number; editorFontFamily: string; lineHeight: number; tabSize: number; wordWrap: boolean; showLineNumbers: boolean;
@@ -308,6 +328,7 @@ function App() {
   const [collapsedChatDates, setCollapsedChatDates] = useState<Record<string, boolean>>({});
   const pendingInstructionCommandId = useRef<string | null>(null);
   const [skillItems, setSkillItems] = useState<Array<{ id: string; name: string; description: string; version: string; tags: string[]; dependencies: string[]; requires_approval: boolean }>>([]);
+  const [skillLearningReport, setSkillLearningReport] = useState<SkillLearningReport | null>(null);
   const [skillImportUrl, setSkillImportUrl] = useState("");
   const [skillImportPreview, setSkillImportPreview] = useState<{ source_url: string; id: string; name: string; description: string; version: string; tags: string[]; dependencies: string[]; instructions_preview: string; fingerprint: string; already_installed: boolean } | null>(null);
   const [skillsNotice, setSkillsNotice] = useState<string | null>(null);
@@ -582,7 +603,7 @@ function App() {
         return;
       }
       if (message.type === "skills.response") {
-        const result = message.payload as { ok?: boolean; skills?: typeof skillItems; approved_ids?: string[]; skill_id?: string; saved_id?: string; installed_id?: string; instructions?: string; preview?: NonNullable<typeof skillImportPreview>; message?: string } | undefined;
+        const result = message.payload as { ok?: boolean; skills?: typeof skillItems; approved_ids?: string[]; skill_id?: string; saved_id?: string; installed_id?: string; instructions?: string; preview?: NonNullable<typeof skillImportPreview>; learning_report?: SkillLearningReport; message?: string } | undefined;
         setSkillsLoading(false);
         if (!result?.ok) {
           setSkillsError(result?.message || "Não foi possível atualizar o catálogo de Skills.");
@@ -594,6 +615,10 @@ function App() {
         }
         if (result.preview) {
           setSkillImportPreview(result.preview);
+          return;
+        }
+        if (result.learning_report) {
+          setSkillLearningReport(result.learning_report);
           return;
         }
         if (result.installed_id) {
@@ -953,7 +978,7 @@ function App() {
     setTerminalReady(false);
   }
 
-  function sendSkillCommand(type: "skills.list" | "skills.body" | "skills.save" | "skills.delete" | "skills.activation.set" | "skills.import.preview" | "skills.import.install", payload: Record<string, unknown> = {}) {
+  function sendSkillCommand(type: "skills.list" | "skills.body" | "skills.save" | "skills.delete" | "skills.activation.set" | "skills.import.preview" | "skills.import.install" | "skills.learning.report", payload: Record<string, unknown> = {}) {
     if (!projectRoot || runtimeStatus !== "online") {
       setSkillsError("Abra um projeto e conecte o Core para gerenciar Skills.");
       return;
@@ -1867,7 +1892,7 @@ function App() {
             </div>
           ) : activeNav === "skills" ? (
             <div className="skills-manager">
-              <div className="process-toolbar"><div><span className="eyebrow">BIBLIOTECA DO PROJETO</span><h2>Gerenciador de Skills</h2><p>Crie, revise e autorize habilidades que orientam o agente. Skills não executam código nem concedem permissões.</p></div><div className="skills-toolbar-actions"><button onClick={() => sendSkillCommand("skills.list")} disabled={skillsLoading || runtimeStatus !== "online"}><RefreshCw size={14}/> Atualizar</button><button onClick={openNewSkillForm} disabled={!projectRoot}><Plus size={14}/> Nova Skill</button></div></div>
+              <div className="process-toolbar"><div><span className="eyebrow">BIBLIOTECA DO PROJETO</span><h2>Gerenciador de Skills</h2><p>Crie, revise e autorize habilidades que orientam o agente. Skills não executam código nem concedem permissões.</p></div><div className="skills-toolbar-actions"><button onClick={() => sendSkillCommand("skills.list")} disabled={skillsLoading || runtimeStatus !== "online"}><RefreshCw size={14}/> Atualizar</button><button onClick={() => sendSkillCommand("skills.learning.report")} disabled={skillsLoading || runtimeStatus !== "online"}><Activity size={14}/> Analisar uso</button><button onClick={openNewSkillForm} disabled={!projectRoot}><Plus size={14}/> Nova Skill</button></div></div>
               <section className="skill-marketplace">
                 <div className="skill-marketplace-heading"><div><span className="eyebrow">CATÁLOGO EXTERNO</span><h3>Marketplace de Skills</h3><p>Visualize uma Skill pública do GitHub antes de importar. Nenhum código do repositório é executado.</p></div><WandSparkles size={22}/></div>
                 <div className="skill-marketplace-search"><input aria-label="URL pública da Skill no GitHub" value={skillImportUrl} onChange={event => setSkillImportUrl(event.target.value)} placeholder="https://github.com/owner/repo/tree/main/skills/python-testing"/><button onClick={() => sendSkillCommand("skills.import.preview", { source_url: skillImportUrl.trim() })} disabled={skillsLoading || !skillImportUrl.trim() || runtimeStatus !== "online"}><Search size={14}/> Visualizar</button></div>
@@ -1897,6 +1922,31 @@ function App() {
               {skillsError && <div className="manager-runtime-error" role="alert">{skillsError}</div>}
               {skillsNotice && <div className="skills-notice" role="status">{skillsNotice}</div>}
               {skillsLoading && <div className="skills-loading"><RefreshCw size={14}/> Processando catálogo...</div>}
+              {skillLearningReport && <section className="skill-learning-panel">
+                <div className="skill-learning-heading"><div><span className="eyebrow">APRENDIZADO BASEADO EM EVIDÊNCIAS</span><h3>Análise de desempenho das Skills</h3><p>{skillLearningReport.tasks_analyzed} tarefas persistidas analisadas (janela máxima: {skillLearningReport.analysis_limit}). Nenhuma Skill foi alterada automaticamente.</p></div><span className="skill-learning-count">{skillLearningReport.proposals.length} proposta(s)</span></div>
+                <div className="skill-learning-metrics">
+                  {skillLearningReport.metrics.map(metric => <article key={metric.skill_id}><strong>{metric.skill_id}</strong><span>{metric.attempts} uso(s)</span><b>{metric.verified_success_rate === null ? "—" : metric.verified_success_rate + "%"} verificado</b><small>{metric.not_verified} sem verificação · {metric.verified_successes} com sucesso</small></article>)}
+                  {!skillLearningReport.metrics.length && <p>Ainda não há resultados de Skills persistidos. Autorize e utilize Skills em tarefas para gerar métricas reais.</p>}
+                </div>
+                <div className="skill-learning-proposals">
+                  <h4>Propostas para revisão humana</h4>
+                  {skillLearningReport.proposals.map(proposal => <article key={proposal.proposal_id}>
+                    <div><span className="skill-state">{proposal.kind === "improve_skill" ? "MELHORIA" : "NOVA SKILL"}</span><h5>{proposal.title}</h5><p>{proposal.reason}</p><small>{proposal.attempts} ocorrência(s) · evidências: {proposal.evidence_task_ids.join(", ") || "não disponíveis"}</small></div>
+                    <button disabled={!proposal.draft_instructions} onClick={() => {
+                      const manifest = proposal.draft_manifest;
+                      setSkillEditingId(proposal.kind === "improve_skill" ? proposal.skill_id : null);
+                      setSkillForm({
+                        id: manifest.id, name: manifest.name, description: manifest.description,
+                        tags: manifest.tags.join(", "), dependencies: manifest.dependencies.join(", "),
+                        instructions: proposal.draft_instructions || "",
+                      });
+                      setSkillFormOpen(true);
+                    }}>Abrir rascunho</button>
+                  </article>)}
+                  {!skillLearningReport.proposals.length && <p>Sem propostas no momento. O mecanismo só sugere mudanças após amostras repetidas e observáveis.</p>}
+                </div>
+                <small className="skill-learning-disclaimer">Indicadores descrevem tarefas que usaram cada Skill; não provam causalidade. Toda proposta precisa ser revisada e salva manualmente.</small>
+              </section>}
               <div className="skills-manager-grid">
                 {skillItems.map(skill => <article className="skill-card" key={skill.id}>
                   <div className="skill-card-heading"><div className="skill-card-icon"><WandSparkles size={17}/></div><span className={skillApprovedIds.includes(skill.id) ? "skill-state active" : "skill-state"}>{skillApprovedIds.includes(skill.id) ? "AUTORIZADA NESTA SESSÃO" : "NÃO AUTORIZADA"}</span></div>

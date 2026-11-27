@@ -711,3 +711,10 @@ body { min-width:900px; }
 .skill-import-source,.skill-import-dependencies{display:block;margin:8px 0;color:#858d9b;font-size:10px;overflow-wrap:anywhere}.skill-import-install{margin-top:8px}.skill-import-install:disabled,.skill-marketplace-search button:disabled{opacity:.45;cursor:not-allowed}
 
 .skills-notice{margin:10px 0;padding:10px 12px;border:1px solid #315d49;border-radius:8px;background:#17241e;color:#a9dfbd;font-size:11px}
+
+/* Evidence-based Skills learning panel */
+.skill-learning-panel{margin:18px 0;padding:17px;border:1px solid #343946;border-radius:12px;background:#171b22}
+.skill-learning-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.skill-learning-heading h3{margin:5px 0;font-size:15px;color:#e4e7ed}.skill-learning-heading p{margin:0;color:#8f98a8;font-size:11px}.skill-learning-count{white-space:nowrap;color:#b9a6ff;font-size:10px}
+.skill-learning-metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin:14px 0}.skill-learning-metrics article{display:flex;flex-direction:column;gap:5px;padding:11px;border:1px solid #303541;border-radius:8px;background:#1c2029}.skill-learning-metrics strong{font-size:11px;color:#e0e3eb}.skill-learning-metrics span,.skill-learning-metrics small{font-size:10px;color:#929aaa}.skill-learning-metrics b{font-size:13px;color:#9bd4b2}.skill-learning-metrics>p{color:#929aaa;font-size:11px}
+.skill-learning-proposals h4{margin:12px 0;font-size:12px;color:#dfe2e9}.skill-learning-proposals article{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-top:1px solid #2e333e}.skill-learning-proposals h5{margin:5px 0;font-size:12px;color:#e3e6ed}.skill-learning-proposals p{margin:4px 0;color:#9ca4b2;font-size:11px}.skill-learning-proposals small{color:#7f8999;font-size:9px}.skill-learning-proposals button{flex-shrink:0;padding:7px 10px;border:1px solid #4b4264;border-radius:7px;background:#2b2639;color:#ddd2ff;font-size:10px}.skill-learning-proposals button:disabled{opacity:.4}
+.skill-learning-disclaimer{display:block;margin-top:12px;color:#7e8795;font-size:10px}
