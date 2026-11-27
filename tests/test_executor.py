@@ -655,6 +655,15 @@ def test_complete_step_requires_disk_verification_and_repairs_mismatch(tmp_path:
                 target.write_text("external edit", encoding="utf-8")
             return LLMResponse(next(self.responses), {})
 
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\\nname='artifact-fixture'\\nversion='0.1.0'\\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_fixture.py").write_text(
+        "def test_fixture():\\n    assert True\\n",
+        encoding="utf-8",
+    )
     loop = AgentLoop(TamperingLLM(), Settings(max_iterations=8))
     plan = ExecutionPlan("Create artifact", ["Create artifact"], ["Check artifact"], [], ["artifact exists"])
 
