@@ -20,6 +20,7 @@ from .agent.skill_marketplace import (
     install_github_skill,
     preview_github_skill,
 )
+from .agent.skill_learning import SkillLearningEngine
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
 from .studio.language import python_semantic_request
@@ -356,6 +357,8 @@ def _skill_command(root: Path, message: dict, approved_skill_fingerprints: dict[
     catalog = SkillCatalog(root)
     if command == "skills.list":
         return {"skills": catalog.list_available(), "approved_ids": _valid_skill_approvals(catalog, approved_skill_fingerprints)}
+    if command == "skills.learning.report":
+        return {"learning_report": SkillLearningEngine(root).analyze()}
     if command == "skills.import.preview":
         source_url = payload.get("source_url")
         if not isinstance(source_url, str):
@@ -581,7 +584,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
             continue
 
-        if message.get("schema_version") == 1 and message.get("type") in {"skills.list", "skills.body", "skills.save", "skills.delete", "skills.activation.set", "skills.import.preview", "skills.import.install"}:
+        if message.get("schema_version") == 1 and message.get("type") in {"skills.list", "skills.body", "skills.save", "skills.delete", "skills.activation.set", "skills.import.preview", "skills.import.install", "skills.learning.report"}:
             command_identifier = message.get("command_id")
             if not isinstance(command_identifier, str) or not command_identifier.strip() or command_identifier in seen_command_ids:
                 _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": False, "message": "command_id inválido ou repetido."}})

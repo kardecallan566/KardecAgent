@@ -200,3 +200,16 @@ def test_marketplace_install_command_invalidates_old_session_consent(
     )
     assert result["installed_id"] == "external-guide"
     assert "external-guide" not in approved
+
+def test_learning_report_command_returns_persisted_metrics(tmp_path, approved, monkeypatch):
+    from kardecagent import studio_protocol
+
+    report = {"tasks_analyzed": 7, "metrics": [], "proposals": [], "auto_changes": False}
+    monkeypatch.setattr(
+        studio_protocol.SkillLearningEngine, "analyze",
+        lambda self: report,
+    )
+    result = studio_protocol._skill_command(
+        tmp_path, payload("skills.learning.report"), approved
+    )
+    assert result["learning_report"] == report
