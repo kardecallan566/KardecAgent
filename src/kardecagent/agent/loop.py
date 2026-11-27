@@ -162,6 +162,13 @@ class AgentLoop:
             state.transition(TaskStatus.FAILED, reason="Execution plan was rejected.")
             return state
 
+        if plan.security_level == "high_risk":
+            if high_risk_approval_callback is None or not high_risk_approval_callback(plan):
+                state.transition(TaskStatus.FAILED, reason="High-risk execution rejected.")
+                state.record("high_risk_approval", "High-risk execution rejected.", approved=False)
+                return state
+            state.record("high_risk_approval", "High-risk execution approved.", approved=True)
+
         memory_path = ProjectMemoryStore(root).record_approved_plan(
             task, brief.as_dict(), plan
         )
@@ -170,13 +177,6 @@ class AgentLoop:
             "Approved project requirements and acceptance criteria were persisted.",
             path=str(memory_path),
         )
-
-        if plan.security_level == "high_risk":
-            if high_risk_approval_callback is None or not high_risk_approval_callback(plan):
-                state.transition(TaskStatus.FAILED, reason="High-risk execution rejected.")
-                state.record("high_risk_approval", "High-risk execution rejected.", approved=False)
-                return state
-            state.record("high_risk_approval", "High-risk execution approved.", approved=True)
 
         store = TaskStore(root)
         state.record("task_persisted", "Approved task state is being durably persisted for resume.", path=str(store.path_for(task)), journal_path=str(store.journal_path_for(task)))
