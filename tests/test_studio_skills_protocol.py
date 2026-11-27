@@ -3,101 +3,108 @@ import pytest
 from kardecagent.studio_protocol import _skill_command
 
 
-APPROVED = set()\n\n\ndef payload(command, **values):
+@pytest.fixture
+def approved():
+    return set()
+
+
+def payload(command, **values):
     return {"type": command, "payload": values}
 
 
-def test_skill_catalog_list_and_save(tmp_path):
+def test_skill_catalog_list_and_save(tmp_path, approved):
     result = _skill_command(tmp_path, payload(
         "skills.save", id="python-tests", name="Python Tests",
         description="Test guidance", tags=["python", "pytest"],
         dependencies=[], instructions="Run focused tests.",
-    ), APPROVED)
+    ), approved)
     assert result["saved_id"] == "python-tests"
     assert result["skills"][0]["name"] == "Python Tests"
     assert result["approved_ids"] == []
 
 
-def test_skill_body_is_loaded_only_when_requested(tmp_path):
+def test_skill_body_is_loaded_only_when_requested(tmp_path, approved):
     _skill_command(tmp_path, payload(
         "skills.save", id="python-tests", name="Python Tests",
         tags=["python"], dependencies=[], instructions="Detailed private workflow.",
-    ), APPROVED)
-    result = _skill_command(tmp_path, payload("skills.body", id="python-tests"), APPROVED)
+    ), approved)
+    result = _skill_command(tmp_path, payload("skills.body", id="python-tests"), approved)
     assert result["instructions"] == "Detailed private workflow."
 
 
-def test_skill_activation_persists_explicit_approval_and_revocation(tmp_path):
+def test_skill_activation_is_explicit_and_session_scoped(tmp_path, approved):
     _skill_command(tmp_path, payload(
         "skills.save", id="base", name="Base", tags=["base"],
         dependencies=[], instructions="Base guidance.",
-    ), APPROVED)
+    ), approved)
     _skill_command(tmp_path, payload(
         "skills.save", id="python-tests", name="Python Tests", tags=["python"],
         dependencies=["base"], instructions="Test guidance.",
-    ), APPROVED)
-    result = _skill_command(tmp_path, payload("skills.activation.set", id="python-tests", enabled=True), APPROVED)
+    ), approved)
+    result = _skill_command(tmp_path, payload("skills.activation.set", id="python-tests", enabled=True), approved)
     assert result["approved_ids"] == ["base", "python-tests"]
-    assert APPROVED == {"base", "python-tests"}
-    result = _skill_command(tmp_path, payload("skills.activation.set", id="python-tests", enabled=False), APPROVED)
+    assert approved == {"base", "python-tests"}
+    result = _skill_command(tmp_path, payload("skills.activation.set", id="python-tests", enabled=False), approved)
     assert result["approved_ids"] == []
-    assert APPROVED == set()
+    assert approved == set()
 
 
-def test_skill_save_rejects_missing_dependencies_without_partial_package(tmp_path):
+def test_skill_save_rejects_missing_dependencies_without_partial_package(tmp_path, approved):
     with pytest.raises(ValueError, match="Dependências não encontradas"):
         _skill_command(tmp_path, payload(
             "skills.save", id="broken", name="Broken", tags=[],
             dependencies=["missing"], instructions="No.",
-        ), APPROVED)
+        ), approved)
     assert not (tmp_path / ".kardecagent" / "skills" / "broken").exists()
 
 
-def test_skill_delete_refuses_to_remove_dependency(tmp_path):
+def test_skill_delete_refuses_to_remove_dependency(tmp_path, approved):
     _skill_command(tmp_path, payload(
         "skills.save", id="base", name="Base", tags=[], dependencies=[], instructions="Base.",
-    ), APPROVED)
+    ), approved)
     _skill_command(tmp_path, payload(
         "skills.save", id="child", name="Child", tags=[], dependencies=["base"], instructions="Child.",
-    ), APPROVED)
+    ), approved)
     with pytest.raises(ValueError, match="outras Skills dependem"):
-        _skill_command(tmp_path, payload("skills.delete", id="base"), APPROVED)
-    result = _skill_command(tmp_path, payload("skills.delete", id="child"), APPROVED)
+        _skill_command(tmp_path, payload("skills.delete", id="base"), approved)
+    result = _skill_command(tmp_path, payload("skills.delete", id="child"), approved)
     assert [item["id"] for item in result["skills"]] == ["base"]
 
 
-def test_skill_activation_rejects_unknown_skill(tmp_path):
+def test_skill_activation_rejects_unknown_skill(tmp_path, approved):
     with pytest.raises(ValueError, match="unknown skill"):
-        _skill_command(tmp_path, payload("skills.activation.set", id="unknown", enabled=True), APPROVED)
+        _skill_command(tmp_path, payload("skills.activation.set", id="unknown", enabled=True), approved)
 
-def test_skill_save_rejects_cyclic_dependency_before_writing(tmp_path):
+
+def test_skill_save_rejects_cyclic_dependency_before_writing(tmp_path, approved):
     _skill_command(tmp_path, payload(
         "skills.save", id="first", name="First", tags=[], dependencies=[],
         instructions="First guidance.",
-    ), APPROVED)
+    ), approved)
     _skill_command(tmp_path, payload(
         "skills.save", id="second", name="Second", tags=[], dependencies=["first"],
         instructions="Second guidance.",
-    ), APPROVED)
+    ), approved)
     with pytest.raises(ValueError, match="cyclic"):
         _skill_command(tmp_path, payload(
             "skills.save", id="first", name="First", tags=[], dependencies=["second"],
             instructions="Changed guidance.",
-        ), APPROVED)
-    assert _skill_command(tmp_path, payload("skills.body", id="first"), APPROVED)["instructions"] == "First guidance."
+        ), approved)
+    assert _skill_command(tmp_path, payload("skills.body", id="first"), approved)["instructions"] == "First guidance."
 
 
-def test_skill_delete_removes_approval_record(tmp_path):
+def test_skill_delete_revokes_session_approval(tmp_path, approved):
     _skill_command(tmp_path, payload(
         "skills.save", id="temporary", name="Temporary", tags=[], dependencies=[],
         instructions="Temporary guidance.",
-    ), APPROVED)
-    _skill_command(tmp_path, payload("skills.activation.set", id="temporary", enabled=True), APPROVED)
-    result = _skill_command(tmp_path, payload("skills.delete", id="temporary"), APPROVED)
+    ), approved)
+    _skill_command(tmp_path, payload("skills.activation.set", id="temporary", enabled=True), approved)
+    result = _skill_command(tmp_path, payload("skills.delete", id="temporary"), approved)
     assert result["approved_ids"] == []
     assert result["skills"] == []
 
-def test_skill_catalog_refuses_symlinked_metadata_root(tmp_path):
+
+def test_skill_catalog_refuses_symlinked_metadata_root(tmp_path, approved):
     outside = tmp_path.parent / (tmp_path.name + "-outside")
     outside.mkdir()
     (outside / "skills").mkdir()
@@ -106,4 +113,4 @@ def test_skill_catalog_refuses_symlinked_metadata_root(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("Directory symlinks are unavailable on this platform.")
     with pytest.raises(ValueError, match="link simbólico"):
-        _skill_command(tmp_path, payload("skills.list"), APPROVED)
+        _skill_command(tmp_path, payload("skills.list"), approved)
