@@ -570,6 +570,7 @@ class AgentExecutor:
         no_progress_count = 0
         no_progress_limit = 3
         verification_failure_count = 0
+        verification_repair_mode = False
 
         def stop_stalled_execution(reason: str, *, tool: str | None = None,
                                    requested_step: int | None = None) -> TaskState:
@@ -764,7 +765,7 @@ class AgentExecutor:
                 continue
 
             if action.tool in {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS:
-                if tracker.completed or action.plan_step != tracker.current_step:
+                if (tracker.completed and not verification_repair_mode) or action.plan_step != tracker.current_step:
                     state.record("plan_scope_violation", "Action rejected: outside active approved plan step.",
                                  tool=action.tool, requested_step=action.plan_step,
                                  active_step=active_step_number(),
@@ -928,6 +929,7 @@ class AgentExecutor:
                     verification=artifact_report,
                 )
                 if not artifact_report["verified"]:
+                    verification_repair_mode = True
                     state.record(
                         "artifact_verification_failed",
                         "Finish rejected because one or more changed files no longer match their latest audited state.",
@@ -979,6 +981,7 @@ class AgentExecutor:
                 verification = self.verify(root, security_required=security_required)
                 state.record("verification", "Completion verification executed.", verification=verification)
                 if not verification["verified"]:
+                    verification_repair_mode = True
                     state.record("verification_failed", "Completion verification failed.", verification=verification)
                     state.transition(TaskStatus.RUNNING, reason="Completion verification failed; continuing execution.")
                     messages += [{"role": "assistant", "content": response.content},
@@ -997,6 +1000,7 @@ class AgentExecutor:
                     review = self._security_review(root, task, plan)
                     state.record("security_review", "Independent security review completed.", review=review)
                     if review.get("status") != "pass":
+                        verification_repair_mode = True
                         state.record("verification_failed", "Security review reported findings.", review=review)
                         state.transition(TaskStatus.RUNNING, reason="Security review found issues; continuing execution.")
                         messages += [{"role": "assistant", "content": response.content},
@@ -1011,6 +1015,7 @@ class AgentExecutor:
                         ):
                             verification_failure_count = 0
                         continue
+                verification_repair_mode = False
                 state.transition(TaskStatus.VERIFIED, reason="Completion verification passed.")
                 state.record("completed", "Task completed and verified.",
                              reason=action.arguments["reason"], criteria_evidence=evidence,
