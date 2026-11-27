@@ -15,6 +15,11 @@ from pathlib import Path
 from .agent.loop import AgentLoop
 from .agent.plan import ExecutionPlan
 from .agent.skills import SkillCatalog, SkillError, SkillManifest
+from .agent.skill_marketplace import (
+    SkillMarketplaceError,
+    install_github_skill,
+    preview_github_skill,
+)
 from .agent.state import AgentEvent
 from .agent.persistence import PersistenceError, TaskStore, task_id
 from .studio.language import python_semantic_request
@@ -351,6 +356,31 @@ def _skill_command(root: Path, message: dict, approved_skill_fingerprints: dict[
     catalog = SkillCatalog(root)
     if command == "skills.list":
         return {"skills": catalog.list_available(), "approved_ids": _valid_skill_approvals(catalog, approved_skill_fingerprints)}
+    if command == "skills.import.preview":
+        source_url = payload.get("source_url")
+        if not isinstance(source_url, str):
+            raise SkillMarketplaceError("source_url é obrigatório.")
+        preview = preview_github_skill(root, source_url)
+        return {"preview": preview.as_dict()}
+    if command == "skills.import.install":
+        source_url = payload.get("source_url")
+        expected_fingerprint = payload.get("fingerprint")
+        approved = payload.get("approved")
+        replace_existing = payload.get("replace_existing", False)
+        if not isinstance(source_url, str) or not isinstance(expected_fingerprint, str):
+            raise SkillMarketplaceError("Origem e fingerprint da prévia são obrigatórios.")
+        if not isinstance(replace_existing, bool):
+            raise SkillMarketplaceError("replace_existing deve ser booleano.")
+        result = install_github_skill(
+            root, source_url, expected_fingerprint=expected_fingerprint,
+            approved=approved, replace_existing=replace_existing,
+        )
+        approved_skill_fingerprints.pop(result["installed_id"], None)
+        return {
+            "skills": catalog.list_available(),
+            "approved_ids": _valid_skill_approvals(catalog, approved_skill_fingerprints),
+            **result,
+        }
     if command == "skills.body":
         skill_id = payload.get("id")
         if not isinstance(skill_id, str):
@@ -551,7 +581,7 @@ def run_stdio(project_root: Path, agent: AgentLoop) -> int:
             _write({"type": "runtime.error", "schema_version": 1, "message": str(exc)})
             continue
 
-        if message.get("schema_version") == 1 and message.get("type") in {"skills.list", "skills.body", "skills.save", "skills.delete", "skills.activation.set"}:
+        if message.get("schema_version") == 1 and message.get("type") in {"skills.list", "skills.body", "skills.save", "skills.delete", "skills.activation.set", "skills.import.preview", "skills.import.install"}:
             command_identifier = message.get("command_id")
             if not isinstance(command_identifier, str) or not command_identifier.strip() or command_identifier in seen_command_ids:
                 _write({"type": "skills.response", "schema_version": 1, "command_id": command_identifier, "payload": {"ok": False, "message": "command_id inválido ou repetido."}})
