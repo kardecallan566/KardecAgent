@@ -78,3 +78,18 @@ def test_atomic_write_replaces_existing_file_and_leaves_no_temporary_file(tmp_pa
     fs.write_file("nested/file.txt", "new")
     assert fs.read_file("nested/file.txt") == "new"
     assert [p.name for p in (tmp_path / "nested").iterdir()] == ["file.txt"]
+
+
+
+def test_write_file_rejects_stale_expected_fingerprint(tmp_path: Path):
+    import hashlib
+
+    fs = ProjectFilesystem(tmp_path)
+    fs.write_file("shared.txt", "initial")
+    expected = hashlib.sha256(b"initial").hexdigest()
+    (tmp_path / "shared.txt").write_text("external edit", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="changed concurrently"):
+        fs.write_file("shared.txt", "agent replacement", expected_sha256=expected)
+
+    assert fs.read_file("shared.txt") == "external edit"
