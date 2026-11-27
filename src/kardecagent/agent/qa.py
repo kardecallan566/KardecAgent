@@ -179,14 +179,14 @@ class ProjectQAEngine:
         lower = source.lower()
         if not re.search(r"""<meta\s+[^>]*name\s*=\s*["']viewport["']""", lower):
             errors.append(f"{relative}: responsive viewport meta tag is missing")
-        if re.search(r"""\b(?:animation|transition)\s*:""", source, re.I):
-            css_files = [
-                item for item in iter_project_files(self.root)
-                if item.suffix.lower() == ".css"
-            ]
-            css = "\n".join(
-                item.read_text(encoding="utf-8", errors="ignore") for item in css_files
-            )
+        css_files = [
+            item for item in iter_project_files(self.root)
+            if item.suffix.lower() == ".css"
+        ]
+        css = "\\n".join(
+            item.read_text(encoding="utf-8", errors="ignore") for item in css_files
+        )
+        if re.search(r"""\b(?:animation|transition)\s*:""", source + "\\n" + css, re.I):
             if "prefers-reduced-motion" not in css:
                 warnings.append(
                     f"{relative}: motion styles detected without prefers-reduced-motion support"
