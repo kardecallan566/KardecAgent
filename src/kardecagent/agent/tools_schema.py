@@ -27,6 +27,7 @@ TOOL_SCHEMAS = {
     "apply_patch": {"required": ["patch"], "types": {"patch": str}, "optional": {}},
     "run_command": {"required": ["command"], "types": {"command": str}, "optional": {}},
     "run_checks": {"required": ["kind"], "types": {"kind": str}, "optional": {}},
+    "run_browser_qa": {"required": ["base_url"], "types": {"base_url": str}, "optional": {"routes": list}},
     "git_status": {"required": [], "types": {}, "optional": {}},
     "git_diff": {"required": [], "types": {}, "optional": {}},
     "git_log": {"required": [], "types": {}, "optional": {"limit": int}},
