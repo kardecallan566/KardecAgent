@@ -24,6 +24,7 @@ class _AccessibilityParser(HTMLParser):
         self.controls: list[dict] = []
         self.images_without_alt: list[str] = []
         self.interactive: list[dict] = []
+        self.interactive_stack: list[dict] = []
         self.label_depth = 0
 
     def handle_starttag(self, tag: str, attrs) -> None:
@@ -43,22 +44,24 @@ class _AccessibilityParser(HTMLParser):
         if tag == "img" and "alt" not in values:
             self.images_without_alt.append(values.get("src", "(unknown image)"))
         if tag in {"a", "button"}:
-            self.interactive.append({"tag": tag, "attrs": values, "text": ""})
+            item = {"tag": tag, "attrs": values, "text": ""}
+            self.interactive.append(item)
+            self.interactive_stack.append(item)
 
     def handle_startendtag(self, tag: str, attrs) -> None:
         self.handle_starttag(tag, attrs)
         self.handle_endtag(tag)
 
     def handle_data(self, data: str) -> None:
-        if self.interactive:
-            self.interactive[-1]["text"] += data
+        if self.interactive_stack:
+            self.interactive_stack[-1]["text"] += data
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
         if tag in {"a", "button"}:
-            for index in range(len(self.interactive) - 1, -1, -1):
-                if self.interactive[index]["tag"] == tag:
-                    self.interactive.pop(index)
+            for index in range(len(self.interactive_stack) - 1, -1, -1):
+                if self.interactive_stack[index]["tag"] == tag:
+                    del self.interactive_stack[index:]
                     break
         if tag == "label" and self.label_depth:
             self.label_depth -= 1
