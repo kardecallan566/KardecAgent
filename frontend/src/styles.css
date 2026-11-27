@@ -709,3 +709,5 @@ body { min-width:900px; }
 .skill-marketplace-search button,.skill-import-install{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid #51436f;border-radius:7px;background:#2b263b;color:#e6ddff}
 .skill-import-preview{margin-top:14px;padding:15px;border:1px solid #393448;border-radius:9px;background:#1d1b26}.skill-import-preview h4{margin:6px 0;font-size:14px;color:#eee}.skill-import-preview p{color:#a8afbd;font-size:11px}.skill-import-preview pre{max-height:180px;overflow:auto;padding:10px;border-radius:7px;background:#11131a;color:#c5cad5;font-size:10px;white-space:pre-wrap;overflow-wrap:anywhere}
 .skill-import-source,.skill-import-dependencies{display:block;margin:8px 0;color:#858d9b;font-size:10px;overflow-wrap:anywhere}.skill-import-install{margin-top:8px}.skill-import-install:disabled,.skill-marketplace-search button:disabled{opacity:.45;cursor:not-allowed}
+
+.skills-notice{margin:10px 0;padding:10px 12px;border:1px solid #315d49;border-radius:8px;background:#17241e;color:#a9dfbd;font-size:11px}

@@ -66,13 +66,17 @@ class SkillImportPreview:
 def parse_github_skill_url(value: str) -> GitHubSkillSource:
     if not isinstance(value, str) or len(value) > 1000:
         raise SkillMarketplaceError("Informe uma URL pública do GitHub.")
-    parsed = urlparse(value.strip())
+    try:
+        parsed = urlparse(value.strip())
+        port = parsed.port
+    except ValueError as exc:
+        raise SkillMarketplaceError("A URL contém uma porta inválida.") from exc
     if (
         parsed.scheme != "https"
         or parsed.hostname != "github.com"
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.port is not None
+        or port is not None
         or parsed.query
         or parsed.fragment
     ):

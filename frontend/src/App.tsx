@@ -349,8 +349,6 @@ function App() {
     const commandId = "skills-list-" + crypto.randomUUID();
     setSkillsLoading(true);
     setSkillsError(null);
-    setSkillsNotice(null);
-    if (type === "skills.import.preview") setSkillImportPreview(null);
     void invoke("send_runtime_command", {
       message: { type: "skills.list", schema_version: 1, command_id: commandId, payload: { project_root: projectRoot } },
     }).catch(error => {
@@ -963,6 +961,8 @@ function App() {
     const commandId = "skills-" + crypto.randomUUID();
     setSkillsLoading(true);
     setSkillsError(null);
+    setSkillsNotice(null);
+    if (type === "skills.import.preview") setSkillImportPreview(null);
     void invoke("send_runtime_command", {
       message: { type, schema_version: 1, command_id: commandId, payload: { ...payload, project_root: projectRoot } },
     }).catch(error => {
@@ -1895,6 +1895,7 @@ function App() {
               {!projectRoot && <div className="manager-runtime-error">Abra um projeto para acessar o catálogo de Skills.</div>}
               {runtimeStatus !== "online" && projectRoot && <div className="manager-runtime-error">O Core precisa estar conectado para gerenciar as Skills.</div>}
               {skillsError && <div className="manager-runtime-error" role="alert">{skillsError}</div>}
+              {skillsNotice && <div className="skills-notice" role="status">{skillsNotice}</div>}
               {skillsLoading && <div className="skills-loading"><RefreshCw size={14}/> Processando catálogo...</div>}
               <div className="skills-manager-grid">
                 {skillItems.map(skill => <article className="skill-card" key={skill.id}>
