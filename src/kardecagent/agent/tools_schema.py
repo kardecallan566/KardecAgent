@@ -27,6 +27,7 @@ TOOL_SCHEMAS = {
     "apply_patch": {"required": ["patch"], "types": {"patch": str}, "optional": {}},
     "run_command": {"required": ["command"], "types": {"command": str}, "optional": {}},
     "run_checks": {"required": ["kind"], "types": {"kind": str}, "optional": {}},
+    "run_browser_qa": {"required": ["base_url"], "types": {"base_url": str}, "optional": {"routes": list}},
     "git_status": {"required": [], "types": {}, "optional": {}},
     "git_diff": {"required": [], "types": {}, "optional": {}},
     "git_log": {"required": [], "types": {}, "optional": {"limit": int}},
@@ -54,7 +55,7 @@ TOOL_SCHEMAS = {
 from ..llm.cleaner import extract_json_payload
 
 GIT_MUTATING_TOOLS = {"git_fetch", "git_pull", "git_push", "git_create_branch", "git_checkout", "git_commit", "git_merge", "git_create_pr", "git_merge_pr"}
-STEP_REQUIRED_TOOLS = {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "open_file", "complete_step"} | GIT_MUTATING_TOOLS
+STEP_REQUIRED_TOOLS = {"write_file", "create_directory", "append_file", "replace_in_file", "apply_patch", "run_command", "run_checks", "run_browser_qa", "open_file", "complete_step"} | GIT_MUTATING_TOOLS
 
 def _validate_arguments(tool: str, arguments: Any) -> dict[str, Any]:
     schema = TOOL_SCHEMAS[tool]
@@ -138,13 +139,13 @@ def tool_instructions() -> str:
         "Before complete_step, provide concrete read-back evidence for each artifact changed in that step. Before finish, re-inspect changed files and run the most relevant available tests, lint, typecheck, build, or validation command. A successful tool response alone is NOT proof that the requested code exists or works. If a check is unavailable, say so explicitly rather than claiming it passed. "
         "For a simple request targeting one named file, keep the plan to 1-2 steps and edit that file directly; do not invent a workspace-wide inventory step. "
         "Return ONLY JSON with tool, arguments and optional plan_step. "
-        "plan_step is required for write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, open_file, complete_step and every Git mutation. "
+        "plan_step is required for write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, run_browser_qa, open_file, complete_step and every Git mutation. "
         "Use read-only tools without plan_step. Git tools: git_status, git_diff, git_log, git_branches, git_remotes, git_pr_status. " 
         "Git mutations: git_fetch, git_pull, git_push, git_create_branch, git_checkout, git_commit, git_merge, git_create_pr, git_merge_pr. " 
-        "Before every Git mutation, request and receive the explicit user high-risk approval; never treat plan approval as Git approval. " 
+        "Before every Git mutation, request and receive the explicit user high-risk approval; never treat plan approval as Git approval. Browser QA may only connect to an explicitly supplied localhost/loopback URL. It never starts a server, installs Playwright, or accesses non-local network hosts; if the browser runtime is unavailable, report that limitation. " 
         "Use git_commit only with explicit selected paths; never stage all files implicitly. For a new branch, git_push must use set_upstream=true. Push before git_create_pr; PR creation refuses unpushed commits and never pushes implicitly. Pulls must be fast-forward-only; never force-push or hard-reset. " 
         "Use read-only tools without plan_step. Tools: list_files, read_file, search_files, search_web, "
-        "fetch_web_page, write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, open_file, git_status, git_diff, git_log, git_branches, git_remotes, git_fetch, git_pull, git_push, git_create_branch, git_checkout, git_commit, git_merge, git_create_pr, git_pr_status, git_merge_pr, "
+        "fetch_web_page, write_file, create_directory, append_file, replace_in_file, apply_patch, run_command, run_checks, run_browser_qa, open_file, git_status, git_diff, git_log, git_branches, git_remotes, git_fetch, git_pull, git_push, git_create_branch, git_checkout, git_commit, git_merge, git_create_pr, git_pr_status, git_merge_pr, "
         "complete_step, request_plan_change, finish. finish requires exactly one criteria_evidence item for every approved completion criterion; use objects with criterion and evidence fields so each item is explicitly linked. "
         "Only execute actions belonging to the active approved plan step. Complete a step only after verifying its result. "
         "If the approved plan is insufficient, use request_plan_change with a complete replacement plan; "

@@ -22,6 +22,7 @@ from ..tools import (
     git_branch_list, git_remote_list, git_fetch, git_pull, git_push, git_create_branch,
     git_checkout, git_commit, git_merge, gh_create_pr, gh_pr_status, gh_merge_pr,
 )
+from .qa import ProjectQAEngine
 from .plan import ExecutionPlan, PlanError, PlanTracker, parse_plan
 from .security import assess_security, security_requirements_for
 from .security_review import (
@@ -150,6 +151,32 @@ class AgentExecutor:
             "checks": summary["checks"],
             "git": None,
         }
+        profile = detect_project(root)
+        if profile.kind in {"web", "static-html"}:
+            project_qa = ProjectQAEngine(root).run_static()
+            result["project_qa"] = project_qa
+            if project_qa.get("available"):
+                qa_passed = bool(project_qa.get("passed", False))
+                result["checks"].append({
+                    "kind": "project_qa",
+                    "available": True,
+                    "passed": qa_passed,
+                    "status": "passed" if qa_passed else "failed",
+                    "summary": (
+                        f"{project_qa.get('routes', {}).get('count', 0)} routes discovered; "
+                        f"{len(project_qa.get('errors', []))} errors; "
+                        f"{len(project_qa.get('warnings', []))} warnings"
+                    ),
+                })
+                result["summary"]["total"] += 1
+                result["summary"]["available"] += 1
+                if qa_passed:
+                    result["summary"]["passed"] += 1
+                else:
+                    result["summary"]["failed"] += 1
+                    result["summary"]["verified"] = False
+                    result["verified"] = False
+
         if git_is_repo(root):
             status, diff = git_status(root), git_diff(root)
             result["git"] = {
@@ -429,6 +456,11 @@ class AgentExecutor:
                         "changed_paths": changed,
                     }, ensure_ascii=False)
             return json.dumps(result.__dict__, ensure_ascii=False)
+        if action.tool == "run_browser_qa":
+            report = ProjectQAEngine(root).run_browser_smoke(
+                args["base_url"], routes=args.get("routes")
+            )
+            return json.dumps(report, ensure_ascii=False)
         if action.tool == "run_checks":
             return json.dumps(self._run_check(root, args["kind"]), ensure_ascii=False)
         if action.tool == "git_status":
