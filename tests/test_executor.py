@@ -634,8 +634,6 @@ def test_complete_step_rejects_artifact_that_changed_after_write(tmp_path: Path)
 
 
 def test_complete_step_requires_disk_verification_and_repairs_mismatch(tmp_path: Path):
-    import json
-
     target = tmp_path / "artifact.txt"
 
     class TamperingLLM:
