@@ -65,7 +65,8 @@ class ProjectMemoryStore:
         supplied = payload.get("checksum")
         if not isinstance(supplied, str) or supplied != self._checksum(payload):
             raise ProjectMemoryError("project memory checksum mismatch")
-        if payload.get("project", {}).get("root") != str(self.root):
+        project = payload.get("project")
+        if not isinstance(project, dict) or project.get("root") != str(self.root):
             raise ProjectMemoryError("project memory belongs to a different workspace")
         for key in (
             "requirements", "decisions", "acceptance_criteria",
@@ -124,12 +125,18 @@ class ProjectMemoryStore:
         criteria = list(getattr(plan, "completion_criteria", ()) or ())
         steps = list(getattr(plan, "steps", ()) or ())
 
-        def merge_unique(existing: list, additions: list) -> list:
-            seen = {json.dumps(item, ensure_ascii=False, sort_keys=True) for item in existing}
+        def merge_unique(existing: list, additions: list, identity_field: str) -> list:
+            """Deduplicate by the semantic value, not the task that introduced it."""
+            def identity(item: Any) -> str:
+                if isinstance(item, dict) and isinstance(item.get(identity_field), str):
+                    return item[identity_field].strip().casefold()
+                return json.dumps(item, ensure_ascii=False, sort_keys=True)
+
+            seen = {identity(item) for item in existing}
             result = list(existing)
             for item in additions:
-                key = json.dumps(item, ensure_ascii=False, sort_keys=True)
-                if key not in seen:
+                key = identity(item)
+                if key and key not in seen:
                     result.append(item)
                     seen.add(key)
             return result
@@ -137,14 +144,17 @@ class ProjectMemoryStore:
         memory["requirements"] = merge_unique(
             memory["requirements"],
             [{"text": item, "source_task": task, "status": "approved"} for item in requirements],
+            "text",
         )
         memory["acceptance_criteria"] = merge_unique(
             memory["acceptance_criteria"],
             [{"text": str(item), "source_task": task, "status": "pending"} for item in criteria],
+            "text",
         )
         memory["milestones"] = merge_unique(
             memory["milestones"],
             [{"title": str(step), "source_task": task, "status": "pending"} for step in steps],
+            "title",
         )
         return self.save(memory)
 
