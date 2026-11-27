@@ -71,7 +71,9 @@ class AgentLoop:
         base_messages = [
             {"role": "system", "content": compose_system_prompt(
                 SYSTEM_PROMPT, load_registry(root / ".kardecagent" / "harness.json"),
-                phase=plan_instructions() + project_brief_instructions(\n                    build_project_brief(task, detect_project(root), context["project_files"])\n                ) + " You are in the planning phase. Do not call implementation tools.",
+                phase=plan_instructions() + project_brief_instructions(
+                    build_project_brief(task, detect_project(root), context["project_files"])
+                ) + " You are in the planning phase. Do not call implementation tools.",
             )},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
