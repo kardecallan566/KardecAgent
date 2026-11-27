@@ -56,3 +56,19 @@ def test_brief_instructions_are_empty_for_maintenance_and_specific_for_website()
     assert "PROJECT DELIVERY MODE" in instructions
     assert "responsive" in instructions
     assert "Do not invent product requirements" in instructions
+
+
+
+def test_agent_context_includes_project_delivery_profile(tmp_path):
+    from kardecagent.agent.loop import AgentLoop
+    from kardecagent.config import Settings
+
+    loop = AgentLoop(object(), Settings())
+    context = loop._build_context(
+        tmp_path,
+        "Crie um website institucional com várias páginas e animações",
+    )
+
+    assert context["project_brief"]["mode"] == "full_project"
+    assert context["project_brief"]["project_type"] == "website"
+    assert context["project_brief"]["quality_gates"]
