@@ -175,6 +175,7 @@ class Orchestrator:
         parent_state=None,
         resume_subtask_id: str | None = None,
         resume_step: int = 1,
+        skill_prompt_sections: list[str] | None = None,
     ) -> TaskBoard:
         while not board.completed:
             ready = board.ready()
@@ -301,6 +302,7 @@ class Orchestrator:
         parent_state=None,
         resume_subtask_id: str | None = None,
         resume_step: int = 1,
+        skill_prompt_sections: list[str] | None = None,
     ) -> TaskBoard:
         """Execute subtasks without replanning or asking for approval again."""
         def execute(subtask: Subtask, requested_resume_step: int = 1) -> SubtaskExecutionResult:
@@ -362,6 +364,7 @@ class Orchestrator:
                     "parent_plan": parent_plan.as_dict(),
                     "subtask": subtask.as_dict(),
                     "specialist_role": subtask.role,
+                    "skill_prompt_sections": list(skill_prompt_sections or []),
                 },
                 allowed_scope=subtask.scope,
                 max_iterations=self.settings.max_iterations,

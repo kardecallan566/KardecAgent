@@ -614,7 +614,9 @@ class AgentExecutor:
             {"role": "system", "content": compose_system_prompt(
                 "You are KardecAgent, a local software engineering agent.",
                 load_registry(root / ".kardecagent" / "harness.json"),
-                phase=tool_instructions(),
+                phase=tool_instructions() + "\n\n" + "\n\n".join(
+                    (context or {}).get("skill_prompt_sections", [])
+                ),
             )},
             {"role": "user", "content": json.dumps(execution_context, ensure_ascii=False)},
         ]
