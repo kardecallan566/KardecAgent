@@ -155,8 +155,28 @@ class AgentExecutor:
         if profile.kind in {"web", "static-html"}:
             project_qa = ProjectQAEngine(root).run_static()
             result["project_qa"] = project_qa
-            if project_qa.get("available") and not project_qa.get("passed", False):
-                result["verified"] = False
+            if project_qa.get("available"):
+                qa_passed = bool(project_qa.get("passed", False))
+                result["checks"].append({
+                    "kind": "project_qa",
+                    "available": True,
+                    "passed": qa_passed,
+                    "status": "passed" if qa_passed else "failed",
+                    "summary": (
+                        f"{project_qa.get('routes', {}).get('count', 0)} routes discovered; "
+                        f"{len(project_qa.get('errors', []))} errors; "
+                        f"{len(project_qa.get('warnings', []))} warnings"
+                    ),
+                })
+                result["summary"]["total"] += 1
+                result["summary"]["available"] += 1
+                if qa_passed:
+                    result["summary"]["passed"] += 1
+                else:
+                    result["summary"]["failed"] += 1
+                    result["summary"]["verified"] = False
+                    result["verified"] = False
+
         if git_is_repo(root):
             status, diff = git_status(root), git_diff(root)
             result["git"] = {
