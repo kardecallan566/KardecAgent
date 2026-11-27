@@ -18,7 +18,7 @@ from ..tools import (
     ProjectFilesystem, apply_unified_patch, git_diff, git_has_uncommitted_changes,
     git_is_repo, git_log, git_status, git_changed_paths, git_changed_fingerprints, run_command, search_text, search_web,
     fetch_web_page,
-    WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change,
+    WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_changes, verify_recorded_changes,
     git_branch_list, git_remote_list, git_fetch, git_pull, git_push, git_create_branch,
     git_checkout, git_commit, git_merge, gh_create_pr, gh_pr_status, gh_merge_pr,
 )
@@ -211,6 +211,25 @@ class AgentExecutor:
                          changes=records, subtask_id=subtask_id)
 
     @staticmethod
+    def _latest_artifact_changes(state: TaskState, plan_step: int | None = None) -> list[dict]:
+        latest = {}
+        for event in state.events:
+            if event.event_type != "integrity_change":
+                continue
+            for change in event.data.get("changes", []):
+                if plan_step is not None and change.get("plan_step") != plan_step:
+                    continue
+                latest[change["path"]] = change
+        return [latest[path] for path in sorted(latest)]
+
+    def _verify_artifacts(
+        self, root: Path, state: TaskState, plan_step: int | None = None
+    ) -> dict:
+        """Re-read every changed artifact from disk and compare its audited SHA-256."""
+        changes = self._latest_artifact_changes(state, plan_step)
+        return verify_recorded_changes(root, changes)
+
+    @staticmethod
     def _contains_git_mutation_command(command: str) -> bool:
         pattern = (
             r"\bgit(?:['\",\s]+)(?:-C\s+[^\s]+\s+)?"
@@ -286,7 +305,11 @@ class AgentExecutor:
             }, ensure_ascii=False)
         if action.tool == "write_file":
             self._check_scope(root, [args["path"]], scope)
-            fs.write_file(args["path"], args["content"])
+            target = fs.safe_path(args["path"])
+            expected_sha256 = (
+                fs.file_fingerprint(args["path"])["sha256"] if target.is_file() else None
+            )
+            fs.write_file(args["path"], args["content"], expected_sha256=expected_sha256)
             if fs.read_file(args["path"]) != args["content"]:
                 raise IOError(f"write verification failed for {args['path']}")
             integrity_after = self._workspace_snapshot(root, True)
@@ -294,7 +317,8 @@ class AgentExecutor:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
-            return json.dumps({"ok": True, "path": args["path"], "method": "full_file"})
+            return json.dumps({"ok": True, "path": args["path"], "method": "full_file",
+                                "fingerprint": fs.file_fingerprint(args["path"])}, ensure_ascii=False)
         if action.tool == "append_file":
             self._check_scope(root, [args["path"]], scope)
             fs.append_file(args["path"], args["content"])
@@ -303,7 +327,8 @@ class AgentExecutor:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
-            return json.dumps({"ok": True, "path": args["path"], "method": "append"}, ensure_ascii=False)
+            return json.dumps({"ok": True, "path": args["path"], "method": "append",
+                                "fingerprint": fs.file_fingerprint(args["path"])}, ensure_ascii=False)
         if action.tool == "replace_in_file":
             self._check_scope(root, [args["path"]], scope)
             count = fs.replace_in_file(args["path"], args["find"], args["replace"], args.get("replace_all", False))
@@ -314,7 +339,9 @@ class AgentExecutor:
                 self._record_integrity(state, integrity_before, integrity_after,
                                       sorted(integrity_before.changed_paths(integrity_after)),
                                       tool=action.tool, plan_step=action.plan_step, subtask=bool(scope), subtask_id=subtask_id)
-            return json.dumps({"ok": True, "path": args["path"], "replacements": count if args.get("replace_all", False) else 1}, ensure_ascii=False)
+            return json.dumps({"ok": True, "path": args["path"],
+                                "replacements": count if args.get("replace_all", False) else 1,
+                                "fingerprint": fs.file_fingerprint(args["path"])}, ensure_ascii=False)
         if action.tool == "apply_patch":
             patch_paths = self._patch_paths(args["patch"])
             self._check_scope(root, patch_paths, scope)
@@ -417,7 +444,7 @@ class AgentExecutor:
         event = events[event_index]
         changes = event.data.get("changes", [])
         for change in reversed(changes):
-            rollback_file_change(root, change)
+            rollback_file_changes(root, changes)
         state.record("integrity_rollback", "Audited operation rolled back safely.", event_index=event_index, changes=changes)
         return state
 
