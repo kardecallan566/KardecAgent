@@ -118,22 +118,28 @@ def _build_llm(settings: Settings):
         # Ollama is the source of truth: never require users to maintain a
         # second, manually curated escalation list.
         primary = build_client(settings.llm_model)
-        inventory = primary.list_models()
+        try:
+            inventory = primary.list_models()
+        except Exception as exc:
+            # Core/Studio startup must not depend on Ollama being online.
+            # Model discovery is retried when an escalation inventory is needed.
+            logger.warning(
+                "Ollama model discovery unavailable at %s; starting with configured model %r: %s",
+                settings.ollama_base_url,
+                settings.llm_model,
+                exc,
+            )
+            inventory = []
         installed = [
             item for item in inventory
             if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"].strip()
         ]
-        if not installed:
-            raise RuntimeError(
-                f"No Ollama models are installed at {settings.ollama_base_url}. "
-                "Pull a model with Ollama before starting KardecAgent."
-            )
 
         by_name = {item["name"]: item for item in installed}
         configured = settings.llm_model.strip()
         if configured and configured in by_name:
             primary_name = configured
-        else:
+        elif installed:
             def primary_key(item):
                 name = item["name"].casefold()
                 coding_hint = any(
@@ -150,6 +156,11 @@ def _build_llm(settings: Settings):
                 configured or None,
                 primary_name,
             )
+        else:
+            # Keep the configured model as a deferred target. The first actual
+            # inference reports the provider error, while Studio can complete
+            # its JSONL handshake and remain usable for diagnostics/settings.
+            primary_name = configured or settings.llm_model
         primary.model = primary_name
         primary_size = by_name[primary_name].get("size")
 
@@ -189,7 +200,11 @@ def _build_llm(settings: Settings):
             alternatives.append(build_client(name))
 
         def refresh_alternatives():
-            latest = primary.list_models()
+            try:
+                latest = primary.list_models()
+            except Exception as exc:
+                logger.warning("Could not refresh Ollama escalation inventory: %s", exc)
+                return []
             discovered = [
                 item for item in latest
                 if isinstance(item, dict)
