@@ -851,6 +851,7 @@ class AgentExecutor:
                     verification=artifact_report,
                 )
                 if not artifact_report["verified"]:
+                    verification_repair_mode = True
                     state.record(
                         "artifact_verification_failed",
                         "Step completion rejected because one or more changed files no longer match the audited result.",
@@ -867,6 +868,7 @@ class AgentExecutor:
                     ]
                     continue
                 tracker.complete(step)
+                verification_repair_mode = False
                 no_progress_count = 0
                 state.record("plan_step_completed", f"Completed plan step {step}.",
                              step=step, evidence=action.arguments["evidence"], progress=tracker.as_dict())
