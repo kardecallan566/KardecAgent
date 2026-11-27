@@ -9,7 +9,10 @@ from .search import search_text
 from .patch import PatchResult, apply_unified_patch
 from .terminal import CommandResult, is_command_allowed, is_command_blocked, run_command
 from .web import WebPage, WebResult, fetch_web_page, search_web
-from .workspace import (\n    FileSnapshot, WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change,\n    rollback_file_changes, verify_recorded_changes,\n)
+from .workspace import (
+    FileSnapshot, WorkspaceSnapshot, git_has_rename_or_copy, rollback_file_change,
+    rollback_file_changes, verify_recorded_changes,
+)
 
 __all__ = [
     "ProjectFilesystem", "GitResult", "git_status", "git_diff", "git_log",
@@ -19,5 +22,6 @@ __all__ = [
     "git_merge", "gh_create_pr", "gh_pr_status", "gh_merge_pr", "search_text", "PatchResult", "apply_unified_patch", "CommandResult",
     "is_command_allowed", "is_command_blocked", "run_command",
     "WebPage", "WebResult", "search_web", "fetch_web_page", "FileSnapshot",
-    "WorkspaceSnapshot", "git_has_rename_or_copy", "rollback_file_change",\n    "rollback_file_changes", "verify_recorded_changes",
+    "WorkspaceSnapshot", "git_has_rename_or_copy", "rollback_file_change",
+    "rollback_file_changes", "verify_recorded_changes",
 ]
