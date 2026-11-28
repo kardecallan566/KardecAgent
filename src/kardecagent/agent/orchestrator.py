@@ -60,9 +60,14 @@ class Orchestrator:
         self.retry_policy = RetryPolicy()
         self._progress_lock = RLock()
 
-    def should_decompose(self, plan: ExecutionPlan, project_root: Path) -> bool:
+    def should_decompose(
+        self, plan: ExecutionPlan, project_root: Path, *, assessment=None
+    ) -> bool:
         manager = SubtaskManager(project_root)
-        return manager.should_decompose(plan.steps, len(project_snapshot(project_root)))
+        return bool(
+            (assessment is not None and assessment.recommend_decomposition)
+            or manager.should_decompose(plan.steps, len(project_snapshot(project_root)))
+        )
 
     def decompose(self, plan: ExecutionPlan, project_root: Path) -> TaskBoard:
         manager = SubtaskManager(project_root)
