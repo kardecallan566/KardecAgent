@@ -248,3 +248,134 @@ def test_parallel_resume_uses_each_subtasks_persisted_cursor(tmp_path: Path):
 
     assert result.completed
     assert received_steps == {"1": 2, "2": 3}
+
+
+
+def test_adaptive_parallelism_limit_caps_independent_subtasks(tmp_path: Path):
+    import threading
+    import time
+
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings(max_parallel_subtasks=4))
+    board = TaskBoard()
+    board.add(Subtask("1", "Core", "Core", scope=("src/core",), plan_steps=(1,)))
+    board.add(Subtask("2", "Tests", "Tests", scope=("tests",), plan_steps=(2,)))
+    active = 0
+    maximum = 0
+    lock = threading.Lock()
+
+    def execute(subtask):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return SubtaskExecutionResult(subtask.id, "completed", "ok", ["verified"])
+
+    result = orchestrator.execute_sequentially(board, execute, parallelism_limit=1)
+    assert result.completed
+    assert maximum == 1
+
+
+def test_adaptive_assessment_can_trigger_decomposition(tmp_path: Path):
+    from kardecagent.agent.adaptive_intelligence import AdaptiveIntelligenceEngine
+
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings())
+    plan = make_plan(steps=4)
+    assessment = AdaptiveIntelligenceEngine().assess(
+        "Implement secure backend architecture and database migration",
+        plan_steps=plan.steps,
+        project_file_count=0,
+    )
+    assert assessment.recommend_decomposition
+    assert orchestrator.should_decompose(plan, tmp_path, assessment=assessment)
+
+
+def test_subtask_skills_are_selected_and_loaded_only_after_explicit_approval(tmp_path: Path, monkeypatch):
+    import json
+    from kardecagent.agent.skills import SkillCatalog
+    from kardecagent.agent.state import TaskState, TaskStatus
+
+    package = tmp_path / ".kardecagent" / "skills" / "python-tests"
+    package.mkdir(parents=True)
+    (package / "manifest.json").write_text(json.dumps({
+        "id": "python-tests",
+        "name": "Python Testing",
+        "description": "Create and validate Python tests with pytest",
+        "tags": ["python", "pytest", "testing"],
+        "dependencies": [],
+    }), encoding="utf-8")
+    (package / "SKILL.md").write_text("Prefer focused pytest tests.", encoding="utf-8")
+
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings())
+    board = TaskBoard()
+    board.add(Subtask(
+        "tests", "Write Python tests", "Implement Python tests using pytest",
+        scope=("tests",), plan_steps=(1,),
+    ))
+    approvals = []
+    observed_contexts = []
+
+    def approve(skill_ids):
+        approvals.append(skill_ids)
+        return True
+
+    def execute(root, task, plan, state, **kwargs):
+        observed_contexts.append(kwargs["context"]["skill_prompt_sections"])
+        state.transition(TaskStatus.VERIFYING, reason="Fixture verification.")
+        state.transition(TaskStatus.VERIFIED, reason="Fixture verified.")
+        state.transition(TaskStatus.COMPLETED, reason="Fixture completed.")
+        return state
+
+    monkeypatch.setattr(orchestrator.agent_loop, "execute_approved_plan", execute)
+    result = orchestrator.execute_approved_plan(
+        tmp_path, "Implement Python tests", make_plan(steps=1), board,
+        skill_catalog=SkillCatalog(tmp_path),
+        skill_approval_callback=approve,
+    )
+
+    assert result.completed
+    assert approvals == [("python-tests",)]
+    assert len(observed_contexts) == 1
+    assert "REFERENCE SKILL: Python Testing" in observed_contexts[0][0]
+
+
+def test_subtask_skill_refusal_keeps_skill_instructions_unloaded(tmp_path: Path, monkeypatch):
+    import json
+    from kardecagent.agent.skills import SkillCatalog
+    from kardecagent.agent.state import TaskStatus
+
+    package = tmp_path / ".kardecagent" / "skills" / "python-tests"
+    package.mkdir(parents=True)
+    (package / "manifest.json").write_text(json.dumps({
+        "id": "python-tests", "name": "Python Testing",
+        "description": "Python pytest testing", "tags": ["python", "pytest"],
+        "dependencies": [],
+    }), encoding="utf-8")
+    (package / "SKILL.md").write_text("Sensitive instructions should not load.", encoding="utf-8")
+
+    orchestrator = Orchestrator(FakeLLM("{}"), Settings())
+    board = TaskBoard()
+    board.add(Subtask(
+        "tests", "Write Python tests", "Implement Python tests using pytest",
+        scope=("tests",), plan_steps=(1,),
+    ))
+    observed = []
+
+    def execute(root, task, plan, state, **kwargs):
+        observed.extend(kwargs["context"]["skill_prompt_sections"])
+        state.transition(TaskStatus.VERIFYING, reason="Fixture verification.")
+        state.transition(TaskStatus.VERIFIED, reason="Fixture verified.")
+        state.transition(TaskStatus.COMPLETED, reason="Fixture completed.")
+        return state
+
+    monkeypatch.setattr(orchestrator.agent_loop, "execute_approved_plan", execute)
+    result = orchestrator.execute_approved_plan(
+        tmp_path, "Implement Python tests", make_plan(steps=1), board,
+        skill_catalog=SkillCatalog(tmp_path),
+        skill_approval_callback=lambda skill_ids: False,
+    )
+
+    assert result.completed
+    assert observed == []
