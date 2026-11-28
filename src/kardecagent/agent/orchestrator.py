@@ -16,6 +16,7 @@ from .diagnostics import diagnose_failure
 from .adaptive_intelligence import AdaptiveIntelligenceEngine
 from .skills import SkillCatalog, SkillError
 from .skill_orchestrator import SkillOrchestrator
+from .model_intelligence import ModelCapabilityCatalog
 from .loop import AgentLoop
 from .plan import ExecutionPlan
 from .recovery import RecoveryManager
@@ -59,6 +60,20 @@ class Orchestrator:
         self.recovery = RecoveryManager()
         self.retry_policy = RetryPolicy()
         self._progress_lock = RLock()
+
+    def model_catalog(self) -> ModelCapabilityCatalog:
+        clients = list(getattr(self.llm, "clients", [self.llm]))
+        return ModelCapabilityCatalog.from_clients(clients)
+
+    def model_recommendations(self, subtasks: list[Subtask]) -> list[dict]:
+        """Return advisory model assignments; execution remains on the configured client."""
+        catalog = self.model_catalog()
+        return [
+            {"subtask_id": subtask.id, **catalog.recommend(
+                objective=subtask.objective, role=getattr(subtask, "role", "general")
+            ).as_dict()}
+            for subtask in subtasks
+        ]
 
     def should_decompose(
         self, plan: ExecutionPlan, project_root: Path, *, assessment=None
@@ -354,6 +369,18 @@ class Orchestrator:
                 assessment=assessment.as_dict(),
                 effective_parallelism=selected_parallelism,
                 configured_parallelism=max(1, min(4, self.settings.max_parallel_subtasks)),
+            )
+
+        model_recommendations = self.model_recommendations(list(board.subtasks.values()))
+        if parent_state is not None:
+            parent_state.record(
+                "multi_model_recommendations",
+                "Model capabilities were evaluated for each subtask; no model was switched or invoked.",
+                recommendations=model_recommendations,
+                model_inventory=self.model_catalog().inventory(),
+                execution_model=str(getattr(self.llm, "model", "unknown")),
+                automatic_switch=False,
+                approval_required_for_switch=True,
             )
 
         subtask_skill_sections: dict[str, list[str]] = {}
