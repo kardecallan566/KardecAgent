@@ -279,9 +279,15 @@ class Orchestrator:
                             resume_step=result.resume_step,
                             board=board.as_dict(),
                         )
+                        prior_retries = sum(
+                            1 for event in parent_state.events
+                            if event.event_type == "subtask_retry_started"
+                            and event.data.get("subtask_id") == subtask.id
+                        )
                         recovery_advice = AdaptiveIntelligenceEngine.recommend_after_failure(
                             failure_kind="tool_error",
-                            attempts=max(1, subtask.iterations),
+                            attempts=1 + prior_retries,
+                            same_hypothesis_repeated=prior_retries > 0,
                         )
                         parent_state.record(
                             "adaptive_recovery_recommendation",
