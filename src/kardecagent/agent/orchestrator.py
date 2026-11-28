@@ -61,10 +61,13 @@ class Orchestrator:
         self.retry_policy = RetryPolicy()
         self._progress_lock = RLock()
 
+    def model_catalog(self) -> ModelCapabilityCatalog:
+        clients = list(getattr(self.llm, "clients", [self.llm]))
+        return ModelCapabilityCatalog.from_clients(clients)
+
     def model_recommendations(self, subtasks: list[Subtask]) -> list[dict]:
         """Return advisory model assignments; execution remains on the configured client."""
-        clients = list(getattr(self.llm, "clients", [self.llm]))
-        catalog = ModelCapabilityCatalog.from_clients(clients)
+        catalog = self.model_catalog()
         return [
             {"subtask_id": subtask.id, **catalog.recommend(
                 objective=subtask.objective, role=getattr(subtask, "role", "general")
@@ -374,6 +377,7 @@ class Orchestrator:
                 "multi_model_recommendations",
                 "Model capabilities were evaluated for each subtask; no model was switched or invoked.",
                 recommendations=model_recommendations,
+                model_inventory=self.model_catalog().inventory(),
                 execution_model=str(getattr(self.llm, "model", "unknown")),
                 automatic_switch=False,
                 approval_required_for_switch=True,
