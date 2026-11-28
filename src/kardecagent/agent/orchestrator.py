@@ -412,6 +412,9 @@ class Orchestrator:
                 project_root=str(project_root.resolve()),
             )
             state.transition(TaskStatus.RUNNING, reason="Subtask execution initialized.")
+            combined_skill_sections = list(dict.fromkeys(
+                list(skill_prompt_sections or []) + subtask_skill_sections.get(subtask.id, [])
+            ))
             propagated_model_events = 0
 
             def persist_subtask_progress(current_state, current_plan):
@@ -457,7 +460,7 @@ class Orchestrator:
                     "parent_plan": parent_plan.as_dict(),
                     "subtask": subtask.as_dict(),
                     "specialist_role": subtask.role,
-                    "skill_prompt_sections": list(dict.fromkeys(list(skill_prompt_sections or []) + subtask_skill_sections.get(subtask.id, []))),
+                    "skill_prompt_sections": combined_skill_sections,
                 },
                 allowed_scope=subtask.scope,
                 max_iterations=self.settings.max_iterations,
@@ -562,6 +565,8 @@ class Orchestrator:
                             "parent_task": parent_task,
                             "parent_plan": parent_plan.as_dict(),
                             "subtask": subtask.as_dict(),
+                            "specialist_role": subtask.role,
+                            "skill_prompt_sections": combined_skill_sections,
                         },
                         allowed_scope=subtask.scope,
                         max_iterations=decision.iteration_limit,
