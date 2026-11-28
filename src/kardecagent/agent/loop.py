@@ -21,6 +21,7 @@ from .project_brief import build_project_brief, project_brief_instructions
 from .project_memory import ProjectMemoryStore
 from .skills import SkillCatalog, SkillError
 from .skill_orchestrator import SkillOrchestrator
+from .adaptive_intelligence import AdaptiveIntelligenceEngine
 from ..llm.cleaner import extract_json_payload
 from ..harness import load_registry
 from ..harness.registry import compose_system_prompt
@@ -270,7 +271,18 @@ class AgentLoop:
             context["skill_prompt_sections"] = list(skill_preparation.prompt_sections)
         from .orchestrator import Orchestrator, OrchestrationError
         orchestrator = Orchestrator(self.llm, self.settings)
-        if orchestrator.should_decompose(plan, root):
+        adaptive_assessment = AdaptiveIntelligenceEngine().assess(
+            task,
+            plan_steps=plan.steps,
+            project_file_count=len(project_snapshot(root, limit=500)),
+            requested_parallelism=max(1, min(4, self.settings.max_parallel_subtasks)),
+        )
+        state.record(
+            "adaptive_assessment",
+            "Adaptive Intelligence evaluated task complexity after plan approval.",
+            assessment=adaptive_assessment.as_dict(),
+        )
+        if orchestrator.should_decompose(plan, root, assessment=adaptive_assessment):
             state.record("subtask_decomposition_started",
                          "Approved plan is large enough for logical subtask decomposition.")
             try:
@@ -284,7 +296,9 @@ class AgentLoop:
                     skill_prompt_sections=list(
                         skill_preparation.prompt_sections
                         if skill_preparation is not None else ()
-                    ))
+                    ),
+                    skill_catalog=SkillCatalog(root),
+                    skill_approval_callback=skill_approval_callback)
                 state.record("subtask_execution_finished", "Logical subtask execution finished.",
                              board=board.as_dict())
                 if not board.completed:

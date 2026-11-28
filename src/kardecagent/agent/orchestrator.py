@@ -13,6 +13,9 @@ from ..llm.router import ChatClient
 from ..llm.cleaner import extract_json_payload
 from ..project import project_snapshot
 from .diagnostics import diagnose_failure
+from .adaptive_intelligence import AdaptiveIntelligenceEngine
+from .skills import SkillCatalog, SkillError
+from .skill_orchestrator import SkillOrchestrator
 from .loop import AgentLoop
 from .plan import ExecutionPlan
 from .recovery import RecoveryManager
@@ -57,9 +60,14 @@ class Orchestrator:
         self.retry_policy = RetryPolicy()
         self._progress_lock = RLock()
 
-    def should_decompose(self, plan: ExecutionPlan, project_root: Path) -> bool:
+    def should_decompose(
+        self, plan: ExecutionPlan, project_root: Path, *, assessment=None
+    ) -> bool:
         manager = SubtaskManager(project_root)
-        return manager.should_decompose(plan.steps, len(project_snapshot(project_root)))
+        return bool(
+            (assessment is not None and assessment.recommend_decomposition)
+            or manager.should_decompose(plan.steps, len(project_snapshot(project_root)))
+        )
 
     def decompose(self, plan: ExecutionPlan, project_root: Path) -> TaskBoard:
         manager = SubtaskManager(project_root)
@@ -176,7 +184,9 @@ class Orchestrator:
         resume_subtask_id: str | None = None,
         resume_step: int = 1,
         skill_prompt_sections: list[str] | None = None,
+        parallelism_limit: int | None = None,
     ) -> TaskBoard:
+        effective_parallelism = max(1, min(4, int(parallelism_limit or self.settings.max_parallel_subtasks)))
         while not board.completed:
             ready = board.ready()
             if not ready:
@@ -196,7 +206,7 @@ class Orchestrator:
                 batch = [next((item for item in ready if item.id == resume_subtask_id), ready[0])]
             else:
                 batch = self._parallel_batch(
-                    ready, limit=max(1, min(4, self.settings.max_parallel_subtasks))
+                    ready, limit=effective_parallelism
                 )
 
             for subtask in batch:
@@ -269,6 +279,25 @@ class Orchestrator:
                             resume_step=result.resume_step,
                             board=board.as_dict(),
                         )
+                        prior_retries = sum(
+                            1 for event in parent_state.events
+                            if event.event_type == "subtask_retry_started"
+                            and event.data.get("subtask_id") == subtask.id
+                        )
+                        recovery_advice = AdaptiveIntelligenceEngine.recommend_after_failure(
+                            failure_kind="tool_error",
+                            attempts=1 + prior_retries,
+                            same_hypothesis_repeated=prior_retries > 0,
+                        )
+                        parent_state.record(
+                            "adaptive_recovery_recommendation",
+                            "Adaptive execution evaluated a failed subtask; no automatic scope change was made.",
+                            subtask_id=subtask.id,
+                            action=recovery_advice.action,
+                            reason=recovery_advice.reason,
+                            requires_user_approval=recovery_advice.requires_user_approval,
+                            automatic_action_taken=False,
+                        )
             if failed:
                 self._mark_blocked(board)
                 if parent_state is not None:
@@ -303,8 +332,78 @@ class Orchestrator:
         resume_subtask_id: str | None = None,
         resume_step: int = 1,
         skill_prompt_sections: list[str] | None = None,
+        skill_catalog: SkillCatalog | None = None,
+        skill_approval_callback: Callable[[tuple[str, ...]], bool] | None = None,
+        parallelism_limit: int | None = None,
     ) -> TaskBoard:
-        """Execute subtasks without replanning or asking for approval again."""
+        """Execute approved subtasks with bounded adaptive scheduling and per-subtask Skill consent."""
+        assessment = AdaptiveIntelligenceEngine().assess(
+            parent_task,
+            plan_steps=parent_plan.steps,
+            project_file_count=len(project_snapshot(project_root, limit=500)),
+            requested_parallelism=max(1, min(4, self.settings.max_parallel_subtasks)),
+        )
+        selected_parallelism = min(
+            assessment.recommended_parallelism,
+            max(1, min(4, int(parallelism_limit or assessment.recommended_parallelism))),
+        )
+        if parent_state is not None:
+            parent_state.record(
+                "adaptive_execution_assessed",
+                "Adaptive execution policy assessed the approved task before scheduling subtasks.",
+                assessment=assessment.as_dict(),
+                effective_parallelism=selected_parallelism,
+                configured_parallelism=max(1, min(4, self.settings.max_parallel_subtasks)),
+            )
+
+        subtask_skill_sections: dict[str, list[str]] = {}
+        if skill_catalog is not None:
+            skill_selector = SkillOrchestrator(skill_catalog)
+            for candidate in board.subtasks.values():
+                try:
+                    preparation = skill_selector.prepare(
+                        candidate.objective,
+                        approval_callback=skill_approval_callback,
+                    )
+                except SkillError as exc:
+                    if parent_state is not None:
+                        parent_state.record(
+                            "subtask_skills_unavailable",
+                            "Subtask Skill selection was unavailable; execution continues without additional Skills.",
+                            subtask_id=candidate.id,
+                            error=str(exc),
+                        )
+                    continue
+                if parent_state is not None and preparation.candidate_ids:
+                    parent_state.record(
+                        "subtask_skills_selected",
+                        "Skills were ranked specifically for this subtask.",
+                        subtask_id=candidate.id,
+                        selection=preparation.as_dict(),
+                    )
+                    if preparation.approval_status == "approval_required":
+                        parent_state.record(
+                            "subtask_skill_approval_required",
+                            "Subtask Skills remain unloaded because explicit approval was not supplied.",
+                            subtask_id=candidate.id,
+                            skill_ids=list(preparation.candidate_ids),
+                        )
+                    elif preparation.approval_status == "rejected":
+                        parent_state.record(
+                            "subtask_skill_approval_rejected",
+                            "User declined the Skills selected for this subtask.",
+                            subtask_id=candidate.id,
+                            skill_ids=list(preparation.candidate_ids),
+                        )
+                    elif preparation.approval_status == "approved":
+                        parent_state.record(
+                            "subtask_skills_loaded",
+                            "Explicitly approved subtask Skills were loaded as untrusted reference instructions.",
+                            subtask_id=candidate.id,
+                            skill_ids=list(preparation.loaded_ids),
+                        )
+                subtask_skill_sections[candidate.id] = list(preparation.prompt_sections)
+
         def execute(subtask: Subtask, requested_resume_step: int = 1) -> SubtaskExecutionResult:
             if not subtask.scope:
                 message = "Implementation subtasks require an explicit scope."
@@ -319,6 +418,9 @@ class Orchestrator:
                 project_root=str(project_root.resolve()),
             )
             state.transition(TaskStatus.RUNNING, reason="Subtask execution initialized.")
+            combined_skill_sections = list(dict.fromkeys(
+                list(skill_prompt_sections or []) + subtask_skill_sections.get(subtask.id, [])
+            ))
             propagated_model_events = 0
 
             def persist_subtask_progress(current_state, current_plan):
@@ -364,7 +466,7 @@ class Orchestrator:
                     "parent_plan": parent_plan.as_dict(),
                     "subtask": subtask.as_dict(),
                     "specialist_role": subtask.role,
-                    "skill_prompt_sections": list(skill_prompt_sections or []),
+                    "skill_prompt_sections": combined_skill_sections,
                 },
                 allowed_scope=subtask.scope,
                 max_iterations=self.settings.max_iterations,
@@ -469,6 +571,8 @@ class Orchestrator:
                             "parent_task": parent_task,
                             "parent_plan": parent_plan.as_dict(),
                             "subtask": subtask.as_dict(),
+                            "specialist_role": subtask.role,
+                            "skill_prompt_sections": combined_skill_sections,
                         },
                         allowed_scope=subtask.scope,
                         max_iterations=decision.iteration_limit,
@@ -523,4 +627,5 @@ class Orchestrator:
             parent_state=parent_state,
             resume_subtask_id=resume_subtask_id,
             resume_step=max(1, resume_step),
+            parallelism_limit=selected_parallelism,
         )
